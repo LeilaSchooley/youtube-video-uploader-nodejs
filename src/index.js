@@ -1,7 +1,16 @@
+require('dotenv').config();
 const express = require("express");
 const app = express();
-const port = 3000;
-const credentials = require("./creds.json");
+const port = process.env.PORT || 3000;
+const host = process.env.HOST || '0.0.0.0';
+
+let credentials = null;
+try {
+  credentials = require("./creds.json");
+} catch (e) {
+  // creds.json not present — falling back to environment variables
+}
+
 const { google } = require("googleapis");
 const { oauth2 } = require("googleapis/build/src/apis/oauth2");
 const multer = require("multer");
@@ -14,9 +23,16 @@ const fs = require("fs");
 const { auth } = require("googleapis/build/src/apis/abusiveexperiencereport");
 const { parseDate } = require("./utils");
 
-const CLIENT_ID = credentials.web.client_id;
-const CLIENT_SECRET = credentials.web.client_secret;
-const REDIRECT_URL = credentials.web.redirect_uris[0];
+const CLIENT_ID =
+  process.env.GOOGLE_CLIENT_ID || (credentials && credentials.web && credentials.web.client_id);
+const CLIENT_SECRET =
+  process.env.GOOGLE_CLIENT_SECRET || (credentials && credentials.web && credentials.web.client_secret);
+const REDIRECT_URL =
+  process.env.GOOGLE_REDIRECT_URI || (credentials && credentials.web && credentials.web.redirect_uris && credentials.web.redirect_uris[0]);
+
+if (!CLIENT_ID || !CLIENT_SECRET || !REDIRECT_URL) {
+  console.warn('Missing Google OAuth credentials. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and GOOGLE_REDIRECT_URI in .env or provide creds.json. OAuth routes will not work until configured.');
+}
 
 const oAuthClient = new google.auth.OAuth2(
   CLIENT_ID,
@@ -279,6 +295,6 @@ app.post("/upload-csv", upload.single("csvFile"), async (req, res) => {
 
 app.set("view engine", "ejs");
 
-app.listen(port, () => {
-  console.log(`Example app listening on port ${port}`);
+app.listen(port, host, () => {
+  console.log(`App listening at http://${host}:${port}`);
 });
