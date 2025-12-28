@@ -295,6 +295,10 @@ app.post("/upload-csv", upload.single("csvFile"), async (req, res) => {
 
 app.set("view engine", "ejs");
 
+// Public legal pages (Privacy Policy and Terms of Service)
+app.get('/privacy', (req, res) => res.render('privacy'));
+app.get('/terms', (req, res) => res.render('terms'));
+
 app.listen(port, host, () => {
   console.log(`App listening at http://${host}:${port}`);
 });
