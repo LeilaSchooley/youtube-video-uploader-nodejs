@@ -1,8 +1,8 @@
-require('dotenv').config();
+require("dotenv").config();
 const express = require("express");
 const app = express();
 const port = process.env.PORT || 3000;
-const host = process.env.HOST || '0.0.0.0';
+const host = process.env.HOST || "0.0.0.0";
 
 let credentials = null;
 try {
@@ -24,14 +24,22 @@ const { auth } = require("googleapis/build/src/apis/abusiveexperiencereport");
 const { parseDate } = require("./utils");
 
 const CLIENT_ID =
-  process.env.GOOGLE_CLIENT_ID || (credentials && credentials.web && credentials.web.client_id);
+  process.env.GOOGLE_CLIENT_ID ||
+  (credentials && credentials.web && credentials.web.client_id);
 const CLIENT_SECRET =
-  process.env.GOOGLE_CLIENT_SECRET || (credentials && credentials.web && credentials.web.client_secret);
+  process.env.GOOGLE_CLIENT_SECRET ||
+  (credentials && credentials.web && credentials.web.client_secret);
 const REDIRECT_URL =
-  process.env.GOOGLE_REDIRECT_URI || (credentials && credentials.web && credentials.web.redirect_uris && credentials.web.redirect_uris[0]);
+  process.env.GOOGLE_REDIRECT_URI ||
+  (credentials &&
+    credentials.web &&
+    credentials.web.redirect_uris &&
+    credentials.web.redirect_uris[0]);
 
 if (!CLIENT_ID || !CLIENT_SECRET || !REDIRECT_URL) {
-  console.warn('Missing Google OAuth credentials. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and GOOGLE_REDIRECT_URI in .env or provide creds.json. OAuth routes will not work until configured.');
+  console.warn(
+    "Missing Google OAuth credentials. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and GOOGLE_REDIRECT_URI in .env or provide creds.json. OAuth routes will not work until configured."
+  );
 }
 
 const oAuthClient = new google.auth.OAuth2(
@@ -68,7 +76,7 @@ app.get("/", (req, res) => {
       console.log(response.data);
       name = response.data.name;
       picture = response.data.picture;
-      console.log(picture, 'sending pix')
+      console.log(picture, "sending pix");
       res.render("success", {
         name: name,
         picture: picture,
@@ -91,9 +99,9 @@ function ensureAuthenticated(req, res, next) {
 // Upload route
 app.post("/upload", ensureAuthenticated, upload.single("video"), (req, res) => {
   const { title, description, privacyStatus, publishDate } = req.body;
-  console.log(publishDate, 'publish date!!')
+  console.log(publishDate, "publish date!!");
   // Validate privacy status
-  if (!['public', 'private', 'unlisted'].includes(privacyStatus)) {
+  if (!["public", "private", "unlisted"].includes(privacyStatus)) {
     return res.status(400).send("Invalid privacy status");
   }
 
@@ -108,10 +116,10 @@ app.post("/upload", ensureAuthenticated, upload.single("video"), (req, res) => {
   // YouTube API request body
   const requestBody = {
     snippet: { title, description },
-    status: { privacyStatus }
+    status: { privacyStatus },
   };
 
-  if (privacyStatus === 'private' &&  publishDate) {
+  if (privacyStatus === "private" && publishDate) {
     if (new Date(publishDate) < new Date()) {
       return res.status(400).send("Publish date must be in the future");
     }
@@ -127,7 +135,7 @@ app.post("/upload", ensureAuthenticated, upload.single("video"), (req, res) => {
   const videoStream = new stream.PassThrough();
   videoStream.end(file.buffer);
 
-  console.log("requestBODY",  requestBody);
+  console.log("requestBODY", requestBody);
   const youtube = google.youtube({
     version: "v3",
     auth: oAuthClient,
@@ -190,12 +198,10 @@ app.get("/google/callback", (req, res) => {
 });
 
 app.post("/upload-csv", upload.single("csvFile"), async (req, res) => {
-  console.log('uplading csv')
+  console.log("uplading csv");
   if (!req.file) {
-     res
-      .status(400)
-      .json({ status: "error", message: "No CSV file uploaded" });
-      return;
+    res.status(400).json({ status: "error", message: "No CSV file uploaded" });
+    return;
   }
 
   if (!authTokens) {
@@ -222,35 +228,42 @@ app.post("/upload-csv", upload.single("csvFile"), async (req, res) => {
     .on("end", async () => {
       for (let i = 0; i < csvData.length; i++) {
         console.log(csvData[i], "csv data");
-        const { title, description, thumbnail, video, scheduleTime, privacyStatus   } = csvData[i];
+        const {
+          title,
+          description,
+          thumbnail,
+          video,
+          scheduleTime,
+          privacyStatus,
+        } = csvData[i];
         progress.push({ index: i, status: "Uploading" }); // Parse flexible date formats
         console.log(privacyStatus, "privacyStatus");
-        
-           // Validate privacy status
-    if (!['public', 'private', 'unlisted'].includes(privacyStatus)) {
-      progress[i] = { status: "Invalid privacy status" };
-      continue;
-    }
 
- // Validate schedule time if private
- let parsedDate = null;
- if (privacyStatus === 'private') {
-   parsedDate = parseDate(scheduleTime);
-   if (!parsedDate || parsedDate < new Date()) {
-     progress[i] = { status: "Invalid schedule time" };
-     continue;
-   }
- }
-    
-            // YouTube upload
-    const requestBody = {
-      snippet: { title, description },
-      status: { privacyStatus }
-    };
+        // Validate privacy status
+        if (!["public", "private", "unlisted"].includes(privacyStatus)) {
+          progress[i] = { status: "Invalid privacy status" };
+          continue;
+        }
 
-    if (privacyStatus === 'private' && parsedDate) {
-      requestBody.status.publishAt = parsedDate.toISOString();
-    }
+        // Validate schedule time if private
+        let parsedDate = null;
+        if (privacyStatus === "private") {
+          parsedDate = parseDate(scheduleTime);
+          if (!parsedDate || parsedDate < new Date()) {
+            progress[i] = { status: "Invalid schedule time" };
+            continue;
+          }
+        }
+
+        // YouTube upload
+        const requestBody = {
+          snippet: { title, description },
+          status: { privacyStatus },
+        };
+
+        if (privacyStatus === "private" && parsedDate) {
+          requestBody.status.publishAt = parsedDate.toISOString();
+        }
 
         try {
           // Upload video
@@ -289,15 +302,15 @@ app.post("/upload-csv", upload.single("csvFile"), async (req, res) => {
       res
         .status(500)
         .json({ status: "error", message: "Failed to parse CSV file" });
-        return;
+      return;
     });
 });
 
 app.set("view engine", "ejs");
 
 // Public legal pages (Privacy Policy and Terms of Service)
-app.get('/privacy', (req, res) => res.render('privacy'));
-app.get('/terms', (req, res) => res.render('terms'));
+app.get("/privacy", (req, res) => res.render("privacy"));
+app.get("/terms", (req, res) => res.render("terms"));
 
 app.listen(port, host, () => {
   console.log(`App listening at http://${host}:${port}`);

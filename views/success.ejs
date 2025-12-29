@@ -1,377 +1,445 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>YouTube Uploader Dashboard</title>
     <style>
-        :root {
-            --primary-color: #FF0000;
-            --secondary-color: #282828;
-            --text-color: #333333;
-            --background-color: #F9F9F9;
-            --card-background: #FFFFFF;
-            --shadow-color: rgba(0, 0, 0, 0.1);
-            --border-color: #E5E5E5;
-        }
+      :root {
+        --primary-color: #ff0000;
+        --secondary-color: #282828;
+        --text-color: #333333;
+        --background-color: #f9f9f9;
+        --card-background: #ffffff;
+        --shadow-color: rgba(0, 0, 0, 0.1);
+        --border-color: #e5e5e5;
+      }
 
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
 
-        body {
-            font-family: 'Roboto', Arial, sans-serif;
-            background-color: var(--background-color);
-            color: var(--text-color);
-            line-height: 1.6;
-        }
+      body {
+        font-family: "Roboto", Arial, sans-serif;
+        background-color: var(--background-color);
+        color: var(--text-color);
+        line-height: 1.6;
+      }
 
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 40px 20px;
-        }
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 40px 20px;
+      }
 
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 40px;
-        }
+      .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 40px;
+      }
 
-        .header h1 {
-            font-size: 2.5rem;
-            color: var(--secondary-color);
-        }
+      .header h1 {
+        font-size: 2.5rem;
+        color: var(--secondary-color);
+      }
 
-        .logout {
-            background-color: var(--primary-color);
-            color: white;
-            border: none;
-            border-radius: 30px;
-            padding: 10px 20px;
-            cursor: pointer;
-            font-size: 1rem;
-            font-weight: 500;
-            transition: background-color 0.3s, transform 0.2s;
-        }
+      .logout {
+        background-color: var(--primary-color);
+        color: white;
+        border: none;
+        border-radius: 30px;
+        padding: 10px 20px;
+        cursor: pointer;
+        font-size: 1rem;
+        font-weight: 500;
+        transition: background-color 0.3s, transform 0.2s;
+      }
 
-        .logout:hover {
-            background-color: #E60000;
-            transform: translateY(-2px);
-        }
+      .logout:hover {
+        background-color: #e60000;
+        transform: translateY(-2px);
+      }
 
-        .card {
-            background: var(--card-background);
-            border-radius: 12px;
-            box-shadow: 0 8px 24px var(--shadow-color);
-            padding: 30px;
-            margin-bottom: 40px;
-        }
+      .card {
+        background: var(--card-background);
+        border-radius: 12px;
+        box-shadow: 0 8px 24px var(--shadow-color);
+        padding: 30px;
+        margin-bottom: 40px;
+      }
 
-        .card h2 {
-            font-size: 1.8rem;
-            margin-bottom: 20px;
-            color: var(--secondary-color);
-        }
+      .card h2 {
+        font-size: 1.8rem;
+        margin-bottom: 20px;
+        color: var(--secondary-color);
+      }
 
-        .profile {
-            display: flex;
-            align-items: center;
-            gap: 20px;
-        }
+      .profile {
+        display: flex;
+        align-items: center;
+        gap: 20px;
+      }
 
-        .profile img {
-            width: 100px;
-            height: 100px;
-            border-radius: 50%;
-            object-fit: cover;
-            border: 3px solid var(--primary-color);
-        }
+      .profile img {
+        width: 100px;
+        height: 100px;
+        border-radius: 50%;
+        object-fit: cover;
+        border: 3px solid var(--primary-color);
+      }
 
-        .profile p {
-            font-size: 1.1rem;
-            color: var(--text-color);
-        }
+      .profile p {
+        font-size: 1.1rem;
+        color: var(--text-color);
+      }
 
-        .form {
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-        }
+      .form {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+      }
 
-        .form label {
-            font-weight: 500;
-            color: var(--secondary-color);
-        }
+      .form label {
+        font-weight: 500;
+        color: var(--secondary-color);
+      }
 
-        .form input, .form textarea {
-            width: 100%;
-            padding: 12px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            font-size: 1rem;
-            transition: border-color 0.3s;
-        }
+      .form input,
+      .form textarea {
+        width: 100%;
+        padding: 12px;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        font-size: 1rem;
+        transition: border-color 0.3s;
+      }
 
-        .form input:focus, .form textarea:focus {
-            outline: none;
-            border-color: var(--primary-color);
-        }
+      .form input:focus,
+      .form textarea:focus {
+        outline: none;
+        border-color: var(--primary-color);
+      }
 
-        .form textarea {
-            resize: vertical;
-            min-height: 100px;
-        }
+      .form textarea {
+        resize: vertical;
+        min-height: 100px;
+      }
 
-        .upload-btn {
-            background-color: var(--primary-color);
-            color: white;
-            border: none;
-            border-radius: 30px;
-            padding: 14px 28px;
-            cursor: pointer;
-            font-size: 1.1rem;
-            font-weight: 500;
-            transition: background-color 0.3s, transform 0.2s;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: 10px;
-        }
+      .upload-btn {
+        background-color: var(--primary-color);
+        color: white;
+        border: none;
+        border-radius: 30px;
+        padding: 14px 28px;
+        cursor: pointer;
+        font-size: 1.1rem;
+        font-weight: 500;
+        transition: background-color 0.3s, transform 0.2s;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+      }
 
-        .upload-btn:hover {
-            background-color: #E60000;
-            transform: translateY(-2px);
-        }
+      .upload-btn:hover {
+        background-color: #e60000;
+        transform: translateY(-2px);
+      }
 
-        .spinner {
-            border: 3px solid rgba(255,255,255,0.3);
-            border-top: 3px solid white;
-            border-radius: 50%;
-            width: 20px;
-            height: 20px;
-            animation: spin 1s linear infinite;
-            display: none;
-        }
+      .spinner {
+        border: 3px solid rgba(255, 255, 255, 0.3);
+        border-top: 3px solid white;
+        border-radius: 50%;
+        width: 20px;
+        height: 20px;
+        animation: spin 1s linear infinite;
+        display: none;
+      }
 
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+      @keyframes spin {
+        0% {
+          transform: rotate(0deg);
         }
+        100% {
+          transform: rotate(360deg);
+        }
+      }
 
-        .progress-container {
-            background: #f1f1f1;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            padding: 20px;
-            margin-top: 20px;
-        }
+      .progress-container {
+        background: #f1f1f1;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 20px;
+        margin-top: 20px;
+      }
 
-        .progress-container h3 {
-            margin-bottom: 15px;
-            color: var(--secondary-color);
-        }
+      .progress-container h3 {
+        margin-bottom: 15px;
+        color: var(--secondary-color);
+      }
 
-        .progress-container ul {
-            list-style: none;
-        }
+      .progress-container ul {
+        list-style: none;
+      }
 
-        .progress-container li {
-            padding: 10px;
-            border-bottom: 1px solid var(--border-color);
-            font-size: 1rem;
-        }
+      .progress-container li {
+        padding: 10px;
+        border-bottom: 1px solid var(--border-color);
+        font-size: 1rem;
+      }
 
-        .progress-container li:last-child {
-            border-bottom: none;
-        }
+      .progress-container li:last-child {
+        border-bottom: none;
+      }
 
-        .message-box {
-            margin-bottom: 20px;
-            padding: 15px;
-            border-radius: 8px;
-            font-weight: 500;
-            font-size: 1rem;
-        }
+      .message-box {
+        margin-bottom: 20px;
+        padding: 15px;
+        border-radius: 8px;
+        font-weight: 500;
+        font-size: 1rem;
+      }
 
-        .message-box.success {
-            background-color: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
+      .message-box.success {
+        background-color: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+      }
 
-        .message-box.error {
-            background-color: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-        .form .date-picker, .form .time-input {
-            width: 100%;
-            padding: 12px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            font-size: 1rem;
-            transition: border-color 0.3s;
-        }
-        .form .date-picker:focus, .form .time-input:focus {
-            outline: none;
-            border-color: var(--primary-color);
-        }
-        .form .date-time-container {
-            display: flex;
-            gap: 10px;
-        }
-        .form .date-time-container > div {
-            flex: 1;
-        }
-        select {
-  width: 100%;
-  padding: 12px;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  font-size: 1rem;
-  margin-bottom: 20px;
-}
+      .message-box.error {
+        background-color: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+      }
+      .form .date-picker,
+      .form .time-input {
+        width: 100%;
+        padding: 12px;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        font-size: 1rem;
+        transition: border-color 0.3s;
+      }
+      .form .date-picker:focus,
+      .form .time-input:focus {
+        outline: none;
+        border-color: var(--primary-color);
+      }
+      .form .date-time-container {
+        display: flex;
+        gap: 10px;
+      }
+      .form .date-time-container > div {
+        flex: 1;
+      }
+      select {
+        width: 100%;
+        padding: 12px;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        font-size: 1rem;
+        margin-bottom: 20px;
+      }
     </style>
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
-</head>
-<body>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
     <div class="container">
-        <div class="header">
-            <h1>YouTube Uploader Dashboard</h1>
-            <form action="/logout" method="GET" style="display: inline;">
-                <button class="logout" type="submit">Logout</button>
-            </form>
+      <div class="header">
+        <h1>YouTube Uploader Dashboard</h1>
+        <form action="/logout" method="GET" style="display: inline">
+          <button class="logout" type="submit">Logout</button>
+        </form>
+      </div>
+
+      <% if (success) { %>
+      <div class="message-box success"><%= success %></div>
+      <% } else if (error) { %>
+      <div class="message-box error"><%= error %></div>
+      <% } %>
+
+      <div class="card">
+        <h2>Profile</h2>
+        <div class="profile">
+          <img src="<%= picture %>" />
+          <p><strong>Name:</strong> <%= name %></p>
         </div>
+      </div>
 
-        <% if (success) { %>
-            <div class="message-box success"><%= success %></div>
-        <% } else if (error) { %>
-            <div class="message-box error"><%= error %></div>
-        <% } %>
+      <div class="card">
+        <h2>Single Video Upload</h2>
+        <form
+          action="/upload"
+          method="POST"
+          enctype="multipart/form-data"
+          class="form"
+        >
+          <label for="title">Title</label>
+          <input
+            type="text"
+            id="title"
+            name="title"
+            placeholder="Enter video title"
+            required
+          />
 
-        <div class="card">
-            <h2>Profile</h2>
-            <div class="profile">
-                <img src="<%= picture %>" >
-                <p><strong>Name:</strong> <%= name %></p>
+          <label for="description">Description</label>
+          <textarea
+            id="description"
+            name="description"
+            placeholder="Enter video description"
+            required
+          ></textarea>
+
+          <label for="video">Choose File</label>
+          <input
+            type="file"
+            id="video"
+            name="video"
+            accept="video/*"
+            required
+          />
+
+          <div class="date-time-container">
+            <div>
+              <label for="publishDate">Schedule Publish Date</label>
+              <input
+                type="datetime-local"
+                id="publishDate"
+                name="publishDate"
+                class="date-picker"
+                placeholder="Select date"
+              />
             </div>
+          </div>
+
+          <!-- Add after the description textarea -->
+          <label for="privacyStatus">Privacy Status</label>
+          <select id="privacyStatus" name="privacyStatus" required>
+            <option value="private">Private</option>
+            <option value="public">Public</option>
+            <option value="unlisted">Unlisted</option>
+          </select>
+          <button type="submit" class="upload-btn">
+            <i class="fas fa-upload"></i> Upload Video
+          </button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Batch Upload from CSV</h2>
+        <!-- New instructions section -->
+        <div style="margin-bottom: 10px; font-size: 13px" class="instructions">
+          <h3>CSV File Instructions</h3>
+          <p>Your CSV file should include the following columns:</p>
+          <ul>
+            <li><strong>title:</strong> The title of your video (required)</li>
+            <li>
+              <strong>description:</strong> A detailed description of your video
+              (required)
+            </li>
+            <li>
+              <strong>thumbnail:</strong> URL or file path to the video
+              thumbnail image (optional)
+            </li>
+            <li>
+              <strong>video:</strong> URL or file path to the video file
+              (required)
+            </li>
+            <li>
+              <strong>scheduleTime:</strong> The date and time to publish the
+              video with. (yyyy-MM-dd HH:mm) (optional)
+            </li>
+            <li>
+              <strong>privacyStatus:</strong> Must be 'public', 'private', or
+              'unlisted' (required)
+            </li>
+          </ul>
         </div>
+        <form
+          action="/upload-csv"
+          method="POST"
+          enctype="multipart/form-data"
+          class="form"
+          id="csvUploadForm"
+        >
+          <label for="csvFile">Upload CSV</label>
+          <input
+            type="file"
+            id="csvFile"
+            name="csvFile"
+            accept=".csv"
+            required
+          />
 
-        <div class="card">
-            <h2>Single Video Upload</h2>
-            <form action="/upload" method="POST" enctype="multipart/form-data" class="form">
-                <label for="title">Title</label>
-                <input type="text" id="title" name="title" placeholder="Enter video title" required>
-
-                <label for="description">Description</label>
-                <textarea id="description" name="description" placeholder="Enter video description" required></textarea>
-
-                <label for="video">Choose File</label>
-                <input type="file" id="video" name="video" accept="video/*" required>
-                
-                <div class="date-time-container">
-                    <div>
-                        <label for="publishDate">Schedule Publish Date</label>
-                        <input type="datetime-local" id="publishDate" name="publishDate" class="date-picker" placeholder="Select date" >
-                    </div>
-                    
-                </div>
-
-                <!-- Add after the description textarea -->
-<label for="privacyStatus">Privacy Status</label>
-<select id="privacyStatus" name="privacyStatus" required>
-  <option value="private">Private</option>
-  <option value="public">Public</option>
-  <option value="unlisted">Unlisted</option>
-</select>
-                <button type="submit" class="upload-btn">
-                    <i class="fas fa-upload"></i> Upload Video
-                </button>
-            </form>
+          <button id="batchUploadBtn" type="submit" class="upload-btn">
+            <i class="fas fa-file-csv"></i> Upload Videos from CSV
+            <div class="spinner" id="buttonSpinner"></div>
+          </button>
+        </form>
+        <div
+          class="progress-container"
+          id="progressContainer"
+          style="display: none"
+        >
+          <h3>Upload Progress</h3>
+          <ul id="progressList"></ul>
         </div>
-
-        <div class="card">
-            <h2>Batch Upload from CSV</h2>
-            <!-- New instructions section -->
-            <div style="margin-bottom: 10px; font-size: 13px;" class="instructions">
-                <h3>CSV File Instructions</h3>
-                <p>Your CSV file should include the following columns:</p>
-                <ul>
-                    <li><strong>title:</strong> The title of your video (required)</li>
-                    <li><strong>description:</strong> A detailed description of your video (required)</li>
-                    <li><strong>thumbnail:</strong> URL or file path to the video thumbnail image (optional)</li>
-                    <li><strong>video:</strong> URL or file path to the video file (required)</li>
-                    <li><strong>scheduleTime:</strong> The date and time to publish the video with. (yyyy-MM-dd HH:mm) (optional) </li>
-                    <li><strong>privacyStatus:</strong> Must be 'public', 'private', or 'unlisted' (required)</li>
-                </ul>
-            </div>
-            <form action="/upload-csv" method="POST" enctype="multipart/form-data" class="form" id="csvUploadForm">
-                <label for="csvFile">Upload CSV</label>
-                <input type="file" id="csvFile" name="csvFile" accept=".csv" required>
-
-                <button id="batchUploadBtn" type="submit" class="upload-btn">
-                    <i class="fas fa-file-csv"></i> Upload Videos from CSV
-                    <div class="spinner" id="buttonSpinner"></div>
-                </button>
-            </form>
-            <div class="progress-container" id="progressContainer" style="display: none;">
-                <h3>Upload Progress</h3>
-                <ul id="progressList"></ul>
-            </div>
-        </div>
+      </div>
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/js/all.min.js"></script>
     <script>
-        
-        const csvUploadForm = document.getElementById('csvUploadForm');
-        const progressList = document.getElementById('progressList');
-        const progressContainer = document.getElementById('progressContainer');
-        const batchUploadButton = document.getElementById('batchUploadBtn');
-        const buttonSpinner = document.getElementById('buttonSpinner');
-    
-        csvUploadForm.addEventListener('submit', async (event) => {
-            event.preventDefault();
-            const formData = new FormData(csvUploadForm);
-    
-            buttonSpinner.style.display = 'inline-block';
-            batchUploadButton.disabled = true;
-    
-            progressList.innerHTML = '';
-            progressContainer.style.display = 'block';
-    
-            try {
-                const response = await fetch('/upload-csv', {
-                    method: 'POST',
-                    body: formData,
-                });
-    
-                const result = await response.json();
-                if (result.status === 'success') {
-                    result.progress.forEach((item) => {
-                        const li = document.createElement('li');
-                        li.textContent = `Video ${item.index + 1}: ${item.status}`;
-                        progressList.appendChild(li);
-                    });
-                } else {
-                    alert('Error: ' + result.message);
-                }
-            } catch (error) {
-                console.error('Error uploading CSV:', error);
-                alert('An error occurred while uploading the CSV file.');
-            } finally {
-                buttonSpinner.style.display = 'none';
-                batchUploadButton.disabled = false;
-            }
-        });
-    </script>
-    <footer style="text-align:center; padding:20px 0; color:#777;">
-        &copy; 2023 YouTube Uploader. <a href="/privacy">Privacy</a> • <a href="/terms">Terms</a>
-    </footer>
-</body>
-</html>
+      const csvUploadForm = document.getElementById("csvUploadForm");
+      const progressList = document.getElementById("progressList");
+      const progressContainer = document.getElementById("progressContainer");
+      const batchUploadButton = document.getElementById("batchUploadBtn");
+      const buttonSpinner = document.getElementById("buttonSpinner");
 
+      csvUploadForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const formData = new FormData(csvUploadForm);
+
+        buttonSpinner.style.display = "inline-block";
+        batchUploadButton.disabled = true;
+
+        progressList.innerHTML = "";
+        progressContainer.style.display = "block";
+
+        try {
+          const response = await fetch("/upload-csv", {
+            method: "POST",
+            body: formData,
+          });
+
+          const result = await response.json();
+          if (result.status === "success") {
+            result.progress.forEach((item) => {
+              const li = document.createElement("li");
+              li.textContent = `Video ${item.index + 1}: ${item.status}`;
+              progressList.appendChild(li);
+            });
+          } else {
+            alert("Error: " + result.message);
+          }
+        } catch (error) {
+          console.error("Error uploading CSV:", error);
+          alert("An error occurred while uploading the CSV file.");
+        } finally {
+          buttonSpinner.style.display = "none";
+          batchUploadButton.disabled = false;
+        }
+      });
+    </script>
+    <footer style="text-align: center; padding: 20px 0; color: #777">
+      &copy; 2023 YouTube Uploader. <a href="/privacy">Privacy</a> •
+      <a href="/terms">Terms</a>
+    </footer>
+  </body>
+</html>
