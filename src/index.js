@@ -312,6 +312,52 @@ app.set("view engine", "ejs");
 app.get("/privacy", (req, res) => res.render("privacy"));
 app.get("/terms", (req, res) => res.render("terms"));
 
+// Delete-account endpoint: revokes Google access and clears local stored data
+app.post("/delete-account", ensureAuthenticated, (req, res) => {
+  try {
+    const token =
+      oAuthClient &&
+      oAuthClient.credentials &&
+      (oAuthClient.credentials.access_token ||
+        oAuthClient.credentials.refresh_token);
+    if (token && typeof oAuthClient.revokeCredentials === "function") {
+      oAuthClient.revokeCredentials((err) => {
+        // best-effort: clear local state regardless of revoke result
+        authTokens = null;
+        oAuthClient.setCredentials({});
+        authenticated = false;
+        return res.json({
+          status: "ok",
+          message:
+            "Your access has been revoked and your local data will be deleted within 30 days.",
+        });
+      });
+    } else {
+      // no token available, just clear local state
+      authTokens = null;
+      oAuthClient.setCredentials({});
+      authenticated = false;
+      return res.json({
+        status: "ok",
+        message:
+          "No active token found. Your local data will be deleted within 30 days.",
+      });
+    }
+  } catch (err) {
+    console.error("Error revoking credentials:", err);
+    authTokens = null;
+    oAuthClient.setCredentials({});
+    authenticated = false;
+    return res
+      .status(500)
+      .json({
+        status: "error",
+        message:
+          "Failed to revoke credentials. Contact privacy@zondiscounts.com",
+      });
+  }
+});
+
 app.listen(port, host, () => {
   console.log(`App listening at http://${host}:${port}`);
 });

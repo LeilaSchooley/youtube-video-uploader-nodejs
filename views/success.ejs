@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>YouTube Uploader Dashboard</title>
+    <title>ZonDiscounts Video Uploader Dashboard</title>
     <style>
       :root {
         --primary-color: #ff0000;
@@ -252,10 +252,25 @@
   <body>
     <div class="container">
       <div class="header">
-        <h1>YouTube Uploader Dashboard</h1>
+        <h1>ZonDiscounts Uploader Dashboard</h1>
         <form action="/logout" method="GET" style="display: inline">
           <button class="logout" type="submit">Logout</button>
         </form>
+        <button
+          id="deleteAccountBtn"
+          type="button"
+          style="
+            margin-left: 10px;
+            background: #777;
+            color: #fff;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 30px;
+            cursor: pointer;
+          "
+        >
+          Delete Account
+        </button>
       </div>
 
       <% if (success) { %>
@@ -275,6 +290,7 @@
       <div class="card">
         <h2>Single Video Upload</h2>
         <form
+          id="singleUploadForm"
           action="/upload"
           method="POST"
           enctype="multipart/form-data"
@@ -361,6 +377,11 @@
               'unlisted' (required)
             </li>
           </ul>
+          <p style="color: #555; font-size: 0.95rem">
+            The uploader will validate the <code>privacyStatus</code> values
+            server-side and will reject rows with invalid values. Also ensure
+            scheduled publish times (for private) are in the future.
+          </p>
         </div>
         <form
           action="/upload-csv"
@@ -436,9 +457,47 @@
           batchUploadButton.disabled = false;
         }
       });
+
+      // Confirm privacy before single upload
+      const singleUploadForm = document.getElementById("singleUploadForm");
+      if (singleUploadForm) {
+        singleUploadForm.addEventListener("submit", function (e) {
+          const privacy = document.getElementById("privacyStatus").value;
+          const ok = confirm(
+            `You have selected "${privacy}" as the video's privacy status. Proceed with upload?`
+          );
+          if (!ok) e.preventDefault();
+        });
+      }
+
+      // Delete account button handler
+      const deleteBtn = document.getElementById("deleteAccountBtn");
+      if (deleteBtn) {
+        deleteBtn.addEventListener("click", async function () {
+          if (
+            !confirm(
+              "Are you sure you want to delete your account data and revoke access? This action can be undone by reauthorizing the app."
+            )
+          )
+            return;
+          try {
+            const resp = await fetch("/delete-account", { method: "POST" });
+            const data = await resp.json();
+            if (resp.ok) {
+              alert(data.message || "Account deletion requested.");
+              window.location.href = "/";
+            } else {
+              alert(data.message || "Failed to delete account.");
+            }
+          } catch (err) {
+            console.error(err);
+            alert("Error: Could not reach the server.");
+          }
+        });
+      }
     </script>
     <footer style="text-align: center; padding: 20px 0; color: #777">
-      &copy; 2023 YouTube Uploader. <a href="/privacy">Privacy</a> •
+      &copy; 2025 ZonDiscounts. <a href="/privacy">Privacy</a> •
       <a href="/terms">Terms</a>
     </footer>
   </body>
