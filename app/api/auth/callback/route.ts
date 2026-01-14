@@ -4,26 +4,36 @@ import { getOAuthClient } from "@/lib/auth";
 import { getSession, setSession, generateSessionId } from "@/lib/session";
 import { cookies } from "next/headers";
 
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code");
 
+  // Get the correct base URL (handles proxy/forwarded headers)
+  const host =
+    request.headers.get("x-forwarded-host") ||
+    request.headers.get("host") ||
+    "zondiscounts.com";
+  const protocol =
+    request.headers.get("x-forwarded-proto") ||
+    (request.url.startsWith("https") ? "https" : "http");
+  const baseUrl = `${protocol}://${host}`;
+
   if (!code) {
-    return NextResponse.redirect(new URL("/", request.url));
+    return NextResponse.redirect(new URL("/", baseUrl));
   }
 
   try {
     const oAuthClient = getOAuthClient();
     const { tokens } = await oAuthClient.getToken(code);
-    
+
     oAuthClient.setCredentials(tokens);
 
     // Get or create session
     const cookieStore = await cookies();
     let sessionId = cookieStore.get("sessionId")?.value;
-    
+
     if (!sessionId) {
       sessionId = generateSessionId();
       cookieStore.set("sessionId", sessionId, {
@@ -36,13 +46,16 @@ export async function GET(request: NextRequest) {
 
     setSession(sessionId, {
       authenticated: true,
-      tokens: tokens as { access_token?: string | null; refresh_token?: string | null; [key: string]: any },
+      tokens: tokens as {
+        access_token?: string | null;
+        refresh_token?: string | null;
+        [key: string]: any;
+      },
     });
 
-    return NextResponse.redirect(new URL("/dashboard", request.url));
+    return NextResponse.redirect(new URL("/dashboard", baseUrl));
   } catch (error) {
     console.error("OAuth callback error:", error);
-    return NextResponse.redirect(new URL("/?error=auth_failed", request.url));
+    return NextResponse.redirect(new URL("/?error=auth_failed", baseUrl));
   }
 }
-

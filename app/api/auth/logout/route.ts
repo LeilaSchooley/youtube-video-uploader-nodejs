@@ -14,6 +14,11 @@ export async function GET(request: NextRequest) {
     cookieStore.delete("sessionId");
   }
 
-  return NextResponse.redirect(new URL("/", request.url));
+  // Get the correct base URL (handles proxy/forwarded headers)
+  const host = request.headers.get("x-forwarded-host") || request.headers.get("host") || "zondiscounts.com";
+  const protocol = request.headers.get("x-forwarded-proto") || (request.url.startsWith("https") ? "https" : "http");
+  const baseUrl = `${protocol}://${host}`;
+
+  return NextResponse.redirect(new URL("/", baseUrl));
 }
 
