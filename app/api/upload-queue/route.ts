@@ -130,6 +130,7 @@ export async function POST(request: NextRequest) {
       uploadDir,
       videosPerDay: videosPerDay || 0,
       startDate: scheduleStartDate || new Date().toISOString(),
+      totalVideos: csvData.length,
     });
 
     return NextResponse.json({

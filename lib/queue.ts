@@ -10,6 +10,7 @@ export interface QueueItem {
   startDate: string;
   status: "pending" | "processing" | "completed" | "failed";
   progress: Array<{ index: number; status: string }>;
+  totalVideos?: number; // Total number of videos in this job
   createdAt: string;
   updatedAt: string;
 }
@@ -51,6 +52,7 @@ export function addToQueue(item: Omit<QueueItem, "id" | "status" | "progress" | 
     id,
     status: "pending",
     progress: [],
+    totalVideos: item.totalVideos,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };

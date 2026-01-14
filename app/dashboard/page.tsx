@@ -255,6 +255,238 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* Statistics Dashboard */}
+      {queue.length > 0 && (() => {
+        // Get all progress items from all jobs
+        const allProgress = queue.flatMap(job => job.progress || []);
+        
+        // Calculate total videos - use totalVideos from jobs if available, otherwise use progress length
+        const totalVideos = queue.reduce((sum, job) => {
+          return sum + (job.totalVideos || job.progress?.length || 0);
+        }, 0);
+        
+        const completed = allProgress.filter(p => 
+          p.status.includes("Uploaded") || 
+          p.status.includes("scheduled") ||
+          p.status.includes("Scheduled")
+        ).length;
+        
+        const failed = allProgress.filter(p => 
+          p.status.includes("Failed") || 
+          p.status.includes("Missing") ||
+          p.status.includes("Invalid")
+        ).length;
+        
+        const pending = allProgress.filter(p => 
+          p.status === "Pending" || 
+          p.status.includes("Uploading") ||
+          p.status.includes("thumbnail")
+        ).length;
+        
+        const processing = queue.filter(job => job.status === 'processing').length;
+        const completedJobs = queue.filter(job => job.status === 'completed').length;
+        const failedJobs = queue.filter(job => job.status === 'failed').length;
+        const pendingJobs = queue.filter(job => job.status === 'pending').length;
+        
+        // Calculate progress percentage
+        const progressPercentage = totalVideos > 0 
+          ? Math.round((completed / totalVideos) * 100) 
+          : (completedJobs > 0 && queue.length === completedJobs ? 100 : 0);
+        
+        const remaining = totalVideos > 0 ? totalVideos - completed - failed : 0;
+        
+        return (
+          <div style={{
+            background: 'var(--card-background)',
+            borderRadius: '12px',
+            boxShadow: '0 8px 24px var(--shadow-color)',
+            padding: '30px',
+            marginBottom: '40px',
+          }}>
+            <h2 style={{ fontSize: '1.8rem', marginBottom: '25px', color: 'var(--secondary-color)' }}>
+              Upload Statistics
+            </h2>
+            
+            {/* Overall Progress Bar */}
+            <div style={{ marginBottom: '30px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
+                <span style={{ fontWeight: '500', color: 'var(--text-color)' }}>Overall Progress</span>
+                <span style={{ fontWeight: '600', color: 'var(--secondary-color)' }}>{progressPercentage}%</span>
+              </div>
+              <div style={{
+                width: '100%',
+                height: '30px',
+                background: '#e9ecef',
+                borderRadius: '15px',
+                overflow: 'hidden',
+                position: 'relative',
+              }}>
+                <div style={{
+                  width: `${progressPercentage}%`,
+                  height: '100%',
+                  background: progressPercentage === 100 ? '#28a745' : 'linear-gradient(90deg, #007bff, #0056b3)',
+                  borderRadius: '15px',
+                  transition: 'width 0.3s ease',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'white',
+                  fontWeight: '600',
+                  fontSize: '0.9rem',
+                }}>
+                  {progressPercentage > 0 && progressPercentage < 100 && `${progressPercentage}%`}
+                  {progressPercentage === 100 && '✓ Complete'}
+                </div>
+              </div>
+            </div>
+
+            {/* Stats Grid */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+              gap: '20px',
+              marginBottom: '30px',
+            }}>
+              {/* Total Videos */}
+              <div style={{
+                padding: '20px',
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                borderRadius: '12px',
+                color: 'white',
+                boxShadow: '0 4px 15px rgba(102, 126, 234, 0.4)',
+              }}>
+                <div style={{ fontSize: '0.9rem', opacity: 0.9, marginBottom: '8px' }}>Total Videos</div>
+                <div style={{ fontSize: '2.5rem', fontWeight: '700' }}>{totalVideos}</div>
+              </div>
+
+              {/* Completed */}
+              <div style={{
+                padding: '20px',
+                background: 'linear-gradient(135deg, #11998e 0%, #38ef7d 100%)',
+                borderRadius: '12px',
+                color: 'white',
+                boxShadow: '0 4px 15px rgba(17, 153, 142, 0.4)',
+              }}>
+                <div style={{ fontSize: '0.9rem', opacity: 0.9, marginBottom: '8px' }}>Completed</div>
+                <div style={{ fontSize: '2.5rem', fontWeight: '700' }}>{completed}</div>
+                {totalVideos > 0 && (
+                  <div style={{ fontSize: '0.85rem', opacity: 0.9, marginTop: '5px' }}>
+                    {Math.round((completed / totalVideos) * 100)}% of total
+                  </div>
+                )}
+              </div>
+
+              {/* Pending */}
+              <div style={{
+                padding: '20px',
+                background: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
+                borderRadius: '12px',
+                color: 'white',
+                boxShadow: '0 4px 15px rgba(240, 147, 251, 0.4)',
+              }}>
+                <div style={{ fontSize: '0.9rem', opacity: 0.9, marginBottom: '8px' }}>Pending</div>
+                <div style={{ fontSize: '2.5rem', fontWeight: '700' }}>{pending}</div>
+                {totalVideos > 0 && (
+                  <div style={{ fontSize: '0.85rem', opacity: 0.9, marginTop: '5px' }}>
+                    {Math.round((pending / totalVideos) * 100)}% of total
+                  </div>
+                )}
+              </div>
+
+              {/* Failed */}
+              <div style={{
+                padding: '20px',
+                background: 'linear-gradient(135deg, #fa709a 0%, #fee140 100%)',
+                borderRadius: '12px',
+                color: 'white',
+                boxShadow: '0 4px 15px rgba(250, 112, 154, 0.4)',
+              }}>
+                <div style={{ fontSize: '0.9rem', opacity: 0.9, marginBottom: '8px' }}>Failed</div>
+                <div style={{ fontSize: '2.5rem', fontWeight: '700' }}>{failed}</div>
+                {totalVideos > 0 && (
+                  <div style={{ fontSize: '0.85rem', opacity: 0.9, marginTop: '5px' }}>
+                    {Math.round((failed / totalVideos) * 100)}% of total
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Job Status Summary */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+              gap: '15px',
+              padding: '20px',
+              background: '#f8f9fa',
+              borderRadius: '10px',
+            }}>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: '2rem', fontWeight: '700', color: '#667eea' }}>{queue.length}</div>
+                <div style={{ fontSize: '0.9rem', color: '#666', marginTop: '5px' }}>Total Jobs</div>
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: '2rem', fontWeight: '700', color: '#11998e' }}>{completedJobs}</div>
+                <div style={{ fontSize: '0.9rem', color: '#666', marginTop: '5px' }}>Completed</div>
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: '2rem', fontWeight: '700', color: '#f5576c' }}>{processing}</div>
+                <div style={{ fontSize: '0.9rem', color: '#666', marginTop: '5px' }}>Processing</div>
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: '2rem', fontWeight: '700', color: '#fee140' }}>{pendingJobs}</div>
+                <div style={{ fontSize: '0.9rem', color: '#666', marginTop: '5px' }}>Pending</div>
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: '2rem', fontWeight: '700', color: '#fa709a' }}>{failedJobs}</div>
+                <div style={{ fontSize: '0.9rem', color: '#666', marginTop: '5px' }}>Failed</div>
+              </div>
+            </div>
+
+            {/* Remaining Videos */}
+            {remaining > 0 && (
+              <div style={{
+                marginTop: '25px',
+                padding: '15px',
+                background: remaining > 0 ? '#fff3cd' : '#d4edda',
+                border: `1px solid ${remaining > 0 ? '#ffc107' : '#28a745'}`,
+                borderRadius: '8px',
+                textAlign: 'center',
+              }}>
+                <div style={{ 
+                  fontSize: '1.1rem', 
+                  fontWeight: '600', 
+                  color: remaining > 0 ? '#856404' : '#155724', 
+                  marginBottom: '5px' 
+                }}>
+                  {remaining > 0 ? `${remaining} videos remaining` : 'All videos processed!'}
+                </div>
+                {remaining > 0 && (
+                  <div style={{ fontSize: '0.9rem', color: '#856404' }}>
+                    {processing > 0 ? 'Worker is processing videos...' : 'Waiting for worker to process...'}
+                  </div>
+                )}
+              </div>
+            )}
+            
+            {/* Summary */}
+            {totalVideos === 0 && queue.length > 0 && (
+              <div style={{
+                marginTop: '25px',
+                padding: '15px',
+                background: '#e7f3ff',
+                border: '1px solid #b3d9ff',
+                borderRadius: '8px',
+                textAlign: 'center',
+              }}>
+                <div style={{ fontSize: '0.95rem', color: '#004085' }}>
+                  Jobs are queued. Statistics will appear once processing begins.
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
       <div style={{
         background: 'var(--card-background)',
         borderRadius: '12px',
@@ -361,6 +593,7 @@ export default function Dashboard() {
           <select
             id="privacyStatus"
             name="privacyStatus"
+            defaultValue="public"
             required
             style={{
               width: '100%',
@@ -371,8 +604,8 @@ export default function Dashboard() {
               marginBottom: '20px',
             }}
           >
-            <option value="private">Private</option>
             <option value="public">Public</option>
+            <option value="private">Private</option>
             <option value="unlisted">Unlisted</option>
           </select>
 
