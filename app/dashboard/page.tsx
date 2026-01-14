@@ -44,7 +44,7 @@ export default function Dashboard() {
       if (selectedJobId) {
         fetchJobStatus(selectedJobId);
       }
-    }, 5000); // Poll every 5 seconds
+    }, 5000);
     return () => clearInterval(interval);
   }, [selectedJobId]);
 
@@ -131,7 +131,6 @@ export default function Dashboard() {
 
     const formData = new FormData(e.currentTarget);
     
-    // Add scheduling options if enabled
     if (enableScheduling) {
       if (!videosPerDay || !scheduleStartDate) {
         setMessage({ type: 'error', text: 'Please fill in videos per day and start date when scheduling is enabled.' });
@@ -191,7 +190,7 @@ export default function Dashboard() {
 
   if (loading) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
+      <div className="flex justify-center items-center min-h-screen">
         <div>Loading...</div>
       </div>
     );
@@ -201,466 +200,280 @@ export default function Dashboard() {
     return null;
   }
 
+  // Calculate statistics
+  const allProgress = queue.flatMap(job => job.progress || []);
+  const totalVideos = queue.reduce((sum, job) => {
+    return sum + (job.totalVideos || job.progress?.length || 0);
+  }, 0);
+  
+  const completed = allProgress.filter(p => 
+    p.status.includes("Uploaded") || 
+    p.status.includes("scheduled") ||
+    p.status.includes("Scheduled")
+  ).length;
+  
+  const failed = allProgress.filter(p => 
+    p.status.includes("Failed") || 
+    p.status.includes("Missing") ||
+    p.status.includes("Invalid")
+  ).length;
+  
+  const pending = allProgress.filter(p => 
+    p.status === "Pending" || 
+    p.status.includes("Uploading") ||
+    p.status.includes("thumbnail")
+  ).length;
+  
+  const processing = queue.filter(job => job.status === 'processing').length;
+  const completedJobs = queue.filter(job => job.status === 'completed').length;
+  const failedJobs = queue.filter(job => job.status === 'failed').length;
+  const pendingJobs = queue.filter(job => job.status === 'pending').length;
+  
+  const progressPercentage = totalVideos > 0 
+    ? Math.round((completed / totalVideos) * 100) 
+    : (completedJobs > 0 && queue.length === completedJobs ? 100 : 0);
+  
+  const remaining = totalVideos > 0 ? totalVideos - completed - failed : 0;
+
   return (
-    <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '40px 20px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '40px' }}>
-        <h1 style={{ fontSize: '2.5rem', color: 'var(--secondary-color)' }}>ZonDiscounts Uploader Dashboard</h1>
-        <div>
+    <div className="max-w-7xl mx-auto px-5 py-10">
+      {/* Header */}
+      <div className="flex justify-between items-center mb-10">
+        <h1 className="text-4xl font-bold text-gray-800">ZonDiscounts Uploader Dashboard</h1>
+        <div className="flex gap-2">
           <a
             href="/api/auth/logout"
-            style={{
-              background: 'var(--primary-color)',
-              color: 'white',
-              border: 'none',
-              borderRadius: '30px',
-              padding: '10px 20px',
-              cursor: 'pointer',
-              fontSize: '1rem',
-              fontWeight: '500',
-              textDecoration: 'none',
-              display: 'inline-block',
-              marginRight: '10px',
-            }}
+            className="btn-primary"
           >
             Logout
           </a>
           <button
             onClick={handleDeleteAccount}
-            style={{
-              background: '#777',
-              color: '#fff',
-              border: 'none',
-              padding: '10px 16px',
-              borderRadius: '30px',
-              cursor: 'pointer',
-            }}
+            className="btn-secondary"
           >
             Delete Account
           </button>
         </div>
       </div>
 
+      {/* Message */}
       {message.type && (
-        <div style={{
-          marginBottom: '20px',
-          padding: '15px',
-          borderRadius: '8px',
-          fontWeight: '500',
-          fontSize: '1rem',
-          backgroundColor: message.type === 'success' ? '#d4edda' : '#f8d7da',
-          color: message.type === 'success' ? '#155724' : '#721c24',
-          border: `1px solid ${message.type === 'success' ? '#c3e6cb' : '#f5c6cb'}`,
-        }}>
+        <div className={`mb-5 p-4 rounded-lg font-medium ${
+          message.type === 'success' 
+            ? 'bg-green-100 text-green-800 border border-green-200' 
+            : 'bg-red-100 text-red-800 border border-red-200'
+        }`}>
           {message.text}
         </div>
       )}
 
-      {/* Statistics Dashboard - Always Visible */}
-      {(() => {
-        // Get all progress items from all jobs
-        const allProgress = queue.flatMap(job => job.progress || []);
-        
-        // Calculate total videos - use totalVideos from jobs if available, otherwise use progress length
-        const totalVideos = queue.reduce((sum, job) => {
-          return sum + (job.totalVideos || job.progress?.length || 0);
-        }, 0);
-        
-        const completed = allProgress.filter(p => 
-          p.status.includes("Uploaded") || 
-          p.status.includes("scheduled") ||
-          p.status.includes("Scheduled")
-        ).length;
-        
-        const failed = allProgress.filter(p => 
-          p.status.includes("Failed") || 
-          p.status.includes("Missing") ||
-          p.status.includes("Invalid")
-        ).length;
-        
-        const pending = allProgress.filter(p => 
-          p.status === "Pending" || 
-          p.status.includes("Uploading") ||
-          p.status.includes("thumbnail")
-        ).length;
-        
-        const processing = queue.filter(job => job.status === 'processing').length;
-        const completedJobs = queue.filter(job => job.status === 'completed').length;
-        const failedJobs = queue.filter(job => job.status === 'failed').length;
-        const pendingJobs = queue.filter(job => job.status === 'pending').length;
-        
-        // Calculate progress percentage
-        const progressPercentage = totalVideos > 0 
-          ? Math.round((completed / totalVideos) * 100) 
-          : (completedJobs > 0 && queue.length === completedJobs ? 100 : 0);
-        
-        const remaining = totalVideos > 0 ? totalVideos - completed - failed : 0;
-        
-        // Show empty state if no jobs
-        if (queue.length === 0) {
-          return (
-            <div style={{
-              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-              borderRadius: '16px',
-              boxShadow: '0 12px 40px rgba(102, 126, 234, 0.3)',
-              padding: '50px 30px',
-              marginBottom: '40px',
-              textAlign: 'center',
-              color: 'white',
-            }}>
-              <div style={{ fontSize: '3rem', marginBottom: '20px' }}>📊</div>
-              <h2 style={{ fontSize: '2.2rem', marginBottom: '15px', fontWeight: '700' }}>
-                Welcome to Your Upload Dashboard
-              </h2>
-              <p style={{ fontSize: '1.1rem', opacity: 0.95, marginBottom: '30px', maxWidth: '600px', margin: '0 auto 30px' }}>
-                Start uploading videos to see real-time statistics, progress tracking, and detailed analytics.
-              </p>
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-                gap: '20px',
-                maxWidth: '600px',
-                margin: '0 auto',
-                marginTop: '30px',
-              }}>
-                <div style={{ padding: '20px', background: 'rgba(255,255,255,0.2)', borderRadius: '12px', backdropFilter: 'blur(10px)' }}>
-                  <div style={{ fontSize: '2.5rem', fontWeight: '700' }}>0</div>
-                  <div style={{ fontSize: '0.9rem', opacity: 0.9, marginTop: '5px' }}>Total Videos</div>
-                </div>
-                <div style={{ padding: '20px', background: 'rgba(255,255,255,0.2)', borderRadius: '12px', backdropFilter: 'blur(10px)' }}>
-                  <div style={{ fontSize: '2.5rem', fontWeight: '700' }}>0</div>
-                  <div style={{ fontSize: '0.9rem', opacity: 0.9, marginTop: '5px' }}>Completed</div>
-                </div>
-                <div style={{ padding: '20px', background: 'rgba(255,255,255,0.2)', borderRadius: '12px', backdropFilter: 'blur(10px)' }}>
-                  <div style={{ fontSize: '2.5rem', fontWeight: '700' }}>0</div>
-                  <div style={{ fontSize: '0.9rem', opacity: 0.9, marginTop: '5px' }}>Jobs</div>
-                </div>
-              </div>
+      {/* Statistics Dashboard */}
+      {queue.length === 0 ? (
+        <div className="bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl shadow-2xl p-12 mb-10 text-center text-white">
+          <div className="text-5xl mb-5">📊</div>
+          <h2 className="text-3xl font-bold mb-4">Welcome to Your Upload Dashboard</h2>
+          <p className="text-lg opacity-95 mb-8 max-w-2xl mx-auto">
+            Start uploading videos to see real-time statistics, progress tracking, and detailed analytics.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5 max-w-2xl mx-auto mt-8">
+            <div className="p-5 bg-white/20 backdrop-blur-lg rounded-xl">
+              <div className="text-4xl font-bold">0</div>
+              <div className="text-sm opacity-90 mt-2">Total Videos</div>
             </div>
-          );
-        }
-        
-        return (
-          <div style={{
-            background: 'var(--card-background)',
-            borderRadius: '16px',
-            boxShadow: '0 12px 40px rgba(0,0,0,0.1)',
-            padding: '40px',
-            marginBottom: '40px',
-            border: '1px solid rgba(0,0,0,0.05)',
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' }}>
-              <h2 style={{ fontSize: '2.2rem', fontWeight: '700', color: 'var(--secondary-color)', margin: 0 }}>
-                📊 Upload Statistics
-              </h2>
-              <div style={{
-                padding: '8px 16px',
-                background: processing > 0 ? '#fff3cd' : '#d4edda',
-                borderRadius: '20px',
-                fontSize: '0.9rem',
-                fontWeight: '600',
-                color: processing > 0 ? '#856404' : '#155724',
-              }}>
-                {processing > 0 ? '⚡ Processing' : '✓ Ready'}
-              </div>
+            <div className="p-5 bg-white/20 backdrop-blur-lg rounded-xl">
+              <div className="text-4xl font-bold">0</div>
+              <div className="text-sm opacity-90 mt-2">Completed</div>
             </div>
-            
-            {/* Overall Progress Bar */}
-            <div style={{ marginBottom: '30px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-                <span style={{ fontWeight: '500', color: 'var(--text-color)' }}>Overall Progress</span>
-                <span style={{ fontWeight: '600', color: 'var(--secondary-color)' }}>{progressPercentage}%</span>
-              </div>
-              <div style={{
-                width: '100%',
-                height: '30px',
-                background: '#e9ecef',
-                borderRadius: '15px',
-                overflow: 'hidden',
-                position: 'relative',
-              }}>
-                <div style={{
-                  width: `${progressPercentage}%`,
-                  height: '100%',
-                  background: progressPercentage === 100 ? '#28a745' : 'linear-gradient(90deg, #007bff, #0056b3)',
-                  borderRadius: '15px',
-                  transition: 'width 0.3s ease',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: 'white',
-                  fontWeight: '600',
-                  fontSize: '0.9rem',
-                }}>
-                  {progressPercentage > 0 && progressPercentage < 100 && `${progressPercentage}%`}
-                  {progressPercentage === 100 && '✓ Complete'}
-                </div>
-              </div>
+            <div className="p-5 bg-white/20 backdrop-blur-lg rounded-xl">
+              <div className="text-4xl font-bold">0</div>
+              <div className="text-sm opacity-90 mt-2">Jobs</div>
             </div>
-
-            {/* Stats Grid */}
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-              gap: '20px',
-              marginBottom: '30px',
-            }}>
-              {/* Total Videos */}
-              <div style={{
-                padding: '20px',
-                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                borderRadius: '12px',
-                color: 'white',
-                boxShadow: '0 4px 15px rgba(102, 126, 234, 0.4)',
-              }}>
-                <div style={{ fontSize: '0.9rem', opacity: 0.9, marginBottom: '8px' }}>Total Videos</div>
-                <div style={{ fontSize: '2.5rem', fontWeight: '700' }}>{totalVideos}</div>
-              </div>
-
-              {/* Completed */}
-              <div style={{
-                padding: '20px',
-                background: 'linear-gradient(135deg, #11998e 0%, #38ef7d 100%)',
-                borderRadius: '12px',
-                color: 'white',
-                boxShadow: '0 4px 15px rgba(17, 153, 142, 0.4)',
-              }}>
-                <div style={{ fontSize: '0.9rem', opacity: 0.9, marginBottom: '8px' }}>Completed</div>
-                <div style={{ fontSize: '2.5rem', fontWeight: '700' }}>{completed}</div>
-                {totalVideos > 0 && (
-                  <div style={{ fontSize: '0.85rem', opacity: 0.9, marginTop: '5px' }}>
-                    {Math.round((completed / totalVideos) * 100)}% of total
-                  </div>
-                )}
-              </div>
-
-              {/* Pending */}
-              <div style={{
-                padding: '20px',
-                background: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
-                borderRadius: '12px',
-                color: 'white',
-                boxShadow: '0 4px 15px rgba(240, 147, 251, 0.4)',
-              }}>
-                <div style={{ fontSize: '0.9rem', opacity: 0.9, marginBottom: '8px' }}>Pending</div>
-                <div style={{ fontSize: '2.5rem', fontWeight: '700' }}>{pending}</div>
-                {totalVideos > 0 && (
-                  <div style={{ fontSize: '0.85rem', opacity: 0.9, marginTop: '5px' }}>
-                    {Math.round((pending / totalVideos) * 100)}% of total
-                  </div>
-                )}
-              </div>
-
-              {/* Failed */}
-              <div style={{
-                padding: '20px',
-                background: 'linear-gradient(135deg, #fa709a 0%, #fee140 100%)',
-                borderRadius: '12px',
-                color: 'white',
-                boxShadow: '0 4px 15px rgba(250, 112, 154, 0.4)',
-              }}>
-                <div style={{ fontSize: '0.9rem', opacity: 0.9, marginBottom: '8px' }}>Failed</div>
-                <div style={{ fontSize: '2.5rem', fontWeight: '700' }}>{failed}</div>
-                {totalVideos > 0 && (
-                  <div style={{ fontSize: '0.85rem', opacity: 0.9, marginTop: '5px' }}>
-                    {Math.round((failed / totalVideos) * 100)}% of total
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Job Status Summary */}
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-              gap: '15px',
-              padding: '20px',
-              background: '#f8f9fa',
-              borderRadius: '10px',
-            }}>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '2rem', fontWeight: '700', color: '#667eea' }}>{queue.length}</div>
-                <div style={{ fontSize: '0.9rem', color: '#666', marginTop: '5px' }}>Total Jobs</div>
-              </div>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '2rem', fontWeight: '700', color: '#11998e' }}>{completedJobs}</div>
-                <div style={{ fontSize: '0.9rem', color: '#666', marginTop: '5px' }}>Completed</div>
-              </div>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '2rem', fontWeight: '700', color: '#f5576c' }}>{processing}</div>
-                <div style={{ fontSize: '0.9rem', color: '#666', marginTop: '5px' }}>Processing</div>
-              </div>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '2rem', fontWeight: '700', color: '#fee140' }}>{pendingJobs}</div>
-                <div style={{ fontSize: '0.9rem', color: '#666', marginTop: '5px' }}>Pending</div>
-              </div>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '2rem', fontWeight: '700', color: '#fa709a' }}>{failedJobs}</div>
-                <div style={{ fontSize: '0.9rem', color: '#666', marginTop: '5px' }}>Failed</div>
-              </div>
-            </div>
-
-            {/* Remaining Videos */}
-            {remaining > 0 && (
-              <div style={{
-                marginTop: '25px',
-                padding: '15px',
-                background: remaining > 0 ? '#fff3cd' : '#d4edda',
-                border: `1px solid ${remaining > 0 ? '#ffc107' : '#28a745'}`,
-                borderRadius: '8px',
-                textAlign: 'center',
-              }}>
-                <div style={{ 
-                  fontSize: '1.1rem', 
-                  fontWeight: '600', 
-                  color: remaining > 0 ? '#856404' : '#155724', 
-                  marginBottom: '5px' 
-                }}>
-                  {remaining > 0 ? `${remaining} videos remaining` : 'All videos processed!'}
-                </div>
-                {remaining > 0 && (
-                  <div style={{ fontSize: '0.9rem', color: '#856404' }}>
-                    {processing > 0 ? 'Worker is processing videos...' : 'Waiting for worker to process...'}
-                  </div>
-                )}
-              </div>
-            )}
-            
-            {/* Summary */}
-            {totalVideos === 0 && queue.length > 0 && (
-              <div style={{
-                marginTop: '25px',
-                padding: '15px',
-                background: '#e7f3ff',
-                border: '1px solid #b3d9ff',
-                borderRadius: '8px',
-                textAlign: 'center',
-              }}>
-                <div style={{ fontSize: '0.95rem', color: '#004085' }}>
-                  Jobs are queued. Statistics will appear once processing begins.
-                </div>
-              </div>
-            )}
           </div>
-        );
-      })()}
+        </div>
+      ) : (
+        <div className="card border border-gray-100">
+          <div className="flex justify-between items-center mb-8">
+            <h2 className="text-3xl font-bold text-gray-800">📊 Upload Statistics</h2>
+            <div className={`px-4 py-2 rounded-full text-sm font-semibold ${
+              processing > 0 ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'
+            }`}>
+              {processing > 0 ? '⚡ Processing' : '✓ Ready'}
+            </div>
+          </div>
+          
+          {/* Progress Bar */}
+          <div className="mb-8">
+            <div className="flex justify-between mb-2">
+              <span className="font-medium text-gray-700">Overall Progress</span>
+              <span className="font-semibold text-gray-800">{progressPercentage}%</span>
+            </div>
+            <div className="w-full h-8 bg-gray-200 rounded-full overflow-hidden relative">
+              <div 
+                className={`h-full rounded-full transition-all duration-300 flex items-center justify-center text-white font-semibold text-sm ${
+                  progressPercentage === 100 ? 'bg-green-500' : 'bg-gradient-to-r from-blue-600 to-blue-800'
+                }`}
+                style={{ width: `${progressPercentage}%` }}
+              >
+                {progressPercentage > 0 && progressPercentage < 100 && `${progressPercentage}%`}
+                {progressPercentage === 100 && '✓ Complete'}
+              </div>
+            </div>
+          </div>
 
-      {/* Profile Section - Moved below statistics */}
-      <div style={{
-        background: 'var(--card-background)',
-        borderRadius: '12px',
-        boxShadow: '0 8px 24px var(--shadow-color)',
-        padding: '30px',
-        marginBottom: '40px',
-      }}>
-        <h2 style={{ fontSize: '1.8rem', marginBottom: '20px', color: 'var(--secondary-color)' }}>Profile</h2>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+          {/* Stats Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
+            <div className="p-5 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl text-white shadow-lg">
+              <div className="text-sm opacity-90 mb-2">Total Videos</div>
+              <div className="text-4xl font-bold">{totalVideos}</div>
+            </div>
+            <div className="p-5 bg-gradient-to-br from-teal-500 to-green-400 rounded-xl text-white shadow-lg">
+              <div className="text-sm opacity-90 mb-2">Completed</div>
+              <div className="text-4xl font-bold">{completed}</div>
+              {totalVideos > 0 && (
+                <div className="text-xs opacity-90 mt-1">
+                  {Math.round((completed / totalVideos) * 100)}% of total
+                </div>
+              )}
+            </div>
+            <div className="p-5 bg-gradient-to-br from-pink-400 to-red-500 rounded-xl text-white shadow-lg">
+              <div className="text-sm opacity-90 mb-2">Pending</div>
+              <div className="text-4xl font-bold">{pending}</div>
+              {totalVideos > 0 && (
+                <div className="text-xs opacity-90 mt-1">
+                  {Math.round((pending / totalVideos) * 100)}% of total
+                </div>
+              )}
+            </div>
+            <div className="p-5 bg-gradient-to-br from-pink-500 to-yellow-400 rounded-xl text-white shadow-lg">
+              <div className="text-sm opacity-90 mb-2">Failed</div>
+              <div className="text-4xl font-bold">{failed}</div>
+              {totalVideos > 0 && (
+                <div className="text-xs opacity-90 mt-1">
+                  {Math.round((failed / totalVideos) * 100)}% of total
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Job Status Summary */}
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 p-5 bg-gray-50 rounded-xl">
+            <div className="text-center">
+              <div className="text-3xl font-bold text-indigo-600">{queue.length}</div>
+              <div className="text-sm text-gray-600 mt-1">Total Jobs</div>
+            </div>
+            <div className="text-center">
+              <div className="text-3xl font-bold text-teal-600">{completedJobs}</div>
+              <div className="text-sm text-gray-600 mt-1">Completed</div>
+            </div>
+            <div className="text-center">
+              <div className="text-3xl font-bold text-red-500">{processing}</div>
+              <div className="text-sm text-gray-600 mt-1">Processing</div>
+            </div>
+            <div className="text-center">
+              <div className="text-3xl font-bold text-yellow-500">{pendingJobs}</div>
+              <div className="text-sm text-gray-600 mt-1">Pending</div>
+            </div>
+            <div className="text-center">
+              <div className="text-3xl font-bold text-pink-500">{failedJobs}</div>
+              <div className="text-sm text-gray-600 mt-1">Failed</div>
+            </div>
+          </div>
+
+          {/* Remaining Videos */}
+          {remaining > 0 && (
+            <div className={`mt-6 p-4 rounded-lg text-center ${
+              remaining > 0 ? 'bg-yellow-50 border border-yellow-300' : 'bg-green-50 border border-green-300'
+            }`}>
+              <div className={`text-lg font-semibold mb-1 ${
+                remaining > 0 ? 'text-yellow-800' : 'text-green-800'
+              }`}>
+                {remaining > 0 ? `${remaining} videos remaining` : 'All videos processed!'}
+              </div>
+              {remaining > 0 && (
+                <div className="text-sm text-yellow-700">
+                  {processing > 0 ? 'Worker is processing videos...' : 'Waiting for worker to process...'}
+                </div>
+              )}
+            </div>
+          )}
+
+          {totalVideos === 0 && queue.length > 0 && (
+            <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg text-center">
+              <div className="text-sm text-blue-900">
+                Jobs are queued. Statistics will appear once processing begins.
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Profile Section */}
+      <div className="card">
+        <h2 className="text-2xl font-bold mb-5 text-gray-800">Profile</h2>
+        <div className="flex items-center gap-5">
           <img
             src={user.picture}
             alt={user.name}
-            style={{
-              width: '100px',
-              height: '100px',
-              borderRadius: '50%',
-              objectFit: 'cover',
-              border: '3px solid var(--primary-color)',
-            }}
+            className="w-24 h-24 rounded-full object-cover border-4 border-red-600"
           />
-          <p style={{ fontSize: '1.1rem', color: 'var(--text-color)' }}>
+          <p className="text-lg text-gray-700">
             <strong>Name:</strong> {user.name}
           </p>
         </div>
       </div>
 
-      <div style={{
-        background: 'var(--card-background)',
-        borderRadius: '12px',
-        boxShadow: '0 8px 24px var(--shadow-color)',
-        padding: '30px',
-        marginBottom: '40px',
-      }}>
-        <h2 style={{ fontSize: '1.8rem', marginBottom: '20px', color: 'var(--secondary-color)' }}>Single Video Upload</h2>
-        <form onSubmit={handleSingleUpload} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          <label htmlFor="title" style={{ fontWeight: '500', color: 'var(--secondary-color)' }}>Title</label>
+      {/* Single Video Upload */}
+      <div className="card">
+        <h2 className="text-2xl font-bold mb-5 text-gray-800">Single Video Upload</h2>
+        <form onSubmit={handleSingleUpload} className="flex flex-col gap-5">
+          <label htmlFor="title" className="label">Title</label>
           <input
             type="text"
             id="title"
             name="title"
             placeholder="Enter video title"
             required
-            style={{
-              width: '100%',
-              padding: '12px',
-              border: '1px solid var(--border-color)',
-              borderRadius: '8px',
-              fontSize: '1rem',
-            }}
+            className="input-field"
           />
 
-          <label htmlFor="description" style={{ fontWeight: '500', color: 'var(--secondary-color)' }}>Description</label>
+          <label htmlFor="description" className="label">Description</label>
           <textarea
             id="description"
             name="description"
             placeholder="Enter video description"
             required
-            style={{
-              width: '100%',
-              padding: '12px',
-              border: '1px solid var(--border-color)',
-              borderRadius: '8px',
-              fontSize: '1rem',
-              resize: 'vertical',
-              minHeight: '100px',
-            }}
+            className="input-field min-h-[100px] resize-y"
           />
 
-          <label htmlFor="video" style={{ fontWeight: '500', color: 'var(--secondary-color)' }}>Choose File</label>
+          <label htmlFor="video" className="label">Choose File</label>
           <input
             type="file"
             id="video"
             name="video"
             accept="video/*"
             required
-            style={{
-              width: '100%',
-              padding: '12px',
-              border: '1px solid var(--border-color)',
-              borderRadius: '8px',
-              fontSize: '1rem',
-            }}
+            className="input-field"
           />
 
-          <div style={{ display: 'flex', gap: '10px' }}>
-            <div style={{ flex: 1 }}>
-              <label htmlFor="publishDate" style={{ fontWeight: '500', color: 'var(--secondary-color)' }}>Schedule Publish Date</label>
+          <div className="flex gap-2">
+            <div className="flex-1">
+              <label htmlFor="publishDate" className="label">Schedule Publish Date</label>
               <input
                 type="datetime-local"
                 id="publishDate"
                 name="publishDate"
-                style={{
-                  width: '100%',
-                  padding: '12px',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: '8px',
-                  fontSize: '1rem',
-                }}
+                className="input-field"
               />
             </div>
           </div>
 
-          <label htmlFor="privacyStatus" style={{ fontWeight: '500', color: 'var(--secondary-color)' }}>Privacy Status</label>
+          <label htmlFor="privacyStatus" className="label">Privacy Status</label>
           <select
             id="privacyStatus"
             name="privacyStatus"
             defaultValue="public"
             required
-            style={{
-              width: '100%',
-              padding: '12px',
-              border: '1px solid var(--border-color)',
-              borderRadius: '8px',
-              fontSize: '1rem',
-              marginBottom: '20px',
-            }}
+            className="input-field mb-5"
           >
             <option value="public">Public</option>
             <option value="private">Private</option>
@@ -670,41 +483,27 @@ export default function Dashboard() {
           <button
             type="submit"
             disabled={uploading}
-            style={{
-              background: uploading ? '#ccc' : 'var(--primary-color)',
-              color: 'white',
-              border: 'none',
-              borderRadius: '30px',
-              padding: '14px 28px',
-              cursor: uploading ? 'not-allowed' : 'pointer',
-              fontSize: '1.1rem',
-              fontWeight: '500',
-            }}
+            className={`btn-primary ${uploading ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
             {uploading ? 'Uploading...' : 'Upload Video'}
           </button>
         </form>
       </div>
 
-      <div style={{
-        background: 'var(--card-background)',
-        borderRadius: '12px',
-        boxShadow: '0 8px 24px var(--shadow-color)',
-        padding: '30px',
-        marginBottom: '40px',
-      }}>
-        <h2 style={{ fontSize: '1.8rem', marginBottom: '20px', color: 'var(--secondary-color)' }}>Batch Upload from CSV (Background Processing)</h2>
-        <div style={{ marginBottom: '20px', padding: '15px', background: '#e7f3ff', borderRadius: '8px', border: '1px solid #b3d9ff' }}>
-          <p style={{ margin: 0, fontSize: '0.95rem', color: '#004085' }}>
+      {/* Batch Upload */}
+      <div className="card">
+        <h2 className="text-2xl font-bold mb-5 text-gray-800">Batch Upload from CSV (Background Processing)</h2>
+        <div className="mb-5 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+          <p className="text-sm text-blue-900">
             <strong>New Background Processing System:</strong> Upload your CSV and video files to the server. 
             The system will process them in the background, uploading X videos per day automatically. 
             You can close your browser and check status later.
           </p>
         </div>
-        <div style={{ marginBottom: '10px', fontSize: '13px' }}>
-          <h3>CSV File Instructions</h3>
-          <p>Your CSV file should include the following columns:</p>
-          <ul>
+        <div className="mb-5 text-sm">
+          <h3 className="font-semibold mb-2">CSV File Instructions</h3>
+          <p className="mb-2">Your CSV file should include the following columns:</p>
+          <ul className="list-disc list-inside mb-2 space-y-1">
             <li><strong>youtube_title:</strong> The title of your video (required)</li>
             <li><strong>youtube_description:</strong> A detailed description of your video (required)</li>
             <li><strong>thumbnail_path:</strong> File path to the video thumbnail image (optional)</li>
@@ -712,52 +511,39 @@ export default function Dashboard() {
             <li><strong>scheduleTime:</strong> The date and time to publish the video with. (yyyy-MM-dd HH:mm) (optional)</li>
             <li><strong>privacyStatus:</strong> Must be &apos;public&apos;, &apos;private&apos;, or &apos;unlisted&apos; (defaults to &apos;public&apos;)</li>
           </ul>
-          <p style={{ color: '#555', fontSize: '0.95rem' }}>
-            <strong>Important:</strong> The <code>video</code> and <code>thumbnail_path</code> columns should contain 
+          <p className="text-gray-600 text-sm">
+            <strong>Important:</strong> The <code className="bg-gray-100 px-1 rounded">video</code> and <code className="bg-gray-100 px-1 rounded">thumbnail_path</code> columns should contain 
             absolute file paths on your server. Files will be copied to server storage when you submit the form.
           </p>
         </div>
-        <form onSubmit={handleCsvUpload} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          <label htmlFor="csvFile" style={{ fontWeight: '500', color: 'var(--secondary-color)' }}>Upload CSV</label>
+        <form onSubmit={handleCsvUpload} className="flex flex-col gap-5">
+          <label htmlFor="csvFile" className="label">Upload CSV</label>
           <input
             type="file"
             id="csvFile"
             name="csvFile"
             accept=".csv"
             required
-            style={{
-              width: '100%',
-              padding: '12px',
-              border: '1px solid var(--border-color)',
-              borderRadius: '8px',
-              fontSize: '1rem',
-            }}
+            className="input-field"
           />
 
-          <div style={{
-            padding: '15px',
-            background: '#f8f9fa',
-            borderRadius: '8px',
-            border: '1px solid var(--border-color)',
-          }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '15px', cursor: 'pointer' }}>
+          <div className="p-4 bg-gray-50 border border-gray-300 rounded-lg">
+            <label className="flex items-center gap-2 mb-4 cursor-pointer">
               <input
                 type="checkbox"
                 checked={enableScheduling}
                 onChange={(e: ChangeEvent<HTMLInputElement>) => setEnableScheduling(e.target.checked)}
-                style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                className="w-5 h-5 cursor-pointer"
               />
-              <span style={{ fontWeight: '500', color: 'var(--secondary-color)' }}>
+              <span className="font-medium text-gray-800">
                 Enable Upload Scheduling (Spread uploads across multiple days)
               </span>
             </label>
 
             {enableScheduling && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', marginTop: '15px' }}>
+              <div className="flex flex-col gap-4 mt-4">
                 <div>
-                  <label htmlFor="videosPerDay" style={{ fontWeight: '500', color: 'var(--secondary-color)', display: 'block', marginBottom: '5px' }}>
-                    Videos Per Day
-                  </label>
+                  <label htmlFor="videosPerDay" className="label">Videos Per Day</label>
                   <input
                     type="number"
                     id="videosPerDay"
@@ -766,23 +552,15 @@ export default function Dashboard() {
                     onChange={(e: ChangeEvent<HTMLInputElement>) => setVideosPerDay(e.target.value)}
                     placeholder="e.g., 5"
                     required={enableScheduling}
-                    style={{
-                      width: '100%',
-                      padding: '12px',
-                      border: '1px solid var(--border-color)',
-                      borderRadius: '8px',
-                      fontSize: '1rem',
-                    }}
+                    className="input-field"
                   />
-                  <p style={{ fontSize: '0.85rem', color: '#666', marginTop: '5px' }}>
+                  <p className="text-xs text-gray-600 mt-1">
                     Number of videos to upload per day. Videos will be scheduled starting from the start date.
                   </p>
                 </div>
 
                 <div>
-                  <label htmlFor="scheduleStartDate" style={{ fontWeight: '500', color: 'var(--secondary-color)', display: 'block', marginBottom: '5px' }}>
-                    Start Date
-                  </label>
+                  <label htmlFor="scheduleStartDate" className="label">Start Date</label>
                   <input
                     type="date"
                     id="scheduleStartDate"
@@ -790,27 +568,14 @@ export default function Dashboard() {
                     onChange={(e: ChangeEvent<HTMLInputElement>) => setScheduleStartDate(e.target.value)}
                     required={enableScheduling}
                     min={new Date().toISOString().split('T')[0]}
-                    style={{
-                      width: '100%',
-                      padding: '12px',
-                      border: '1px solid var(--border-color)',
-                      borderRadius: '8px',
-                      fontSize: '1rem',
-                    }}
+                    className="input-field"
                   />
-                  <p style={{ fontSize: '0.85rem', color: '#666', marginTop: '5px' }}>
+                  <p className="text-xs text-gray-600 mt-1">
                     First day to start uploading videos. Videos will be distributed across days based on &quot;Videos Per Day&quot;.
                   </p>
                 </div>
                 
-                <div style={{
-                  padding: '10px',
-                  background: '#fff3cd',
-                  border: '1px solid #ffc107',
-                  borderRadius: '6px',
-                  fontSize: '0.9rem',
-                  color: '#856404',
-                }}>
+                <div className="p-3 bg-yellow-50 border border-yellow-300 rounded-lg text-sm text-yellow-800">
                   <strong>Note:</strong> When scheduling is enabled, videos are uploaded immediately but scheduled to publish on their assigned dates. All videos will be uploaded as private initially (required for scheduling), then updated to your CSV&apos;s privacyStatus if possible.
                 </div>
               </div>
@@ -820,67 +585,43 @@ export default function Dashboard() {
           <button
             type="submit"
             disabled={csvUploading}
-            style={{
-              background: csvUploading ? '#ccc' : 'var(--primary-color)',
-              color: 'white',
-              border: 'none',
-              borderRadius: '30px',
-              padding: '14px 28px',
-              cursor: csvUploading ? 'not-allowed' : 'pointer',
-              fontSize: '1.1rem',
-              fontWeight: '500',
-            }}
+            className={`btn-primary ${csvUploading ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
             {csvUploading ? 'Uploading Files...' : 'Queue Upload Job'}
           </button>
         </form>
       </div>
 
-      {/* Queue Status Section */}
-      <div style={{
-        background: 'var(--card-background)',
-        borderRadius: '12px',
-        boxShadow: '0 8px 24px var(--shadow-color)',
-        padding: '30px',
-        marginBottom: '40px',
-      }}>
-        <h2 style={{ fontSize: '1.8rem', marginBottom: '20px', color: 'var(--secondary-color)' }}>Upload Queue Status</h2>
+      {/* Queue Status */}
+      <div className="card">
+        <h2 className="text-2xl font-bold mb-5 text-gray-800">Upload Queue Status</h2>
         
         {queue.length === 0 ? (
-          <p style={{ color: '#666' }}>No upload jobs in queue.</p>
+          <p className="text-gray-600">No upload jobs in queue.</p>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+          <div className="flex flex-col gap-4">
             {queue.map((job) => (
               <div
                 key={job.id}
-                style={{
-                  padding: '15px',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: '8px',
-                  background: selectedJobId === job.id ? '#f0f8ff' : 'white',
-                  cursor: 'pointer',
-                }}
+                className={`p-4 border border-gray-300 rounded-lg cursor-pointer transition-colors ${
+                  selectedJobId === job.id ? 'bg-blue-50' : 'bg-white hover:bg-gray-50'
+                }`}
                 onClick={() => {
                   setSelectedJobId(job.id);
                   fetchJobStatus(job.id);
                 }}
               >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div className="flex justify-between items-center">
                   <div>
                     <strong>Job ID:</strong> {job.id}
                     <br />
                     <strong>Status:</strong> 
-                    <span style={{
-                      padding: '4px 8px',
-                      borderRadius: '4px',
-                      marginLeft: '8px',
-                      background: job.status === 'completed' ? '#d4edda' : 
-                                  job.status === 'failed' ? '#f8d7da' : 
-                                  job.status === 'processing' ? '#fff3cd' : '#e2e3e5',
-                      color: job.status === 'completed' ? '#155724' : 
-                             job.status === 'failed' ? '#721c24' : 
-                             job.status === 'processing' ? '#856404' : '#383d41',
-                    }}>
+                    <span className={`px-2 py-1 rounded ml-2 ${
+                      job.status === 'completed' ? 'bg-green-100 text-green-800' : 
+                      job.status === 'failed' ? 'bg-red-100 text-red-800' : 
+                      job.status === 'processing' ? 'bg-yellow-100 text-yellow-800' : 
+                      'bg-gray-100 text-gray-800'
+                    }`}>
                       {job.status.toUpperCase()}
                     </span>
                     <br />
@@ -899,27 +640,19 @@ export default function Dashboard() {
         )}
 
         {selectedJobId && jobStatus && (
-          <div style={{
-            marginTop: '20px',
-            padding: '20px',
-            background: '#f8f9fa',
-            border: '1px solid var(--border-color)',
-            borderRadius: '8px',
-          }}>
-            <h3 style={{ marginBottom: '15px', color: 'var(--secondary-color)' }}>
+          <div className="mt-5 p-5 bg-gray-50 border border-gray-300 rounded-lg">
+            <h3 className="mb-4 text-gray-800 font-semibold">
               Job Progress: {jobStatus.id}
             </h3>
             {jobStatus.progress && jobStatus.progress.length > 0 ? (
-              <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
-                <ul style={{ listStyle: 'none', padding: 0 }}>
+              <div className="max-h-96 overflow-y-auto">
+                <ul className="list-none p-0">
                   {jobStatus.progress.map((item: ProgressItem, idx: number) => (
                     <li
                       key={idx}
-                      style={{
-                        padding: '8px',
-                        borderBottom: idx < jobStatus.progress.length - 1 ? '1px solid #ddd' : 'none',
-                        fontSize: '0.9rem',
-                      }}
+                      className={`py-2 text-sm ${
+                        idx < jobStatus.progress.length - 1 ? 'border-b border-gray-200' : ''
+                      }`}
                     >
                       Video {item.index + 1}: {item.status}
                     </li>
@@ -927,16 +660,15 @@ export default function Dashboard() {
                 </ul>
               </div>
             ) : (
-              <p style={{ color: '#666' }}>No progress data available yet.</p>
+              <p className="text-gray-600">No progress data available yet.</p>
             )}
           </div>
         )}
       </div>
 
-      <footer style={{ textAlign: 'center', padding: '20px 0', color: '#777' }}>
-        &copy; 2025 ZonDiscounts. <Link href="/privacy">Privacy</Link> • <Link href="/terms">Terms</Link>
+      <footer className="text-center py-5 text-gray-500">
+        &copy; 2025 ZonDiscounts. <Link href="/privacy" className="text-red-600 hover:underline">Privacy</Link> • <Link href="/terms" className="text-red-600 hover:underline">Terms</Link>
       </footer>
     </div>
   );
 }
-

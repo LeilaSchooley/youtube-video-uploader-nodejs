@@ -1,32 +1,32 @@
-:root {
-  --primary-color: #ff0000;
-  --secondary-color: #282828;
-  --text-color: #333333;
-  --background-color: #f9f9f9;
-  --card-background: #ffffff;
-  --shadow-color: rgba(0, 0, 0, 0.1);
-  --border-color: #e5e5e5;
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-gray-50 text-gray-800;
+  }
 }
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-
-body {
-  font-family: "Roboto", Arial, sans-serif;
-  background-color: var(--background-color);
-  color: var(--text-color);
-  line-height: 1.6;
-}
-
-a {
-  color: var(--primary-color);
-  text-decoration: none;
-}
-
-a:hover {
-  text-decoration: underline;
+@layer components {
+  .btn-primary {
+    @apply bg-red-600 hover:bg-red-700 text-white font-medium py-3 px-6 rounded-full transition-colors;
+  }
+  
+  .btn-secondary {
+    @apply bg-gray-600 hover:bg-gray-700 text-white font-medium py-2.5 px-4 rounded-full transition-colors;
+  }
+  
+  .card {
+    @apply bg-white rounded-xl shadow-lg p-8 mb-10;
+  }
+  
+  .input-field {
+    @apply w-full px-4 py-3 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent;
+  }
+  
+  .label {
+    @apply font-medium text-gray-700 mb-2 block;
+  }
 }
 
