@@ -4,8 +4,8 @@
 interface SessionData {
   authenticated: boolean;
   tokens?: {
-    access_token?: string;
-    refresh_token?: string;
+    access_token?: string | null;
+    refresh_token?: string | null;
     [key: string]: any;
   };
 }

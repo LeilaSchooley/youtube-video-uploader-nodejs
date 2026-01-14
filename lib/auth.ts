@@ -15,7 +15,14 @@ interface Credentials {
 let credentials: Credentials | null = null;
 try {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  credentials = require("../src/creds.json") as Credentials;
+  const fs = require("fs");
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const path = require("path");
+  const credsPath = path.join(process.cwd(), "src", "creds.json");
+  if (fs.existsSync(credsPath)) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    credentials = require(credsPath) as Credentials;
+  }
 } catch (e) {
   // creds.json not present — falling back to environment variables
 }

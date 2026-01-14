@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
 
     setSession(sessionId, {
       authenticated: true,
-      tokens: tokens,
+      tokens: tokens as { access_token?: string | null; refresh_token?: string | null; [key: string]: any },
     });
 
     return NextResponse.redirect(new URL("/dashboard", request.url));
