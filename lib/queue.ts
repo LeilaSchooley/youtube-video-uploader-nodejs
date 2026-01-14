@@ -87,7 +87,7 @@ export function updateQueueItem(id: string, updates: Partial<QueueItem>): void {
 
 export function getNextPendingItem(): QueueItem | undefined {
   const queue = readQueue();
-  return queue.find(item => item.status === "pending" && item.status !== "paused");
+  return queue.find(item => item.status === "pending");
 }
 
 export function pauseJob(id: string): void {
