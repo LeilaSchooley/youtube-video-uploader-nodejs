@@ -255,8 +255,8 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Statistics Dashboard */}
-      {queue.length > 0 && (() => {
+      {/* Statistics Dashboard - Always Visible */}
+      {(() => {
         // Get all progress items from all jobs
         const allProgress = queue.flatMap(job => job.progress || []);
         
@@ -295,17 +295,74 @@ export default function Dashboard() {
         
         const remaining = totalVideos > 0 ? totalVideos - completed - failed : 0;
         
+        // Show empty state if no jobs
+        if (queue.length === 0) {
+          return (
+            <div style={{
+              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+              borderRadius: '16px',
+              boxShadow: '0 12px 40px rgba(102, 126, 234, 0.3)',
+              padding: '50px 30px',
+              marginBottom: '40px',
+              textAlign: 'center',
+              color: 'white',
+            }}>
+              <div style={{ fontSize: '3rem', marginBottom: '20px' }}>📊</div>
+              <h2 style={{ fontSize: '2.2rem', marginBottom: '15px', fontWeight: '700' }}>
+                Welcome to Your Upload Dashboard
+              </h2>
+              <p style={{ fontSize: '1.1rem', opacity: 0.95, marginBottom: '30px', maxWidth: '600px', margin: '0 auto 30px' }}>
+                Start uploading videos to see real-time statistics, progress tracking, and detailed analytics.
+              </p>
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+                gap: '20px',
+                maxWidth: '600px',
+                margin: '0 auto',
+                marginTop: '30px',
+              }}>
+                <div style={{ padding: '20px', background: 'rgba(255,255,255,0.2)', borderRadius: '12px', backdropFilter: 'blur(10px)' }}>
+                  <div style={{ fontSize: '2.5rem', fontWeight: '700' }}>0</div>
+                  <div style={{ fontSize: '0.9rem', opacity: 0.9, marginTop: '5px' }}>Total Videos</div>
+                </div>
+                <div style={{ padding: '20px', background: 'rgba(255,255,255,0.2)', borderRadius: '12px', backdropFilter: 'blur(10px)' }}>
+                  <div style={{ fontSize: '2.5rem', fontWeight: '700' }}>0</div>
+                  <div style={{ fontSize: '0.9rem', opacity: 0.9, marginTop: '5px' }}>Completed</div>
+                </div>
+                <div style={{ padding: '20px', background: 'rgba(255,255,255,0.2)', borderRadius: '12px', backdropFilter: 'blur(10px)' }}>
+                  <div style={{ fontSize: '2.5rem', fontWeight: '700' }}>0</div>
+                  <div style={{ fontSize: '0.9rem', opacity: 0.9, marginTop: '5px' }}>Jobs</div>
+                </div>
+              </div>
+            </div>
+          );
+        }
+        
         return (
           <div style={{
             background: 'var(--card-background)',
-            borderRadius: '12px',
-            boxShadow: '0 8px 24px var(--shadow-color)',
-            padding: '30px',
+            borderRadius: '16px',
+            boxShadow: '0 12px 40px rgba(0,0,0,0.1)',
+            padding: '40px',
             marginBottom: '40px',
+            border: '1px solid rgba(0,0,0,0.05)',
           }}>
-            <h2 style={{ fontSize: '1.8rem', marginBottom: '25px', color: 'var(--secondary-color)' }}>
-              Upload Statistics
-            </h2>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' }}>
+              <h2 style={{ fontSize: '2.2rem', fontWeight: '700', color: 'var(--secondary-color)', margin: 0 }}>
+                📊 Upload Statistics
+              </h2>
+              <div style={{
+                padding: '8px 16px',
+                background: processing > 0 ? '#fff3cd' : '#d4edda',
+                borderRadius: '20px',
+                fontSize: '0.9rem',
+                fontWeight: '600',
+                color: processing > 0 ? '#856404' : '#155724',
+              }}>
+                {processing > 0 ? '⚡ Processing' : '✓ Ready'}
+              </div>
+            </div>
             
             {/* Overall Progress Bar */}
             <div style={{ marginBottom: '30px' }}>
@@ -487,6 +544,7 @@ export default function Dashboard() {
         );
       })()}
 
+      {/* Profile Section - Moved below statistics */}
       <div style={{
         background: 'var(--card-background)',
         borderRadius: '12px',
