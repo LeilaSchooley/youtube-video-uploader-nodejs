@@ -20,8 +20,8 @@ try {
   const path = require("path");
   const credsPath = path.join(process.cwd(), "src", "creds.json");
   if (fs.existsSync(credsPath)) {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    credentials = require(credsPath) as Credentials;
+    const credsContent = fs.readFileSync(credsPath, "utf8");
+    credentials = JSON.parse(credsContent) as Credentials;
   }
 } catch (e) {
   // creds.json not present — falling back to environment variables

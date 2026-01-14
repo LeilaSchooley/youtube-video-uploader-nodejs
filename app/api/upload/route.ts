@@ -84,8 +84,7 @@ export async function POST(request: NextRequest) {
     });
 
     const result = await youtube.videos.insert({
-      auth: oAuthClient,
-      part: "snippet,status",
+      part: ["snippet", "status"],
       requestBody,
       media: {
         body: videoStream,

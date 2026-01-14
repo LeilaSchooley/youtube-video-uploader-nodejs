@@ -119,13 +119,13 @@ export async function POST(request: NextRequest) {
 
       // Validate required fields
       if (!youtube_title || !youtube_description) {
-        progress[i] = { status: "Missing required fields (youtube_title or youtube_description)" };
+        progress[i] = { index: i, status: "Missing required fields (youtube_title or youtube_description)" };
         continue;
       }
 
       // Validate privacy status
       if (!["public", "private", "unlisted"].includes(privacyStatus || "")) {
-        progress[i] = { status: "Invalid privacy status" };
+        progress[i] = { index: i, status: "Invalid privacy status" };
         continue;
       }
 
@@ -141,7 +141,7 @@ export async function POST(request: NextRequest) {
         // Use scheduleTime from CSV if provided
         publishDate = parseDate(scheduleTime);
         if (!publishDate || publishDate < new Date()) {
-          progress[i] = { status: "Invalid schedule time" };
+          progress[i] = { index: i, status: "Invalid schedule time" };
           continue;
         }
       }
@@ -170,14 +170,13 @@ export async function POST(request: NextRequest) {
       try {
         // Upload video
         if (!video || !fs.existsSync(video)) {
-          progress[i] = { status: "Video file not found" };
+          progress[i] = { index: i, status: "Video file not found" };
           continue;
         }
 
         const videoStream = fs.createReadStream(video);
         const resultVideoUpload = await youtube.videos.insert({
-          auth: oAuthClient,
-          part: "snippet,status",
+          part: ["snippet", "status"],
           requestBody,
           media: { body: videoStream },
         });
@@ -200,8 +199,7 @@ export async function POST(request: NextRequest) {
         if (enableScheduling && privacyStatus !== "private" && videoId) {
           try {
             await youtube.videos.update({
-              auth: oAuthClient,
-              part: "status",
+              part: ["status"],
               requestBody: {
                 id: videoId,
                 status: {
