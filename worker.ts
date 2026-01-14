@@ -22,7 +22,7 @@ interface CSVRow {
   youtube_title?: string;
   youtube_description?: string;
   thumbnail_path?: string;
-  video?: string;
+  path?: string;
   scheduleTime?: string;
   privacyStatus?: string;
 }
@@ -83,7 +83,7 @@ async function processQueueItem(item: QueueItem): Promise<void> {
         youtube_title,
         youtube_description,
         thumbnail_path,
-        video,
+        path,
         scheduleTime,
         privacyStatus,
       } = row;
@@ -142,7 +142,7 @@ async function processQueueItem(item: QueueItem): Promise<void> {
 
       try {
         // Check if video file exists
-        if (!video || !fileExists(video)) {
+        if (!path || !fileExists(path)) {
           progress[i] = { index: i, status: "Video file not found" };
           updateProgress(item.id, progress);
           continue;
@@ -151,7 +151,7 @@ async function processQueueItem(item: QueueItem): Promise<void> {
         progress[i] = { index: i, status: "Uploading..." };
         updateProgress(item.id, progress);
 
-        const videoStream = getFileStream(video);
+        const videoStream = getFileStream(path);
         const resultVideoUpload = await youtube.videos.insert({
           part: ["snippet", "status"],
           requestBody,

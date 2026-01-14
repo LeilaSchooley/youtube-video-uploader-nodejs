@@ -14,7 +14,7 @@ interface CSVRow {
   youtube_title?: string;
   youtube_description?: string;
   thumbnail_path?: string;
-  video?: string;
+  path?: string;
   scheduleTime?: string;
   privacyStatus?: string;
 }
@@ -112,7 +112,7 @@ export async function POST(request: NextRequest) {
         youtube_title,
         youtube_description,
         thumbnail_path,
-        video,
+        path,
         scheduleTime,
         privacyStatus,
       } = csvData[i];
@@ -172,12 +172,12 @@ export async function POST(request: NextRequest) {
 
       try {
         // Upload video
-        if (!video || !fs.existsSync(video)) {
+        if (!path || !fs.existsSync(path)) {
           progress[i] = { index: i, status: "Video file not found" };
           continue;
         }
 
-        const videoStream = fs.createReadStream(video);
+        const videoStream = fs.createReadStream(path);
         const resultVideoUpload = await youtube.videos.insert({
           part: ["snippet", "status"],
           requestBody,

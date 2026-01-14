@@ -14,7 +14,7 @@ interface CSVRow {
   youtube_title?: string;
   youtube_description?: string;
   thumbnail_path?: string;
-  video?: string;
+  path?: string;
   scheduleTime?: string;
   privacyStatus?: string;
 }
@@ -43,7 +43,6 @@ export async function POST(request: NextRequest) {
     const csvFile = formData.get("csvFile") as File | null;
     const enableScheduling = formData.get("enableScheduling") === "true";
     const videosPerDayStr = formData.get("videosPerDay") as string | null;
-    const scheduleStartDate = formData.get("scheduleStartDate") as string | null;
     const videosPerDay = enableScheduling && videosPerDayStr ? parseInt(videosPerDayStr) : null;
 
     if (!csvFile) {
@@ -53,12 +52,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (enableScheduling && (!videosPerDay || !scheduleStartDate)) {
+    if (enableScheduling && !videosPerDay) {
       return NextResponse.json(
-        { error: "Videos per day and start date are required when scheduling is enabled" },
+        { error: "Videos per day is required when scheduling is enabled" },
         { status: 400 }
       );
     }
+
+    // Automatically use today's date as start date when scheduling is enabled
+    const scheduleStartDate = enableScheduling ? new Date().toISOString() : null;
 
     // Generate job ID
     const jobId = `job-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
@@ -90,11 +92,11 @@ export async function POST(request: NextRequest) {
       const updatedRow = { ...row };
 
       // Copy video file if it exists
-      if (row.video && fs.existsSync(row.video)) {
-        const videoFilename = path.basename(row.video);
+      if (row.path && fs.existsSync(row.path)) {
+        const videoFilename = path.basename(row.path);
         const videoDest = path.join(uploadDir, "videos", videoFilename);
-        fs.copyFileSync(row.video, videoDest);
-        updatedRow.video = videoDest;
+        fs.copyFileSync(row.path, videoDest);
+        updatedRow.path = videoDest;
       }
 
       // Copy thumbnail file if it exists
@@ -109,6 +111,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Write updated CSV with server paths
+    // Note: CSV fields with newlines must be quoted, and quotes must be escaped
     if (updatedRows.length > 0) {
       const headers = Object.keys(updatedRows[0]);
       const csvContent = [
@@ -116,11 +119,14 @@ export async function POST(request: NextRequest) {
         ...updatedRows.map(row => 
           headers.map(header => {
             const value = row[header as keyof CSVRow] || "";
-            return `"${String(value).replace(/"/g, '""')}"`;
+            // Escape quotes by doubling them (CSV standard)
+            // Newlines within quoted fields are preserved
+            const escaped = String(value).replace(/"/g, '""');
+            return `"${escaped}"`;
           }).join(",")
         )
       ].join("\n");
-      fs.writeFileSync(csvPath, csvContent);
+      fs.writeFileSync(csvPath, csvContent, 'utf8');
     }
 
     // Add to queue

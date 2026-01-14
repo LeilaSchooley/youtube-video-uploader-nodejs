@@ -30,7 +30,6 @@ export default function Dashboard() {
   const [progress, setProgress] = useState<ProgressItem[]>([]);
   const [showProgress, setShowProgress] = useState<boolean>(false);
   const [videosPerDay, setVideosPerDay] = useState<string>('');
-  const [scheduleStartDate, setScheduleStartDate] = useState<string>('');
   const [enableScheduling, setEnableScheduling] = useState<boolean>(false);
   const [queue, setQueue] = useState<any[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
@@ -132,13 +131,12 @@ export default function Dashboard() {
     const formData = new FormData(e.currentTarget);
     
     if (enableScheduling) {
-      if (!videosPerDay || !scheduleStartDate) {
-        setMessage({ type: 'error', text: 'Please fill in videos per day and start date when scheduling is enabled.' });
+      if (!videosPerDay) {
+        setMessage({ type: 'error', text: 'Please fill in videos per day when scheduling is enabled.' });
         setCsvUploading(false);
         return;
       }
       formData.append('videosPerDay', videosPerDay);
-      formData.append('scheduleStartDate', scheduleStartDate);
       formData.append('enableScheduling', 'true');
     }
 
@@ -154,7 +152,6 @@ export default function Dashboard() {
         e.currentTarget.reset();
         setEnableScheduling(false);
         setVideosPerDay('');
-        setScheduleStartDate('');
         fetchQueue();
         setSelectedJobId(data.jobId);
         fetchJobStatus(data.jobId);
@@ -507,14 +504,27 @@ export default function Dashboard() {
             <li><strong>youtube_title:</strong> The title of your video (required)</li>
             <li><strong>youtube_description:</strong> A detailed description of your video (required)</li>
             <li><strong>thumbnail_path:</strong> File path to the video thumbnail image (optional)</li>
-            <li><strong>video:</strong> File path to the video file on your server (required)</li>
+            <li><strong>path:</strong> File path to the video file on your server (required)</li>
             <li><strong>scheduleTime:</strong> The date and time to publish the video with. (yyyy-MM-dd HH:mm) (optional)</li>
             <li><strong>privacyStatus:</strong> Must be &apos;public&apos;, &apos;private&apos;, or &apos;unlisted&apos; (defaults to &apos;public&apos;)</li>
           </ul>
-          <p className="text-gray-600 text-sm">
-            <strong>Important:</strong> The <code className="bg-gray-100 px-1 rounded">video</code> and <code className="bg-gray-100 px-1 rounded">thumbnail_path</code> columns should contain 
+          <p className="text-gray-600 text-sm mb-2">
+            <strong>Important:</strong> The <code className="bg-gray-100 px-1 rounded">path</code> and <code className="bg-gray-100 px-1 rounded">thumbnail_path</code> columns should contain 
             absolute file paths on your server. Files will be copied to server storage when you submit the form.
           </p>
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-900">
+            <strong>📝 Description Formatting:</strong> Your <code className="bg-blue-100 px-1 rounded">youtube_description</code> can include:
+            <ul className="list-disc list-inside mt-1 ml-2 space-y-1">
+              <li>Multi-line text with line breaks (use <code className="bg-blue-100 px-1 rounded">\n</code> or actual line breaks in CSV)</li>
+              <li>Emojis and special characters (🎯, 💰, 🔗, etc.)</li>
+              <li>Links (full URLs will be clickable on YouTube)</li>
+              <li>Hashtags (place at the end)</li>
+            </ul>
+            <p className="mt-2 text-xs">
+              <strong>CSV Tip:</strong> If your description contains line breaks, make sure the entire field is properly quoted in your CSV file. 
+              The system will preserve all formatting when uploading to YouTube.
+            </p>
+          </div>
         </div>
         <form onSubmit={handleCsvUpload} className="flex flex-col gap-5">
           <label htmlFor="csvFile" className="label">Upload CSV</label>
@@ -555,28 +565,12 @@ export default function Dashboard() {
                     className="input-field"
                   />
                   <p className="text-xs text-gray-600 mt-1">
-                    Number of videos to upload per day. Videos will be scheduled starting from the start date.
-                  </p>
-                </div>
-
-                <div>
-                  <label htmlFor="scheduleStartDate" className="label">Start Date</label>
-                  <input
-                    type="date"
-                    id="scheduleStartDate"
-                    value={scheduleStartDate}
-                    onChange={(e: ChangeEvent<HTMLInputElement>) => setScheduleStartDate(e.target.value)}
-                    required={enableScheduling}
-                    min={new Date().toISOString().split('T')[0]}
-                    className="input-field"
-                  />
-                  <p className="text-xs text-gray-600 mt-1">
-                    First day to start uploading videos. Videos will be distributed across days based on &quot;Videos Per Day&quot;.
+                    Number of videos to upload per day. Uploads will start automatically from today and continue daily.
                   </p>
                 </div>
                 
                 <div className="p-3 bg-yellow-50 border border-yellow-300 rounded-lg text-sm text-yellow-800">
-                  <strong>Note:</strong> When scheduling is enabled, videos are uploaded immediately but scheduled to publish on their assigned dates. All videos will be uploaded as private initially (required for scheduling), then updated to your CSV&apos;s privacyStatus if possible.
+                  <strong>Note:</strong> When scheduling is enabled, uploads will start automatically from today. Videos are uploaded immediately but scheduled to publish on their assigned dates. All videos will be uploaded as private initially (required for scheduling), then updated to your CSV&apos;s privacyStatus if possible.
                 </div>
               </div>
             )}
