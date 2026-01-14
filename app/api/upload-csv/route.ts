@@ -125,8 +125,9 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
-      // Validate privacy status
-      if (!["public", "private", "unlisted"].includes(privacyStatus || "")) {
+      // Validate privacy status, default to "public" if not specified
+      const finalPrivacyStatus = privacyStatus || "public";
+      if (!["public", "private", "unlisted"].includes(finalPrivacyStatus)) {
         progress[i] = { index: i, status: "Invalid privacy status" };
         continue;
       }
@@ -139,7 +140,7 @@ export async function POST(request: NextRequest) {
         publishDate = scheduledDates[i];
         // When scheduling is enabled, videos must be uploaded as private
         // (YouTube's publishAt only works for private videos)
-      } else if (privacyStatus === "private" && scheduleTime) {
+      } else if (finalPrivacyStatus === "private" && scheduleTime) {
         // Use scheduleTime from CSV if provided
         publishDate = parseDate(scheduleTime);
         if (!publishDate || publishDate < new Date()) {
@@ -149,9 +150,9 @@ export async function POST(request: NextRequest) {
       }
 
       // YouTube upload
-      // If scheduling is enabled, upload as private with publishAt
-      // Otherwise, use the privacyStatus from CSV
-      const finalPrivacyStatus = enableScheduling ? "private" : (privacyStatus || "private");
+      // YouTube requires publishAt to be used with private videos
+      // So we upload as private with publishAt, then update to desired privacy status
+      const uploadPrivacyStatus = (enableScheduling || publishDate) ? "private" : finalPrivacyStatus;
       
       const requestBody: {
         snippet: { title: string; description: string };
@@ -161,7 +162,7 @@ export async function POST(request: NextRequest) {
           title: youtube_title, 
           description: youtube_description 
         },
-        status: { privacyStatus: finalPrivacyStatus },
+        status: { privacyStatus: uploadPrivacyStatus },
       };
 
       if (publishDate) {
@@ -196,24 +197,30 @@ export async function POST(request: NextRequest) {
           });
         }
         
-        // If scheduling was enabled and original privacyStatus was public/unlisted,
-        // update the privacy status after upload
-        if (enableScheduling && privacyStatus !== "private" && videoId) {
+        // If we uploaded as private (for scheduling) but want public/unlisted,
+        // try to update the privacy status. Note: YouTube may not allow this if publishAt is set.
+        // If it fails, the video will be private when published and can be changed manually.
+        if (uploadPrivacyStatus === "private" && finalPrivacyStatus !== "private" && videoId) {
           try {
             await youtube.videos.update({
               part: ["status"],
               requestBody: {
                 id: videoId,
                 status: {
-                  privacyStatus: privacyStatus,
+                  privacyStatus: finalPrivacyStatus,
                   publishAt: requestBody.status.publishAt, // Keep the publish date
                 },
               },
             });
-            progress[i].status = `Uploaded & scheduled as ${privacyStatus} for ${publishDate ? publishDate.toLocaleDateString() : 'N/A'}`;
+            progress[i].status = publishDate 
+              ? `Uploaded & scheduled as ${finalPrivacyStatus} for ${publishDate.toLocaleDateString()}` 
+              : `Uploaded as ${finalPrivacyStatus}`;
           } catch (updateError: any) {
             console.error(`Error updating privacy status for video ${i + 1}:`, updateError?.message);
-            progress[i].status = `Uploaded as private (scheduled), but failed to set to ${privacyStatus}. You can change it manually.`;
+            // YouTube doesn't allow changing privacy when publishAt is set, so it will be private when published
+            progress[i].status = publishDate 
+              ? `Uploaded as private (scheduled for ${publishDate.toLocaleDateString()}). Will be private when published - change manually to ${finalPrivacyStatus} after publish date.`
+              : `Uploaded as private, but failed to set to ${finalPrivacyStatus}. You can change it manually.`;
           }
         } else {
           progress[i].status = publishDate 

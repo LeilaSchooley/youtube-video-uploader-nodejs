@@ -37,3 +37,7 @@ next-env.d.ts
 
 # credentials
 src/creds.json
+
+# uploads and queue data
+/uploads
+/data

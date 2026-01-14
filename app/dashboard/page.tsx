@@ -32,10 +32,21 @@ export default function Dashboard() {
   const [videosPerDay, setVideosPerDay] = useState<string>('');
   const [scheduleStartDate, setScheduleStartDate] = useState<string>('');
   const [enableScheduling, setEnableScheduling] = useState<boolean>(false);
+  const [queue, setQueue] = useState<any[]>([]);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [jobStatus, setJobStatus] = useState<any>(null);
 
   useEffect(() => {
     fetchUser();
-  }, []);
+    fetchQueue();
+    const interval = setInterval(() => {
+      fetchQueue();
+      if (selectedJobId) {
+        fetchJobStatus(selectedJobId);
+      }
+    }, 5000); // Poll every 5 seconds
+    return () => clearInterval(interval);
+  }, [selectedJobId]);
 
   const fetchUser = async () => {
     try {
@@ -51,6 +62,30 @@ export default function Dashboard() {
       router.push('/');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchQueue = async () => {
+    try {
+      const res = await fetch('/api/upload-queue');
+      const data = await res.json();
+      if (res.ok && data.queue) {
+        setQueue(data.queue);
+      }
+    } catch (error) {
+      console.error('Error fetching queue:', error);
+    }
+  };
+
+  const fetchJobStatus = async (jobId: string) => {
+    try {
+      const res = await fetch(`/api/queue-status?jobId=${jobId}`);
+      const data = await res.json();
+      if (res.ok && data.job) {
+        setJobStatus(data.job);
+      }
+    } catch (error) {
+      console.error('Error fetching job status:', error);
     }
   };
 
@@ -91,7 +126,7 @@ export default function Dashboard() {
     e.preventDefault();
     setCsvUploading(true);
     setMessage({ type: null, text: null });
-    setShowProgress(true);
+    setShowProgress(false);
     setProgress([]);
 
     const formData = new FormData(e.currentTarget);
@@ -109,20 +144,26 @@ export default function Dashboard() {
     }
 
     try {
-      const res = await fetch('/api/upload-csv', {
+      const res = await fetch('/api/upload-queue', {
         method: 'POST',
         body: formData,
       });
 
       const data = await res.json();
-      if (data.status === 'success') {
-        setProgress(data.progress);
-        setMessage({ type: 'success', text: 'CSV upload completed!' });
+      if (res.ok && data.success) {
+        setMessage({ type: 'success', text: `Files uploaded and queued! Job ID: ${data.jobId}. The worker will process ${data.totalVideos} videos.` });
+        e.currentTarget.reset();
+        setEnableScheduling(false);
+        setVideosPerDay('');
+        setScheduleStartDate('');
+        fetchQueue();
+        setSelectedJobId(data.jobId);
+        fetchJobStatus(data.jobId);
       } else {
-        setMessage({ type: 'error', text: data.message || 'Error uploading CSV' });
+        setMessage({ type: 'error', text: data.error || 'Error uploading files' });
       }
     } catch (error) {
-      setMessage({ type: 'error', text: 'An error occurred while uploading the CSV file.' });
+      setMessage({ type: 'error', text: 'An error occurred while uploading files.' });
     } finally {
       setCsvUploading(false);
     }
@@ -361,7 +402,14 @@ export default function Dashboard() {
         padding: '30px',
         marginBottom: '40px',
       }}>
-        <h2 style={{ fontSize: '1.8rem', marginBottom: '20px', color: 'var(--secondary-color)' }}>Batch Upload from CSV</h2>
+        <h2 style={{ fontSize: '1.8rem', marginBottom: '20px', color: 'var(--secondary-color)' }}>Batch Upload from CSV (Background Processing)</h2>
+        <div style={{ marginBottom: '20px', padding: '15px', background: '#e7f3ff', borderRadius: '8px', border: '1px solid #b3d9ff' }}>
+          <p style={{ margin: 0, fontSize: '0.95rem', color: '#004085' }}>
+            <strong>New Background Processing System:</strong> Upload your CSV and video files to the server. 
+            The system will process them in the background, uploading X videos per day automatically. 
+            You can close your browser and check status later.
+          </p>
+        </div>
         <div style={{ marginBottom: '10px', fontSize: '13px' }}>
           <h3>CSV File Instructions</h3>
           <p>Your CSV file should include the following columns:</p>
@@ -369,14 +417,13 @@ export default function Dashboard() {
             <li><strong>youtube_title:</strong> The title of your video (required)</li>
             <li><strong>youtube_description:</strong> A detailed description of your video (required)</li>
             <li><strong>thumbnail_path:</strong> File path to the video thumbnail image (optional)</li>
-            <li><strong>video:</strong> File path to the video file (required)</li>
+            <li><strong>video:</strong> File path to the video file on your server (required)</li>
             <li><strong>scheduleTime:</strong> The date and time to publish the video with. (yyyy-MM-dd HH:mm) (optional)</li>
-            <li><strong>privacyStatus:</strong> Must be &apos;public&apos;, &apos;private&apos;, or &apos;unlisted&apos; (required)</li>
+            <li><strong>privacyStatus:</strong> Must be &apos;public&apos;, &apos;private&apos;, or &apos;unlisted&apos; (defaults to &apos;public&apos;)</li>
           </ul>
           <p style={{ color: '#555', fontSize: '0.95rem' }}>
-            The uploader will validate the <code>privacyStatus</code> values
-            server-side and will reject rows with invalid values. Also ensure
-            scheduled publish times (for private) are in the future.
+            <strong>Important:</strong> The <code>video</code> and <code>thumbnail_path</code> columns should contain 
+            absolute file paths on your server. Files will be copied to server storage when you submit the form.
           </p>
         </div>
         <form onSubmit={handleCsvUpload} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -493,33 +540,104 @@ export default function Dashboard() {
               fontWeight: '500',
             }}
           >
-            {csvUploading ? 'Uploading...' : 'Upload Videos from CSV'}
+            {csvUploading ? 'Uploading Files...' : 'Queue Upload Job'}
           </button>
         </form>
+      </div>
 
-        {showProgress && progress.length > 0 && (
+      {/* Queue Status Section */}
+      <div style={{
+        background: 'var(--card-background)',
+        borderRadius: '12px',
+        boxShadow: '0 8px 24px var(--shadow-color)',
+        padding: '30px',
+        marginBottom: '40px',
+      }}>
+        <h2 style={{ fontSize: '1.8rem', marginBottom: '20px', color: 'var(--secondary-color)' }}>Upload Queue Status</h2>
+        
+        {queue.length === 0 ? (
+          <p style={{ color: '#666' }}>No upload jobs in queue.</p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+            {queue.map((job) => (
+              <div
+                key={job.id}
+                style={{
+                  padding: '15px',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '8px',
+                  background: selectedJobId === job.id ? '#f0f8ff' : 'white',
+                  cursor: 'pointer',
+                }}
+                onClick={() => {
+                  setSelectedJobId(job.id);
+                  fetchJobStatus(job.id);
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <strong>Job ID:</strong> {job.id}
+                    <br />
+                    <strong>Status:</strong> 
+                    <span style={{
+                      padding: '4px 8px',
+                      borderRadius: '4px',
+                      marginLeft: '8px',
+                      background: job.status === 'completed' ? '#d4edda' : 
+                                  job.status === 'failed' ? '#f8d7da' : 
+                                  job.status === 'processing' ? '#fff3cd' : '#e2e3e5',
+                      color: job.status === 'completed' ? '#155724' : 
+                             job.status === 'failed' ? '#721c24' : 
+                             job.status === 'processing' ? '#856404' : '#383d41',
+                    }}>
+                      {job.status.toUpperCase()}
+                    </span>
+                    <br />
+                    <strong>Created:</strong> {new Date(job.createdAt).toLocaleString()}
+                    {job.videosPerDay > 0 && (
+                      <>
+                        <br />
+                        <strong>Schedule:</strong> {job.videosPerDay} videos/day starting {new Date(job.startDate).toLocaleDateString()}
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {selectedJobId && jobStatus && (
           <div style={{
-            background: '#f1f1f1',
+            marginTop: '20px',
+            padding: '20px',
+            background: '#f8f9fa',
             border: '1px solid var(--border-color)',
             borderRadius: '8px',
-            padding: '20px',
-            marginTop: '20px',
           }}>
-            <h3 style={{ marginBottom: '15px', color: 'var(--secondary-color)' }}>Upload Progress</h3>
-            <ul style={{ listStyle: 'none' }}>
-              {progress.map((item, idx) => (
-                <li
-                  key={idx}
-                  style={{
-                    padding: '10px',
-                    borderBottom: idx < progress.length - 1 ? '1px solid var(--border-color)' : 'none',
-                    fontSize: '1rem',
-                  }}
-                >
-                  Video {item.index + 1}: {item.status}
-                </li>
-              ))}
-            </ul>
+            <h3 style={{ marginBottom: '15px', color: 'var(--secondary-color)' }}>
+              Job Progress: {jobStatus.id}
+            </h3>
+            {jobStatus.progress && jobStatus.progress.length > 0 ? (
+              <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                <ul style={{ listStyle: 'none', padding: 0 }}>
+                  {jobStatus.progress.map((item: ProgressItem, idx: number) => (
+                    <li
+                      key={idx}
+                      style={{
+                        padding: '8px',
+                        borderBottom: idx < jobStatus.progress.length - 1 ? '1px solid #ddd' : 'none',
+                        fontSize: '0.9rem',
+                      }}
+                    >
+                      Video {item.index + 1}: {item.status}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <p style={{ color: '#666' }}>No progress data available yet.</p>
+            )}
           </div>
         )}
       </div>
