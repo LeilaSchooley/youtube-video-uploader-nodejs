@@ -3,6 +3,8 @@ import { getSession } from "@/lib/session";
 import { cookies } from "next/headers";
 import { addToQueue, getQueue } from "@/lib/queue";
 import { getUploadDir, saveFile } from "@/lib/storage";
+import { getOAuthClient } from "@/lib/auth";
+import { google } from "googleapis";
 import { Readable } from "stream";
 import csvParser from "csv-parser";
 import fs from "fs";
@@ -37,6 +39,21 @@ export async function POST(request: NextRequest) {
         { error: "Not authenticated" },
         { status: 401 }
       );
+    }
+
+    // Get userId from session (or fetch if not stored)
+    let userId = session.userId;
+    if (!userId) {
+      const oAuthClient = getOAuthClient();
+      oAuthClient.setCredentials(session.tokens);
+      const oauth2 = google.oauth2({
+        version: "v2",
+        auth: oAuthClient,
+      });
+      const userInfo = await oauth2.userinfo.get();
+      userId = userInfo.data.email || userInfo.data.id;
+      // Update session with userId
+      session.userId = userId;
     }
 
     const formData = await request.formData();
@@ -162,6 +179,7 @@ export async function POST(request: NextRequest) {
     // Add to queue
     const queueId = addToQueue({
       sessionId,
+      userId: userId,
       csvPath,
       uploadDir,
       videosPerDay: videosPerDay || 0,
@@ -211,8 +229,27 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    // Get userId from session (or fetch if not stored)
+    let userId = session.userId;
+    if (!userId) {
+      const oAuthClient = getOAuthClient();
+      oAuthClient.setCredentials(session.tokens || {});
+      const oauth2 = google.oauth2({
+        version: "v2",
+        auth: oAuthClient,
+      });
+      const userInfo = await oauth2.userinfo.get();
+      userId = userInfo.data.email || userInfo.data.id || undefined;
+      // Update session with userId
+      session.userId = userId;
+    }
+
     const queue = getQueue();
-    const userQueue = queue.filter(item => item.sessionId === sessionId);
+    // Filter by userId (persistent) or fallback to sessionId (backward compatibility)
+    const userQueue = queue.filter(item => 
+      (item.userId && item.userId === userId) || 
+      (!item.userId && item.sessionId === sessionId)
+    );
 
     return NextResponse.json({
       queue: userQueue,

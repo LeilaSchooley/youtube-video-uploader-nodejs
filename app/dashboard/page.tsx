@@ -40,6 +40,7 @@ export default function Dashboard() {
   const [nextUploadTime, setNextUploadTime] = useState<Date | null>(null);
   const [timeUntilNext, setTimeUntilNext] = useState<string>('');
   const [darkMode, setDarkMode] = useState<boolean>(false);
+  const [selectedVideoFile, setSelectedVideoFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const csvFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -228,6 +229,7 @@ export default function Dashboard() {
     e.preventDefault();
     setUploading(true);
     setMessage({ type: null, text: null });
+    setSelectedVideoFile(null); // Reset file selection after upload starts
 
     const formData = new FormData(e.currentTarget);
     const privacy = formData.get('privacyStatus') as string;
@@ -257,6 +259,11 @@ export default function Dashboard() {
       setMessage({ type: 'error', text: 'An error occurred while uploading the video.' });
     } finally {
       setUploading(false);
+      // Reset file input after upload completes
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+        setSelectedVideoFile(null);
+      }
     }
   };
 
@@ -692,8 +699,25 @@ export default function Dashboard() {
 
           <label htmlFor="video" className="label">Choose File</label>
           <div 
-            className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center cursor-pointer hover:border-red-500 transition-colors"
+            className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-all ${
+              selectedVideoFile 
+                ? 'border-green-500 bg-green-50 dark:bg-green-900/20' 
+                : 'border-gray-300 hover:border-red-500'
+            }`}
             onClick={() => fileInputRef.current?.click()}
+            onDrop={(e) => {
+              e.preventDefault();
+              const file = e.dataTransfer.files[0];
+              if (file && file.type.startsWith('video/')) {
+                setSelectedVideoFile(file);
+                if (fileInputRef.current) {
+                  const dataTransfer = new DataTransfer();
+                  dataTransfer.items.add(file);
+                  fileInputRef.current.files = dataTransfer.files;
+                }
+              }
+            }}
+            onDragOver={(e) => e.preventDefault()}
           >
             <input
               ref={fileInputRef}
@@ -703,10 +727,33 @@ export default function Dashboard() {
               accept="video/*"
               required
               className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  setSelectedVideoFile(file);
+                }
+              }}
             />
-            <div className="text-4xl mb-2">📹</div>
-            <p className="text-gray-600 mb-1">Click to upload or drag and drop</p>
-            <p className="text-sm text-gray-500">Video files only</p>
+            {selectedVideoFile ? (
+              <div>
+                <div className="text-4xl mb-2">✅</div>
+                <p className="text-green-700 dark:text-green-300 font-semibold mb-1">
+                  {selectedVideoFile.name}
+                </p>
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                  {(selectedVideoFile.size / (1024 * 1024)).toFixed(2)} MB
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
+                  Click to change file
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="text-4xl mb-2">📹</div>
+                <p className="text-gray-600 dark:text-gray-400 mb-1">Click to upload or drag and drop</p>
+                <p className="text-sm text-gray-500 dark:text-gray-500">Video files only</p>
+              </>
+            )}
           </div>
 
           <div className="flex gap-2">

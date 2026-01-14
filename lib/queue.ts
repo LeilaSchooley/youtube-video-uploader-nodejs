@@ -3,7 +3,8 @@ import path from "path";
 
 export interface QueueItem {
   id: string;
-  sessionId: string;
+  sessionId: string; // Keep for backward compatibility
+  userId?: string; // Google user email/ID - persistent across sessions
   csvPath: string;
   uploadDir: string;
   videosPerDay: number;

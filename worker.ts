@@ -2,7 +2,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 import { getOAuthClient } from "./lib/auth";
-import { getSession } from "./lib/session";
+import { getSession, getAllSessions } from "./lib/session";
 import { 
   getNextPendingItem, 
   markAsProcessing, 
@@ -33,8 +33,20 @@ async function processQueueItem(item: QueueItem): Promise<void> {
   markAsProcessing(item.id);
 
   try {
-    // Get session and set up OAuth
-    const session = getSession(item.sessionId);
+    // Get session - try by sessionId first, then find any session for this userId
+    let session = getSession(item.sessionId);
+    
+    // If session not found but userId exists, find any active session for this user
+    if (!session && item.userId) {
+      const allSessions = getAllSessions();
+      for (const [_, s] of allSessions.entries()) {
+        if (s.userId === item.userId && s.authenticated && s.tokens) {
+          session = s;
+          break;
+        }
+      }
+    }
+    
     if (!session || !session.authenticated || !session.tokens) {
       throw new Error("Session not found or invalid");
     }

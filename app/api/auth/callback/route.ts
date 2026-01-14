@@ -3,6 +3,7 @@ import { NextRequest } from "next/server";
 import { getOAuthClient } from "@/lib/auth";
 import { getSession, setSession, generateSessionId } from "@/lib/session";
 import { cookies } from "next/headers";
+import { google } from "googleapis";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +31,14 @@ export async function GET(request: NextRequest) {
 
     oAuthClient.setCredentials(tokens);
 
+    // Get user info to store userId
+    const oauth2 = google.oauth2({
+      version: "v2",
+      auth: oAuthClient,
+    });
+    const userInfo = await oauth2.userinfo.get();
+    const userId = userInfo.data.email || userInfo.data.id || undefined;
+
     // Get or create session
     const cookieStore = await cookies();
     let sessionId = cookieStore.get("sessionId")?.value;
@@ -46,6 +55,7 @@ export async function GET(request: NextRequest) {
 
     setSession(sessionId, {
       authenticated: true,
+      userId: userId,
       tokens: tokens as {
         access_token?: string | null;
         refresh_token?: string | null;

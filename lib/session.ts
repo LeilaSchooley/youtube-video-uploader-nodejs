@@ -3,6 +3,7 @@
 
 interface SessionData {
   authenticated: boolean;
+  userId?: string; // Google user email/ID
   tokens?: {
     access_token?: string | null;
     refresh_token?: string | null;
