@@ -1,11 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  experimental: {
-    serverActions: {
-      bodySizeLimit: '50mb',
-    },
-  },
-}
+  // API routes handle file uploads, no need for server actions config
+};
 
-module.exports = nextConfig
-
+module.exports = nextConfig;

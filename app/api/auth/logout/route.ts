@@ -3,6 +3,8 @@ import { NextRequest } from "next/server";
 import { deleteSession } from "@/lib/session";
 import { cookies } from "next/headers";
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest) {
   const cookieStore = await cookies();
   const sessionId = cookieStore.get("sessionId")?.value;

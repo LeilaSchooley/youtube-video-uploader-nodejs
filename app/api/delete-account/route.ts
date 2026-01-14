@@ -4,6 +4,8 @@ import { getOAuthClient } from "@/lib/auth";
 import { getSession, deleteSession } from "@/lib/session";
 import { cookies } from "next/headers";
 
+export const dynamic = 'force-dynamic';
+
 export async function POST(request: NextRequest) {
   try {
     const cookieStore = await cookies();

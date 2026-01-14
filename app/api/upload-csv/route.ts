@@ -24,6 +24,8 @@ interface ProgressItem {
   status: string;
 }
 
+export const dynamic = 'force-dynamic';
+
 export async function POST(request: NextRequest) {
   try {
     const cookieStore = await cookies();

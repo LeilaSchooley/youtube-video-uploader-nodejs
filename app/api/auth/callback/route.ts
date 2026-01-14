@@ -4,6 +4,8 @@ import { getOAuthClient } from "@/lib/auth";
 import { getSession, setSession, generateSessionId } from "@/lib/session";
 import { cookies } from "next/headers";
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code");

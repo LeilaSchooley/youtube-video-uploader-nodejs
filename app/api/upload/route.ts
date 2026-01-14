@@ -5,6 +5,8 @@ import { google } from "googleapis";
 import { cookies } from "next/headers";
 import { Readable } from "stream";
 
+export const dynamic = 'force-dynamic';
+
 export async function POST(request: NextRequest) {
   try {
     const cookieStore = await cookies();
