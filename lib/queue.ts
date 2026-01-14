@@ -8,7 +8,7 @@ export interface QueueItem {
   uploadDir: string;
   videosPerDay: number;
   startDate: string;
-  status: "pending" | "processing" | "completed" | "failed";
+  status: "pending" | "processing" | "completed" | "failed" | "paused";
   progress: Array<{ index: number; status: string }>;
   totalVideos?: number; // Total number of videos in this job
   createdAt: string;
@@ -87,7 +87,28 @@ export function updateQueueItem(id: string, updates: Partial<QueueItem>): void {
 
 export function getNextPendingItem(): QueueItem | undefined {
   const queue = readQueue();
-  return queue.find(item => item.status === "pending");
+  return queue.find(item => item.status === "pending" && item.status !== "paused");
+}
+
+export function pauseJob(id: string): void {
+  const item = getQueueItem(id);
+  if (item && (item.status === "pending" || item.status === "processing")) {
+    updateQueueItem(id, { status: "paused" });
+  }
+}
+
+export function resumeJob(id: string): void {
+  const item = getQueueItem(id);
+  if (item && item.status === "paused") {
+    updateQueueItem(id, { status: "pending" });
+  }
+}
+
+export function cancelJob(id: string): void {
+  const item = getQueueItem(id);
+  if (item && (item.status === "pending" || item.status === "paused")) {
+    updateQueueItem(id, { status: "failed" });
+  }
 }
 
 export function markAsProcessing(id: string): void {

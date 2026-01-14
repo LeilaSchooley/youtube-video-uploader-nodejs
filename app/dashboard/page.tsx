@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState, FormEvent, ChangeEvent } from 'react';
+import { useEffect, useState, FormEvent, ChangeEvent, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import Toast from '@/app/components/Toast';
 
 interface User {
   authenticated: boolean;
@@ -11,7 +12,7 @@ interface User {
 }
 
 interface Message {
-  type: 'success' | 'error' | null;
+  type: 'success' | 'error' | 'info' | null;
   text: string | null;
 }
 
@@ -34,6 +35,141 @@ export default function Dashboard() {
   const [queue, setQueue] = useState<any[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [jobStatus, setJobStatus] = useState<any>(null);
+  const [showToast, setShowToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [nextUploadTime, setNextUploadTime] = useState<Date | null>(null);
+  const [timeUntilNext, setTimeUntilNext] = useState<string>('');
+  const [darkMode, setDarkMode] = useState<boolean>(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const csvFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Calculate next scheduled upload time
+  const calculateNextUploadTime = useCallback(() => {
+    const now = new Date();
+    let earliestDate: Date | null = null;
+
+    // Check all scheduled jobs
+    for (const job of queue) {
+      if (job.videosPerDay > 0 && job.status !== 'failed') {
+        const startDate = new Date(job.startDate);
+        startDate.setHours(12, 0, 0, 0); // Scheduled videos publish at noon
+        
+        // Count how many videos have been completed
+        const completedCount = job.progress?.filter((p: ProgressItem) => 
+          p.status.includes("Uploaded") || 
+          p.status.includes("scheduled") ||
+          p.status.includes("Scheduled")
+        ).length || 0;
+        
+        const totalVideos = job.totalVideos || job.progress?.length || 0;
+        
+        // If there are still videos to upload
+        if (completedCount < totalVideos) {
+          // Calculate which day the next video should be scheduled for
+          const nextVideoIndex = completedCount;
+          const dayIndex = Math.floor(nextVideoIndex / job.videosPerDay);
+          const scheduledDate = new Date(startDate);
+          scheduledDate.setDate(startDate.getDate() + dayIndex);
+          
+          // Only consider future dates
+          if (scheduledDate > now) {
+            if (!earliestDate || scheduledDate < earliestDate) {
+              earliestDate = scheduledDate;
+            }
+          }
+        }
+      }
+    }
+
+    setNextUploadTime(earliestDate);
+  }, [queue]);
+
+  // Update countdown timer
+  useEffect(() => {
+    const updateTimer = () => {
+      if (!nextUploadTime) {
+        setTimeUntilNext('');
+        return;
+      }
+
+      const now = new Date();
+      const diff = nextUploadTime.getTime() - now.getTime();
+
+      if (diff <= 0) {
+        setTimeUntilNext('Uploading now...');
+        return;
+      }
+
+      const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+      const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+      const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+      const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+
+      if (days > 0) {
+        setTimeUntilNext(`${days}d ${hours}h ${minutes}m`);
+      } else if (hours > 0) {
+        setTimeUntilNext(`${hours}h ${minutes}m ${seconds}s`);
+      } else if (minutes > 0) {
+        setTimeUntilNext(`${minutes}m ${seconds}s`);
+      } else {
+        setTimeUntilNext(`${seconds}s`);
+      }
+    };
+
+    updateTimer();
+    const timerInterval = setInterval(updateTimer, 1000);
+    return () => clearInterval(timerInterval);
+  }, [nextUploadTime]);
+
+  // Recalculate next upload time when queue changes
+  useEffect(() => {
+    calculateNextUploadTime();
+  }, [calculateNextUploadTime]);
+
+  // Dark mode effect
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [darkMode]);
+
+  // Load dark mode preference from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem('darkMode');
+    if (saved === 'true') {
+      setDarkMode(true);
+    }
+  }, []);
+
+  const toggleDarkMode = () => {
+    const newMode = !darkMode;
+    setDarkMode(newMode);
+    localStorage.setItem('darkMode', String(newMode));
+  };
+
+  const handleQueueAction = async (jobId: string, action: 'pause' | 'resume' | 'cancel') => {
+    try {
+      const res = await fetch('/api/queue-manage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId, action }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setShowToast({ message: data.message, type: 'success' });
+        fetchQueue();
+        if (selectedJobId === jobId) {
+          fetchJobStatus(jobId);
+        }
+      } else {
+        setShowToast({ message: data.error || 'Failed to perform action', type: 'error' });
+      }
+    } catch (error) {
+      setShowToast({ message: 'An error occurred', type: 'error' });
+    }
+  };
 
   useEffect(() => {
     fetchUser();
@@ -109,12 +245,15 @@ export default function Dashboard() {
 
       const data = await res.json();
       if (res.ok) {
-        setMessage({ type: 'success', text: data.message || 'Video uploaded successfully!' });
+        setShowToast({ message: data.message || 'Video uploaded successfully!', type: 'success' });
+        setMessage({ type: null, text: null });
         e.currentTarget.reset();
       } else {
+        setShowToast({ message: data.error || 'Error uploading video', type: 'error' });
         setMessage({ type: 'error', text: data.error || 'Error uploading video' });
       }
     } catch (error) {
+      setShowToast({ message: 'An error occurred while uploading the video.', type: 'error' });
       setMessage({ type: 'error', text: 'An error occurred while uploading the video.' });
     } finally {
       setUploading(false);
@@ -130,17 +269,21 @@ export default function Dashboard() {
 
     const formData = new FormData(e.currentTarget);
     
-    if (enableScheduling) {
-      if (!videosPerDay) {
-        setMessage({ type: 'error', text: 'Please fill in videos per day when scheduling is enabled.' });
-        setCsvUploading(false);
-        return;
-      }
+      if (enableScheduling) {
+        if (!videosPerDay) {
+          setShowToast({ message: 'Please fill in videos per day when scheduling is enabled.', type: 'error' });
+          setMessage({ type: 'error', text: 'Please fill in videos per day when scheduling is enabled.' });
+          setCsvUploading(false);
+          return;
+        }
       formData.append('videosPerDay', videosPerDay);
       formData.append('enableScheduling', 'true');
     }
 
     try {
+      // Show copying message
+      setMessage({ type: 'info', text: 'Copying files to server storage...' });
+      
       const res = await fetch('/api/upload-queue', {
         method: 'POST',
         body: formData,
@@ -148,7 +291,35 @@ export default function Dashboard() {
 
       const data = await res.json();
       if (res.ok && data.success) {
-        setMessage({ type: 'success', text: `Files uploaded and queued! Job ID: ${data.jobId}. The worker will process ${data.totalVideos} videos.` });
+        // Build detailed message with copy stats
+        let message = `Files queued! Job ID: ${data.jobId}\n`;
+        message += `📊 ${data.totalVideos} videos in queue\n`;
+        
+        if (data.copyStats) {
+          message += `✅ ${data.copyStats.videosCopied} videos copied`;
+          if (data.copyStats.videosSkipped > 0) {
+            message += `, ⚠️ ${data.copyStats.videosSkipped} skipped`;
+          }
+          message += `\n`;
+          
+          if (data.copyStats.thumbnailsCopied > 0) {
+            message += `🖼️ ${data.copyStats.thumbnailsCopied} thumbnails copied`;
+            if (data.copyStats.thumbnailsSkipped > 0) {
+              message += `, ${data.copyStats.thumbnailsSkipped} skipped`;
+            }
+            message += `\n`;
+          }
+          
+          if (data.copyStats.errors && data.copyStats.errors.length > 0) {
+            message += `\n⚠️ ${data.copyStats.errors.length} error(s) during copy`;
+          }
+        }
+        
+        setShowToast({ 
+          message: message.trim(), 
+          type: data.copyStats?.errors?.length > 0 ? 'info' : 'success' 
+        });
+        setMessage({ type: null, text: null });
         e.currentTarget.reset();
         setEnableScheduling(false);
         setVideosPerDay('');
@@ -156,9 +327,11 @@ export default function Dashboard() {
         setSelectedJobId(data.jobId);
         fetchJobStatus(data.jobId);
       } else {
+        setShowToast({ message: data.error || 'Error uploading files', type: 'error' });
         setMessage({ type: 'error', text: data.error || 'Error uploading files' });
       }
     } catch (error) {
+      setShowToast({ message: 'An error occurred while uploading files.', type: 'error' });
       setMessage({ type: 'error', text: 'An error occurred while uploading files.' });
     } finally {
       setCsvUploading(false);
@@ -187,8 +360,11 @@ export default function Dashboard() {
 
   if (loading) {
     return (
-      <div className="flex justify-center items-center min-h-screen">
-        <div>Loading...</div>
+      <div className="flex justify-center items-center min-h-screen bg-gray-50">
+        <div className="text-center">
+          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-red-600 mb-4"></div>
+          <p className="text-gray-600 text-lg">Loading dashboard...</p>
+        </div>
       </div>
     );
   }
@@ -233,11 +409,19 @@ export default function Dashboard() {
   const remaining = totalVideos > 0 ? totalVideos - completed - failed : 0;
 
   return (
-    <div className="max-w-7xl mx-auto px-5 py-10">
-      {/* Header */}
-      <div className="flex justify-between items-center mb-10">
-        <h1 className="text-4xl font-bold text-gray-800">ZonDiscounts Uploader Dashboard</h1>
-        <div className="flex gap-2">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
+      <div className="max-w-7xl mx-auto px-4 sm:px-5 py-6 sm:py-10">
+        {/* Header */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-10">
+        <h1 className="text-3xl sm:text-4xl font-bold text-gray-800 dark:text-white">ZonDiscounts Uploader Dashboard</h1>
+        <div className="flex gap-2 flex-wrap">
+          <button
+            onClick={toggleDarkMode}
+            className="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white font-medium rounded-full transition-colors"
+            aria-label="Toggle dark mode"
+          >
+            {darkMode ? '☀️' : '🌙'}
+          </button>
           <a
             href="/api/auth/logout"
             className="btn-primary"
@@ -253,14 +437,77 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Message */}
-      {message.type && (
-        <div className={`mb-5 p-4 rounded-lg font-medium ${
-          message.type === 'success' 
-            ? 'bg-green-100 text-green-800 border border-green-200' 
-            : 'bg-red-100 text-red-800 border border-red-200'
-        }`}>
-          {message.text}
+      {/* Toast Notification */}
+      {showToast && (
+        <Toast
+          message={showToast.message}
+          type={showToast.type}
+          onClose={() => setShowToast(null)}
+          duration={showToast.type === 'info' ? 8000 : 5000}
+        />
+      )}
+
+      {/* Info Message (for copying progress) */}
+      {message.type === 'info' && (
+        <div className="mb-5 p-4 rounded-lg font-medium bg-blue-100 text-blue-800 border border-blue-200 flex items-center gap-3">
+          <div className="inline-block animate-spin rounded-full h-5 w-5 border-b-2 border-blue-800"></div>
+          <span>{message.text}</span>
+        </div>
+      )}
+
+      {/* Next Upload Timer */}
+      {nextUploadTime && timeUntilNext && (
+        <div className="mb-6 p-6 bg-gradient-to-r from-blue-500 to-indigo-600 rounded-xl shadow-lg text-white">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="text-4xl">⏰</div>
+              <div>
+                <div className="text-sm opacity-90 mb-1">Next Scheduled Upload</div>
+                <div className="text-2xl font-bold">{timeUntilNext}</div>
+                <div className="text-sm opacity-80 mt-1">
+                  {nextUploadTime.toLocaleDateString('en-US', { 
+                    weekday: 'long', 
+                    year: 'numeric', 
+                    month: 'long', 
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                  })}
+                </div>
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-3xl animate-pulse">⏳</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Next Upload Timer */}
+      {nextUploadTime && timeUntilNext && (
+        <div className="mb-6 p-6 bg-gradient-to-r from-blue-500 to-indigo-600 rounded-xl shadow-lg text-white">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="text-4xl">⏰</div>
+              <div>
+                <div className="text-sm opacity-90 mb-1">Next Scheduled Upload</div>
+                <div className="text-2xl font-bold">{timeUntilNext}</div>
+                <div className="text-sm opacity-80 mt-1">
+                  {nextUploadTime.toLocaleDateString('en-US', { 
+                    weekday: 'long', 
+                    year: 'numeric', 
+                    month: 'long', 
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                  })}
+                </div>
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-3xl animate-pulse">⏳</div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -288,9 +535,9 @@ export default function Dashboard() {
           </div>
         </div>
       ) : (
-        <div className="card border border-gray-100">
-          <div className="flex justify-between items-center mb-8">
-            <h2 className="text-3xl font-bold text-gray-800">📊 Upload Statistics</h2>
+        <div className="card border border-gray-100 dark:border-gray-700">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
+            <h2 className="text-2xl sm:text-3xl font-bold text-gray-800 dark:text-white">📊 Upload Statistics</h2>
             <div className={`px-4 py-2 rounded-full text-sm font-semibold ${
               processing > 0 ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'
             }`}>
@@ -406,22 +653,23 @@ export default function Dashboard() {
 
       {/* Profile Section */}
       <div className="card">
-        <h2 className="text-2xl font-bold mb-5 text-gray-800">Profile</h2>
-        <div className="flex items-center gap-5">
+        <h2 className="text-2xl font-bold mb-5 text-gray-800">👤 Profile</h2>
+        <div className="flex items-center gap-5 p-4 bg-gradient-to-r from-red-50 to-pink-50 rounded-lg border border-red-100">
           <img
             src={user.picture}
             alt={user.name}
-            className="w-24 h-24 rounded-full object-cover border-4 border-red-600"
+            className="w-20 h-20 rounded-full object-cover border-4 border-red-600 shadow-lg"
           />
-          <p className="text-lg text-gray-700">
-            <strong>Name:</strong> {user.name}
-          </p>
+          <div>
+            <p className="text-lg font-semibold text-gray-800">{user.name}</p>
+            <p className="text-sm text-gray-600">Google Account Connected</p>
+          </div>
         </div>
       </div>
 
       {/* Single Video Upload */}
       <div className="card">
-        <h2 className="text-2xl font-bold mb-5 text-gray-800">Single Video Upload</h2>
+        <h2 className="text-2xl font-bold mb-5 text-gray-800">🎬 Single Video Upload</h2>
         <form onSubmit={handleSingleUpload} className="flex flex-col gap-5">
           <label htmlFor="title" className="label">Title</label>
           <input
@@ -443,14 +691,23 @@ export default function Dashboard() {
           />
 
           <label htmlFor="video" className="label">Choose File</label>
-          <input
-            type="file"
-            id="video"
-            name="video"
-            accept="video/*"
-            required
-            className="input-field"
-          />
+          <div 
+            className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center cursor-pointer hover:border-red-500 transition-colors"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <input
+              ref={fileInputRef}
+              type="file"
+              id="video"
+              name="video"
+              accept="video/*"
+              required
+              className="hidden"
+            />
+            <div className="text-4xl mb-2">📹</div>
+            <p className="text-gray-600 mb-1">Click to upload or drag and drop</p>
+            <p className="text-sm text-gray-500">Video files only</p>
+          </div>
 
           <div className="flex gap-2">
             <div className="flex-1">
@@ -489,7 +746,7 @@ export default function Dashboard() {
 
       {/* Batch Upload */}
       <div className="card">
-        <h2 className="text-2xl font-bold mb-5 text-gray-800">Batch Upload from CSV (Background Processing)</h2>
+        <h2 className="text-2xl font-bold mb-5 text-gray-800">📦 Batch Upload from CSV (Background Processing)</h2>
         <div className="mb-5 p-4 bg-blue-50 border border-blue-200 rounded-lg">
           <p className="text-sm text-blue-900">
             <strong>New Background Processing System:</strong> Upload your CSV and video files to the server. 
@@ -528,14 +785,23 @@ export default function Dashboard() {
         </div>
         <form onSubmit={handleCsvUpload} className="flex flex-col gap-5">
           <label htmlFor="csvFile" className="label">Upload CSV</label>
-          <input
-            type="file"
-            id="csvFile"
-            name="csvFile"
-            accept=".csv"
-            required
-            className="input-field"
-          />
+          <div 
+            className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center cursor-pointer hover:border-red-500 transition-colors"
+            onClick={() => csvFileInputRef.current?.click()}
+          >
+            <input
+              ref={csvFileInputRef}
+              type="file"
+              id="csvFile"
+              name="csvFile"
+              accept=".csv"
+              required
+              className="hidden"
+            />
+            <div className="text-4xl mb-2">📄</div>
+            <p className="text-gray-600 mb-1">Click to upload or drag and drop</p>
+            <p className="text-sm text-gray-500">CSV files only</p>
+          </div>
 
           <div className="p-4 bg-gray-50 border border-gray-300 rounded-lg">
             <label className="flex items-center gap-2 mb-4 cursor-pointer">
@@ -588,44 +854,144 @@ export default function Dashboard() {
 
       {/* Queue Status */}
       <div className="card">
-        <h2 className="text-2xl font-bold mb-5 text-gray-800">Upload Queue Status</h2>
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-5">
+          <h2 className="text-2xl font-bold text-gray-800 dark:text-white">Upload Queue Status</h2>
+          {queue.length > 0 && (
+            <input
+              type="text"
+              placeholder="Search jobs..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="input-field w-full sm:max-w-xs"
+            />
+          )}
+        </div>
         
         {queue.length === 0 ? (
-          <p className="text-gray-600">No upload jobs in queue.</p>
+          <div className="text-center py-12">
+            <div className="text-6xl mb-4">📭</div>
+            <p className="text-gray-600 text-lg">No upload jobs in queue.</p>
+            <p className="text-gray-500 text-sm mt-2">Upload a CSV file to get started!</p>
+          </div>
         ) : (
           <div className="flex flex-col gap-4">
-            {queue.map((job) => (
+            {queue
+              .filter(job => 
+                !searchQuery || 
+                job.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                job.status.toLowerCase().includes(searchQuery.toLowerCase())
+              )
+              .map((job) => (
               <div
                 key={job.id}
-                className={`p-4 border border-gray-300 rounded-lg cursor-pointer transition-colors ${
-                  selectedJobId === job.id ? 'bg-blue-50' : 'bg-white hover:bg-gray-50'
+                className={`p-5 border-2 rounded-xl cursor-pointer transition-all duration-200 ${
+                  selectedJobId === job.id 
+                    ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-400 dark:border-blue-500 shadow-md' 
+                    : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:border-red-300 dark:hover:border-red-500 hover:shadow-md'
                 }`}
                 onClick={() => {
                   setSelectedJobId(job.id);
                   fetchJobStatus(job.id);
                 }}
               >
-                <div className="flex justify-between items-center">
-                  <div>
-                    <strong>Job ID:</strong> {job.id}
-                    <br />
-                    <strong>Status:</strong> 
-                    <span className={`px-2 py-1 rounded ml-2 ${
-                      job.status === 'completed' ? 'bg-green-100 text-green-800' : 
-                      job.status === 'failed' ? 'bg-red-100 text-red-800' : 
-                      job.status === 'processing' ? 'bg-yellow-100 text-yellow-800' : 
-                      'bg-gray-100 text-gray-800'
-                    }`}>
-                      {job.status.toUpperCase()}
-                    </span>
-                    <br />
-                    <strong>Created:</strong> {new Date(job.createdAt).toLocaleString()}
-                    {job.videosPerDay > 0 && (
-                      <>
-                        <br />
-                        <strong>Schedule:</strong> {job.videosPerDay} videos/day starting {new Date(job.startDate).toLocaleDateString()}
-                      </>
-                    )}
+                <div className="flex justify-between items-start">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className={`w-3 h-3 rounded-full ${
+                        job.status === 'completed' ? 'bg-green-500' : 
+                        job.status === 'failed' ? 'bg-red-500' : 
+                        job.status === 'processing' ? 'bg-yellow-500 animate-pulse-slow' : 
+                        'bg-gray-400'
+                      }`}></div>
+                      <span className="font-mono text-sm text-gray-600 dark:text-gray-400">{job.id}</span>
+                    </div>
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                        job.status === 'completed' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' : 
+                        job.status === 'failed' ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' : 
+                        job.status === 'processing' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200' : 
+                        job.status === 'paused' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' :
+                        'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200'
+                      }`}>
+                        {job.status === 'completed' && '✓ '}
+                        {job.status === 'failed' && '✕ '}
+                        {job.status === 'processing' && '⚡ '}
+                        {job.status === 'paused' && '⏸ '}
+                        {job.status.toUpperCase()}
+                      </span>
+                      {job.totalVideos && (
+                        <span className="text-sm text-gray-600 dark:text-gray-400">
+                          {job.totalVideos} video{job.totalVideos !== 1 ? 's' : ''}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
+                      <div>📅 Created: {new Date(job.createdAt).toLocaleString()}</div>
+                      {job.videosPerDay > 0 && (
+                        <div>📊 Schedule: {job.videosPerDay} videos/day starting {new Date(job.startDate).toLocaleDateString()}</div>
+                      )}
+                    </div>
+                    {/* Queue Management Actions */}
+                    <div className="flex gap-2 mt-3 flex-wrap">
+                      {job.status === 'pending' && (
+                        <>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleQueueAction(job.id, 'pause');
+                            }}
+                            className="px-3 py-1.5 bg-yellow-500 hover:bg-yellow-600 text-white text-xs font-semibold rounded-lg transition-colors"
+                          >
+                            ⏸ Pause
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleQueueAction(job.id, 'cancel');
+                            }}
+                            className="px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold rounded-lg transition-colors"
+                          >
+                            ✕ Cancel
+                          </button>
+                        </>
+                      )}
+                      {job.status === 'paused' && (
+                        <>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleQueueAction(job.id, 'resume');
+                            }}
+                            className="px-3 py-1.5 bg-green-500 hover:bg-green-600 text-white text-xs font-semibold rounded-lg transition-colors"
+                          >
+                            ▶ Resume
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleQueueAction(job.id, 'cancel');
+                            }}
+                            className="px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold rounded-lg transition-colors"
+                          >
+                            ✕ Cancel
+                          </button>
+                        </>
+                      )}
+                      {job.status === 'processing' && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleQueueAction(job.id, 'pause');
+                          }}
+                          className="px-3 py-1.5 bg-yellow-500 hover:bg-yellow-600 text-white text-xs font-semibold rounded-lg transition-colors"
+                        >
+                          ⏸ Pause
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="text-2xl">
+                    {selectedJobId === job.id ? '▼' : '▶'}
                   </div>
                 </div>
               </div>
@@ -634,27 +1000,60 @@ export default function Dashboard() {
         )}
 
         {selectedJobId && jobStatus && (
-          <div className="mt-5 p-5 bg-gray-50 border border-gray-300 rounded-lg">
-            <h3 className="mb-4 text-gray-800 font-semibold">
-              Job Progress: {jobStatus.id}
-            </h3>
+          <div className="mt-5 p-6 bg-gradient-to-br from-gray-50 to-blue-50 border-2 border-blue-200 rounded-xl shadow-inner">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold text-gray-800">
+                📋 Job Progress: {jobStatus.id}
+              </h3>
+              <button
+                onClick={() => setSelectedJobId(null)}
+                className="text-gray-500 hover:text-gray-700 text-xl font-bold"
+              >
+                ×
+              </button>
+            </div>
             {jobStatus.progress && jobStatus.progress.length > 0 ? (
               <div className="max-h-96 overflow-y-auto">
-                <ul className="list-none p-0">
-                  {jobStatus.progress.map((item: ProgressItem, idx: number) => (
-                    <li
-                      key={idx}
-                      className={`py-2 text-sm ${
-                        idx < jobStatus.progress.length - 1 ? 'border-b border-gray-200' : ''
-                      }`}
-                    >
-                      Video {item.index + 1}: {item.status}
-                    </li>
-                  ))}
-                </ul>
+                <div className="space-y-2">
+                  {jobStatus.progress.map((item: ProgressItem, idx: number) => {
+                    const isSuccess = item.status.includes("Uploaded") || item.status.includes("Scheduled");
+                    const isFailed = item.status.includes("Failed") || item.status.includes("Missing") || item.status.includes("Invalid");
+                    const isProcessing = item.status.includes("Uploading") || item.status === "Pending";
+                    
+                    return (
+                      <div
+                        key={idx}
+                        className={`p-3 rounded-lg border ${
+                          isSuccess ? 'bg-green-50 border-green-200' :
+                          isFailed ? 'bg-red-50 border-red-200' :
+                          isProcessing ? 'bg-yellow-50 border-yellow-200' :
+                          'bg-gray-50 border-gray-200'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium text-gray-800">Video {item.index + 1}</span>
+                          <span className={`text-xs px-2 py-1 rounded ${
+                            isSuccess ? 'bg-green-100 text-green-800' :
+                            isFailed ? 'bg-red-100 text-red-800' :
+                            isProcessing ? 'bg-yellow-100 text-yellow-800 animate-pulse-slow' :
+                            'bg-gray-100 text-gray-800'
+                          }`}>
+                            {isProcessing && '⏳ '}
+                            {isSuccess && '✓ '}
+                            {isFailed && '✕ '}
+                            {item.status}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             ) : (
-              <p className="text-gray-600">No progress data available yet.</p>
+              <div className="text-center py-8">
+                <div className="text-4xl mb-2">⏳</div>
+                <p className="text-gray-600">No progress data available yet.</p>
+              </div>
             )}
           </div>
         )}
@@ -663,6 +1062,7 @@ export default function Dashboard() {
       <footer className="text-center py-5 text-gray-500">
         &copy; 2025 ZonDiscounts. <Link href="/privacy" className="text-red-600 hover:underline">Privacy</Link> • <Link href="/terms" className="text-red-600 hover:underline">Terms</Link>
       </footer>
+      </div>
     </div>
   );
 }

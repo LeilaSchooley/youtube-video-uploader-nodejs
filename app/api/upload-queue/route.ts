@@ -88,23 +88,53 @@ export async function POST(request: NextRequest) {
 
     // Copy video and thumbnail files to server storage
     const updatedRows: CSVRow[] = [];
-    for (const row of csvData) {
+    const copyStats = {
+      videosCopied: 0,
+      videosSkipped: 0,
+      thumbnailsCopied: 0,
+      thumbnailsSkipped: 0,
+      errors: [] as string[],
+    };
+
+    for (let i = 0; i < csvData.length; i++) {
+      const row = csvData[i];
       const updatedRow = { ...row };
 
       // Copy video file if it exists
-      if (row.path && fs.existsSync(row.path)) {
-        const videoFilename = path.basename(row.path);
-        const videoDest = path.join(uploadDir, "videos", videoFilename);
-        fs.copyFileSync(row.path, videoDest);
-        updatedRow.path = videoDest;
+      if (row.path) {
+        if (fs.existsSync(row.path)) {
+          try {
+            const videoFilename = path.basename(row.path);
+            const videoDest = path.join(uploadDir, "videos", videoFilename);
+            fs.copyFileSync(row.path, videoDest);
+            updatedRow.path = videoDest;
+            copyStats.videosCopied++;
+          } catch (error: any) {
+            copyStats.errors.push(`Video ${i + 1}: ${error?.message || 'Copy failed'}`);
+            copyStats.videosSkipped++;
+          }
+        } else {
+          copyStats.errors.push(`Video ${i + 1}: File not found at ${row.path}`);
+          copyStats.videosSkipped++;
+        }
       }
 
       // Copy thumbnail file if it exists
-      if (row.thumbnail_path && fs.existsSync(row.thumbnail_path)) {
-        const thumbFilename = path.basename(row.thumbnail_path);
-        const thumbDest = path.join(uploadDir, "thumbnails", thumbFilename);
-        fs.copyFileSync(row.thumbnail_path, thumbDest);
-        updatedRow.thumbnail_path = thumbDest;
+      if (row.thumbnail_path) {
+        if (fs.existsSync(row.thumbnail_path)) {
+          try {
+            const thumbFilename = path.basename(row.thumbnail_path);
+            const thumbDest = path.join(uploadDir, "thumbnails", thumbFilename);
+            fs.copyFileSync(row.thumbnail_path, thumbDest);
+            updatedRow.thumbnail_path = thumbDest;
+            copyStats.thumbnailsCopied++;
+          } catch (error: any) {
+            copyStats.errors.push(`Thumbnail ${i + 1}: ${error?.message || 'Copy failed'}`);
+            copyStats.thumbnailsSkipped++;
+          }
+        } else {
+          copyStats.thumbnailsSkipped++;
+        }
       }
 
       updatedRows.push(updatedRow);
@@ -144,6 +174,13 @@ export async function POST(request: NextRequest) {
       jobId: queueId,
       message: "Files uploaded and queued for processing",
       totalVideos: csvData.length,
+      copyStats: {
+        videosCopied: copyStats.videosCopied,
+        videosSkipped: copyStats.videosSkipped,
+        thumbnailsCopied: copyStats.thumbnailsCopied,
+        thumbnailsSkipped: copyStats.thumbnailsSkipped,
+        errors: copyStats.errors,
+      },
     });
   } catch (error: any) {
     console.error("Queue upload error:", error);
