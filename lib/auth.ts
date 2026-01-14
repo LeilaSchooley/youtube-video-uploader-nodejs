@@ -1,6 +1,8 @@
 import { google } from "googleapis";
 import { OAuth2Client } from "google-auth-library";
-require("dotenv").config();
+import dotenv from "dotenv";
+
+dotenv.config();
 
 interface Credentials {
   web?: {
@@ -12,6 +14,7 @@ interface Credentials {
 
 let credentials: Credentials | null = null;
 try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   credentials = require("../src/creds.json") as Credentials;
 } catch (e) {
   // creds.json not present — falling back to environment variables
