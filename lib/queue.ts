@@ -106,9 +106,17 @@ export function resumeJob(id: string): void {
 }
 
 export function cancelJob(id: string): void {
-  const item = getQueueItem(id);
-  if (item && (item.status === "pending" || item.status === "paused")) {
-    updateQueueItem(id, { status: "failed" });
+  const queue = readQueue();
+  const index = queue.findIndex(item => item.id === id);
+  
+  if (index !== -1) {
+    const item = queue[index];
+    // Only allow cancellation of pending or paused jobs
+    if (item.status === "pending" || item.status === "paused") {
+      // Remove from queue
+      queue.splice(index, 1);
+      writeQueue(queue);
+    }
   }
 }
 

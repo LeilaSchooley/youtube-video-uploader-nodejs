@@ -9,6 +9,7 @@ import {
   markAsCompleted, 
   markAsFailed, 
   updateProgress,
+  updateQueueItem,
   type QueueItem 
 } from "./lib/queue";
 import { parseDate } from "./lib/utils";
@@ -87,10 +88,29 @@ async function processQueueItem(item: QueueItem): Promise<void> {
       }
     }
 
-    const progress: Array<{ index: number; status: string }> = [];
+    // Load existing progress or initialize
+    const existingProgress = item.progress || [];
+    const progress: Array<{ index: number; status: string }> = [...existingProgress];
+    
+    // Initialize progress for all videos if not already done
+    while (progress.length < csvData.length) {
+      progress.push({ index: progress.length, status: "Pending" });
+    }
 
-    // Process videos based on schedule
+    const now = new Date();
+    now.setHours(0, 0, 0, 0); // Start of today
+
+    // Process videos based on schedule - only upload videos scheduled for TODAY
     for (let i = 0; i < csvData.length; i++) {
+      // Skip if already processed (uploaded, failed, or invalid)
+      const existingStatus = progress[i]?.status || "Pending";
+      if (existingStatus.includes("Uploaded") || 
+          existingStatus.includes("Scheduled") ||
+          existingStatus.includes("Failed") ||
+          existingStatus.includes("Missing") ||
+          existingStatus.includes("Invalid")) {
+        continue; // Skip already processed videos
+      }
       const row = csvData[i];
       const {
         youtube_title,
@@ -101,8 +121,10 @@ async function processQueueItem(item: QueueItem): Promise<void> {
         privacyStatus,
       } = row;
 
-      progress.push({ index: i, status: "Pending" });
-      updateProgress(item.id, progress);
+      // Progress already initialized above, just update status
+      if (!progress[i]) {
+        progress[i] = { index: i, status: "Pending" };
+      }
 
       // Validate required fields
       if (!youtube_title || !youtube_description) {
@@ -120,9 +142,22 @@ async function processQueueItem(item: QueueItem): Promise<void> {
 
       // Determine publish date
       let publishDate: Date | null = null;
+      let scheduledForToday = false;
       
       if (item.videosPerDay > 0 && scheduledDates[i]) {
         publishDate = scheduledDates[i];
+        // Check if this video is scheduled for today
+        const scheduledDay = new Date(publishDate);
+        scheduledDay.setHours(0, 0, 0, 0);
+        scheduledForToday = scheduledDay.getTime() === now.getTime();
+        
+        // If videosPerDay is set, only process videos scheduled for today
+        if (!scheduledForToday) {
+          // Keep as pending - will be processed on its scheduled day
+          progress[i] = { index: i, status: `Pending - Scheduled for ${publishDate.toLocaleDateString()}` };
+          updateProgress(item.id, progress);
+          continue;
+        }
       } else if (finalPrivacyStatus === "private" && scheduleTime) {
         publishDate = parseDate(scheduleTime);
         if (!publishDate || publishDate < new Date()) {
@@ -130,13 +165,20 @@ async function processQueueItem(item: QueueItem): Promise<void> {
           updateProgress(item.id, progress);
           continue;
         }
+        const scheduledDay = new Date(publishDate);
+        scheduledDay.setHours(0, 0, 0, 0);
+        scheduledForToday = scheduledDay.getTime() === now.getTime();
+        
+        if (!scheduledForToday) {
+          progress[i] = { index: i, status: `Pending - Scheduled for ${publishDate.toLocaleDateString()}` };
+          updateProgress(item.id, progress);
+          continue;
+        }
       }
 
-      // For scheduled uploads, upload all videos immediately but set publishAt dates
-      // The worker will process all videos in the job, scheduling them appropriately
-
+      // Only upload videos scheduled for today (or videos without scheduling)
       // Upload video
-      const uploadPrivacyStatus = (item.videosPerDay > 0 || publishDate) ? "private" : finalPrivacyStatus;
+      const uploadPrivacyStatus = (publishDate) ? "private" : finalPrivacyStatus;
 
       const requestBody: {
         snippet: { title: string; description: string };
@@ -241,15 +283,29 @@ async function processQueueItem(item: QueueItem): Promise<void> {
       markAsCompleted(item.id);
       console.log(`Queue item ${item.id} completed - all ${csvData.length} videos processed`);
     } else {
-      // Still has pending items, keep as processing
+      // Still has pending items
       const processedCount = progress.filter(p => 
         p.status.includes("Uploaded") || 
         p.status.includes("Scheduled") || 
+        p.status.includes("scheduled") ||
         p.status.includes("Failed") ||
         p.status.includes("Missing") ||
         p.status.includes("Invalid")
       ).length;
-      console.log(`Queue item ${item.id} partially processed: ${processedCount}/${csvData.length}`);
+      
+      const pendingCount = progress.filter(p => 
+        p.status.includes("Pending")
+      ).length;
+      
+      // If there are videos scheduled for future days, mark as pending so worker can process them later
+      if (pendingCount > 0 && item.videosPerDay > 0) {
+        updateQueueItem(item.id, { status: "pending" });
+        console.log(`Queue item ${item.id}: Processed ${processedCount}/${csvData.length} videos today. ${pendingCount} videos scheduled for future days.`);
+      } else {
+        // No more videos to process, mark as completed
+        markAsCompleted(item.id);
+        console.log(`Queue item ${item.id} completed: ${processedCount}/${csvData.length} videos processed`);
+      }
     }
   } catch (error: any) {
     console.error(`Error processing queue item ${item.id}:`, error);

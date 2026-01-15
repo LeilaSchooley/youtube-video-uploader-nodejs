@@ -355,12 +355,28 @@ export default function Dashboard() {
         setSelectedJobId(data.jobId);
         fetchJobStatus(data.jobId);
       } else {
-        setShowToast({ message: data.error || 'Error uploading files', type: 'error' });
-        setMessage({ type: 'error', text: data.error || 'Error uploading files' });
+        console.error("=== BULK UPLOAD ERROR (Client) ===");
+        console.error("Error:", data.error);
+        console.error("Details:", data.details);
+        console.error("Code:", data.code);
+        console.error("Status:", data.status);
+        console.error("Full response:", data);
+        console.error("==================================");
+        
+        const errorMsg = data.error || 'Error uploading files';
+        setShowToast({ message: errorMsg, type: 'error' });
+        setMessage({ type: 'error', text: errorMsg });
       }
-    } catch (error) {
-      setShowToast({ message: 'An error occurred while uploading files.', type: 'error' });
-      setMessage({ type: 'error', text: 'An error occurred while uploading files.' });
+    } catch (error: any) {
+      console.error("=== BULK UPLOAD EXCEPTION (Client) ===");
+      console.error("Error:", error);
+      console.error("Message:", error?.message);
+      console.error("Stack:", error?.stack);
+      console.error("======================================");
+      
+      const errorMsg = error?.message || 'An error occurred while uploading files.';
+      setShowToast({ message: errorMsg, type: 'error' });
+      setMessage({ type: 'error', text: errorMsg });
     } finally {
       setCsvUploading(false);
       // Reset CSV file input after upload completes
@@ -496,35 +512,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Next Upload Timer */}
-      {nextUploadTime && timeUntilNext && (
-        <div className="mb-6 p-6 bg-gradient-to-r from-blue-500 to-indigo-600 rounded-xl shadow-lg text-white">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="text-4xl">⏰</div>
-              <div>
-                <div className="text-sm opacity-90 mb-1">Next Scheduled Upload</div>
-                <div className="text-2xl font-bold">{timeUntilNext}</div>
-                <div className="text-sm opacity-80 mt-1">
-                  {nextUploadTime.toLocaleDateString('en-US', { 
-                    weekday: 'long', 
-                    year: 'numeric', 
-                    month: 'long', 
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                  })}
-                </div>
-              </div>
-            </div>
-            <div className="text-right">
-              <div className="text-3xl animate-pulse">⏳</div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Next Upload Timer */}
+      {/* Next Upload Timer - Single Display */}
       {nextUploadTime && timeUntilNext && (
         <div className="mb-6 p-6 bg-gradient-to-r from-blue-500 to-indigo-600 rounded-xl shadow-lg text-white">
           <div className="flex items-center justify-between">
@@ -1129,64 +1117,134 @@ export default function Dashboard() {
           </div>
         )}
 
-        {selectedJobId && jobStatus && (
-          <div className="mt-5 p-6 bg-gradient-to-br from-gray-50 to-blue-50 border-2 border-blue-200 rounded-xl shadow-inner">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-bold text-gray-800">
-                📋 Job Progress: {jobStatus.id}
-              </h3>
-              <button
-                onClick={() => setSelectedJobId(null)}
-                className="text-gray-500 hover:text-gray-700 text-xl font-bold"
-              >
-                ×
-              </button>
-            </div>
-            {jobStatus.progress && jobStatus.progress.length > 0 ? (
-              <div className="max-h-96 overflow-y-auto">
-                <div className="space-y-2">
-                  {jobStatus.progress.map((item: ProgressItem, idx: number) => {
-                    const isSuccess = item.status.includes("Uploaded") || item.status.includes("Scheduled");
-                    const isFailed = item.status.includes("Failed") || item.status.includes("Missing") || item.status.includes("Invalid");
-                    const isProcessing = item.status.includes("Uploading") || item.status === "Pending";
-                    
-                    return (
-                      <div
-                        key={idx}
-                        className={`p-3 rounded-lg border ${
-                          isSuccess ? 'bg-green-50 border-green-200' :
-                          isFailed ? 'bg-red-50 border-red-200' :
-                          isProcessing ? 'bg-yellow-50 border-yellow-200' :
-                          'bg-gray-50 border-gray-200'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="font-medium text-gray-800">Video {item.index + 1}</span>
-                          <span className={`text-xs px-2 py-1 rounded ${
-                            isSuccess ? 'bg-green-100 text-green-800' :
-                            isFailed ? 'bg-red-100 text-red-800' :
-                            isProcessing ? 'bg-yellow-100 text-yellow-800 animate-pulse-slow' :
-                            'bg-gray-100 text-gray-800'
-                          }`}>
-                            {isProcessing && '⏳ '}
-                            {isSuccess && '✓ '}
-                            {isFailed && '✕ '}
-                            {item.status}
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  })}
+        {selectedJobId && jobStatus && (() => {
+          const progress = jobStatus.progress || [];
+          const totalVideos = jobStatus.totalVideos || progress.length || 0;
+          const completed = progress.filter((p: ProgressItem) => 
+            p.status.includes("Uploaded") || 
+            p.status.includes("Scheduled") ||
+            p.status.includes("scheduled")
+          ).length;
+          const failed = progress.filter((p: ProgressItem) => 
+            p.status.includes("Failed") || 
+            p.status.includes("Missing") ||
+            p.status.includes("Invalid")
+          ).length;
+          const processing = progress.filter((p: ProgressItem) => 
+            p.status.includes("Uploading") || 
+            p.status === "Pending" ||
+            p.status.includes("thumbnail")
+          ).length;
+          const pending = totalVideos - completed - failed - processing;
+          const progressPercentage = totalVideos > 0 ? Math.round((completed / totalVideos) * 100) : 0;
+
+          return (
+            <div className="mt-5 p-6 bg-gradient-to-br from-gray-50 dark:from-gray-800 to-blue-50 dark:to-blue-900/30 border-2 border-blue-200 dark:border-blue-700 rounded-xl shadow-lg">
+              <div className="flex justify-between items-start mb-6">
+                <div>
+                  <h3 className="text-xl font-bold text-gray-800 dark:text-white mb-1">
+                    📋 Job Progress
+                  </h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 font-mono">
+                    {jobStatus.id}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setSelectedJobId(null)}
+                  className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 text-2xl font-bold transition-colors"
+                >
+                  ×
+                </button>
+              </div>
+
+              {/* Progress Statistics */}
+              <div className="mb-6">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Overall Progress</span>
+                  <span className="text-lg font-bold text-gray-800 dark:text-white">{progressPercentage}%</span>
+                </div>
+                <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3 mb-4">
+                  <div 
+                    className="bg-gradient-to-r from-green-500 to-green-600 h-3 rounded-full transition-all duration-500"
+                    style={{ width: `${progressPercentage}%` }}
+                  ></div>
+                </div>
+                
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                  <div className="text-center p-3 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                    <div className="text-2xl font-bold text-gray-800 dark:text-white">{totalVideos}</div>
+                    <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">Total Videos</div>
+                  </div>
+                  <div className="text-center p-3 bg-green-50 dark:bg-green-900/30 rounded-lg border border-green-200 dark:border-green-700">
+                    <div className="text-2xl font-bold text-green-700 dark:text-green-300">{completed}</div>
+                    <div className="text-xs text-green-600 dark:text-green-400 mt-1">✅ Completed</div>
+                  </div>
+                  <div className="text-center p-3 bg-yellow-50 dark:bg-yellow-900/30 rounded-lg border border-yellow-200 dark:border-yellow-700">
+                    <div className="text-2xl font-bold text-yellow-700 dark:text-yellow-300">{processing + pending}</div>
+                    <div className="text-xs text-yellow-600 dark:text-yellow-400 mt-1">⏳ Processing</div>
+                  </div>
+                  <div className="text-center p-3 bg-red-50 dark:bg-red-900/30 rounded-lg border border-red-200 dark:border-red-700">
+                    <div className="text-2xl font-bold text-red-700 dark:text-red-300">{failed}</div>
+                    <div className="text-xs text-red-600 dark:text-red-400 mt-1">❌ Failed</div>
+                  </div>
                 </div>
               </div>
-            ) : (
-              <div className="text-center py-8">
-                <div className="text-4xl mb-2">⏳</div>
-                <p className="text-gray-600">No progress data available yet.</p>
-              </div>
-            )}
-          </div>
-        )}
+
+              {/* Video List */}
+              {progress.length > 0 ? (
+                <div>
+                  <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
+                    Video Details ({completed}/{totalVideos} completed)
+                  </h4>
+                  <div className="max-h-96 overflow-y-auto space-y-2 pr-2">
+                    {progress.map((item: ProgressItem, idx: number) => {
+                      const isSuccess = item.status.includes("Uploaded") || item.status.includes("Scheduled") || item.status.includes("scheduled");
+                      const isFailed = item.status.includes("Failed") || item.status.includes("Missing") || item.status.includes("Invalid");
+                      const isProcessing = item.status.includes("Uploading") || item.status === "Pending" || item.status.includes("thumbnail");
+                      
+                      return (
+                        <div
+                          key={idx}
+                          className={`p-3 rounded-lg border transition-all ${
+                            isSuccess ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-700' :
+                            isFailed ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-700' :
+                            isProcessing ? 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-700' :
+                            'bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-3 flex-1 min-w-0">
+                              <span className="text-lg font-bold text-gray-800 dark:text-white flex-shrink-0">
+                                {isSuccess ? '✅' : isFailed ? '❌' : isProcessing ? '⏳' : '⏸️'}
+                              </span>
+                              <span className="font-medium text-gray-800 dark:text-white truncate">
+                                Video {item.index + 1}
+                              </span>
+                            </div>
+                            <span className={`text-xs px-3 py-1 rounded-full font-medium flex-shrink-0 ${
+                              isSuccess ? 'bg-green-100 dark:bg-green-800 text-green-800 dark:text-green-200' :
+                              isFailed ? 'bg-red-100 dark:bg-red-800 text-red-800 dark:text-red-200' :
+                              isProcessing ? 'bg-yellow-100 dark:bg-yellow-800 text-yellow-800 dark:text-yellow-200 animate-pulse-slow' :
+                              'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200'
+                            }`}>
+                              {item.status}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-8">
+                  <div className="text-5xl mb-3">⏳</div>
+                  <p className="text-gray-600 dark:text-gray-400 font-medium">Waiting for worker to start processing...</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-500 mt-2">Progress will appear here once uploads begin</p>
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
       <footer className="text-center py-5 text-gray-500">

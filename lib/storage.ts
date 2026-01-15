@@ -40,3 +40,7 @@ export function deleteUploadDir(sessionId: string, jobId: string): void {
   }
 }
 
+export function cleanupUploadDir(sessionId: string, jobId: string): void {
+  deleteUploadDir(sessionId, jobId);
+}
+
