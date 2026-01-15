@@ -30,3 +30,8 @@ export function generateSessionId(): string {
          Math.random().toString(36).substring(2, 15);
 }
 
+// Export sessions map for worker to access (in production, use a shared store like Redis)
+export function getAllSessions(): Map<string, SessionData> {
+  return sessions;
+}
+

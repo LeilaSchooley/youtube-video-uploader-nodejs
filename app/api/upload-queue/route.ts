@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
         auth: oAuthClient,
       });
       const userInfo = await oauth2.userinfo.get();
-      userId = userInfo.data.email || userInfo.data.id;
+      userId = (userInfo.data.email || userInfo.data.id || undefined) as string | undefined;
       // Update session with userId
       session.userId = userId;
     }
@@ -239,7 +239,7 @@ export async function GET(request: NextRequest) {
         auth: oAuthClient,
       });
       const userInfo = await oauth2.userinfo.get();
-      userId = userInfo.data.email || userInfo.data.id || undefined;
+      userId = (userInfo.data.email || userInfo.data.id || undefined) as string | undefined;
       // Update session with userId
       session.userId = userId;
     }

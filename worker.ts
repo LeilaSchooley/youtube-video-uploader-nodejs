@@ -39,7 +39,8 @@ async function processQueueItem(item: QueueItem): Promise<void> {
     // If session not found but userId exists, find any active session for this user
     if (!session && item.userId) {
       const allSessions = getAllSessions();
-      for (const [_, s] of allSessions.entries()) {
+      const sessionsArray = Array.from(allSessions.values());
+      for (const s of sessionsArray) {
         if (s.userId === item.userId && s.authenticated && s.tokens) {
           session = s;
           break;
