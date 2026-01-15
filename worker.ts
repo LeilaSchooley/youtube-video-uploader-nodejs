@@ -856,7 +856,10 @@ async function processQueueItem(item: QueueItem): Promise<void> {
               i + 1
             }: Video path is missing in CSV`
           );
-          progress[i] = { index: i, status: "Failed: Missing video path in CSV" };
+          progress[i] = {
+            index: i,
+            status: "Failed: Missing video path in CSV",
+          };
           updateProgress(item.id, progress);
           continue;
         }
@@ -908,7 +911,10 @@ async function processQueueItem(item: QueueItem): Promise<void> {
                 i + 1
               }: Path exists but is not a file: ${path}`
             );
-            progress[i] = { index: i, status: `Failed: Invalid path (not a file)` };
+            progress[i] = {
+              index: i,
+              status: `Failed: Invalid path (not a file)`,
+            };
             updateProgress(item.id, progress);
             continue;
           }
@@ -927,7 +933,12 @@ async function processQueueItem(item: QueueItem): Promise<void> {
               i + 1
             }: Cannot access file: ${statError?.message || "Unknown error"}`
           );
-          progress[i] = { index: i, status: `Failed: Cannot access file - ${statError?.message || "Unknown error"}` };
+          progress[i] = {
+            index: i,
+            status: `Failed: Cannot access file - ${
+              statError?.message || "Unknown error"
+            }`,
+          };
           updateProgress(item.id, progress);
           continue;
         }
@@ -1103,17 +1114,15 @@ async function processQueueItem(item: QueueItem): Promise<void> {
     ).length;
 
     const pendingCount = progress.filter(
-      (p) =>
-        p.status.includes("Pending") ||
-        p.status === "Pending"
+      (p) => p.status.includes("Pending") || p.status === "Pending"
     ).length;
 
     const totalDuration = ((Date.now() - startTime) / 1000).toFixed(1);
 
     console.log(
       `[WORKER] [${new Date().toISOString()}] 📊 Job ${item.id} final stats: ` +
-      `${successCount} succeeded, ${failedCount} failed, ${pendingCount} pending ` +
-      `out of ${csvData.length} total`
+        `${successCount} succeeded, ${failedCount} failed, ${pendingCount} pending ` +
+        `out of ${csvData.length} total`
     );
 
     // Determine final job status based on results
@@ -1122,40 +1131,49 @@ async function processQueueItem(item: QueueItem): Promise<void> {
       updateQueueItem(item.id, { status: "pending" });
       console.log(
         `[WORKER] [${new Date().toISOString()}] ⏸️ Job ${item.id}: ` +
-        `${successCount} uploaded, ${failedCount} failed, ${pendingCount} pending. ` +
-        `Job set to PENDING for future processing. Duration: ${totalDuration}s`
+          `${successCount} uploaded, ${failedCount} failed, ${pendingCount} pending. ` +
+          `Job set to PENDING for future processing. Duration: ${totalDuration}s`
       );
     } else if (successCount === 0 && failedCount > 0) {
       // All videos failed - mark job as failed
       markAsFailed(item.id, `All ${failedCount} video(s) failed to upload`);
       console.log(
         `[WORKER] [${new Date().toISOString()}] ❌ Job ${item.id} FAILED - ` +
-        `All ${failedCount} video(s) failed. No successful uploads. Duration: ${totalDuration}s`
+          `All ${failedCount} video(s) failed. No successful uploads. Duration: ${totalDuration}s`
       );
     } else if (successCount > 0) {
       // At least some videos succeeded - mark as completed
       markAsCompleted(item.id);
       if (failedCount > 0) {
         console.log(
-          `[WORKER] [${new Date().toISOString()}] ⚠️ Job ${item.id} COMPLETED with errors - ` +
-          `${successCount} uploaded, ${failedCount} failed out of ${csvData.length}. Duration: ${totalDuration}s`
+          `[WORKER] [${new Date().toISOString()}] ⚠️ Job ${
+            item.id
+          } COMPLETED with errors - ` +
+            `${successCount} uploaded, ${failedCount} failed out of ${csvData.length}. Duration: ${totalDuration}s`
         );
       } else {
         console.log(
-          `[WORKER] [${new Date().toISOString()}] ✅ Job ${item.id} COMPLETED - ` +
-          `All ${successCount} video(s) uploaded successfully. Duration: ${totalDuration}s`
+          `[WORKER] [${new Date().toISOString()}] ✅ Job ${
+            item.id
+          } COMPLETED - ` +
+            `All ${successCount} video(s) uploaded successfully. Duration: ${totalDuration}s`
         );
       }
     } else {
       // No videos processed at all (edge case - empty CSV or all skipped)
       markAsCompleted(item.id);
       console.log(
-        `[WORKER] [${new Date().toISOString()}] ⚠️ Job ${item.id} COMPLETED - ` +
-        `No videos were processed. Duration: ${totalDuration}s`
+        `[WORKER] [${new Date().toISOString()}] ⚠️ Job ${
+          item.id
+        } COMPLETED - ` +
+          `No videos were processed. Duration: ${totalDuration}s`
       );
     }
   } catch (error: any) {
-    console.error(`[WORKER] [ERROR] Error processing queue item ${item.id}:`, error);
+    console.error(
+      `[WORKER] [ERROR] Error processing queue item ${item.id}:`,
+      error
+    );
     markAsFailed(item.id, error?.message || "Unknown error");
   }
 }
