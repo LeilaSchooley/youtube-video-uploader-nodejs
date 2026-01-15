@@ -232,12 +232,6 @@ export default function Dashboard() {
     setSelectedVideoFile(null); // Reset file selection after upload starts
 
     const formData = new FormData(e.currentTarget);
-    const privacy = formData.get('privacyStatus') as string;
-    
-    if (!confirm(`You have selected "${privacy}" as the video's privacy status. Proceed with upload?`)) {
-      setUploading(false);
-      return;
-    }
 
     try {
       const res = await fetch('/api/upload', {
@@ -251,12 +245,28 @@ export default function Dashboard() {
         setMessage({ type: null, text: null });
         e.currentTarget.reset();
       } else {
-        setShowToast({ message: data.error || 'Error uploading video', type: 'error' });
-        setMessage({ type: 'error', text: data.error || 'Error uploading video' });
+        console.error("=== UPLOAD ERROR (Client) ===");
+        console.error("Error:", data.error);
+        console.error("Details:", data.details);
+        console.error("Code:", data.code);
+        console.error("Status:", data.status);
+        console.error("Full response:", data);
+        console.error("=============================");
+        
+        const errorMsg = data.error || 'Error uploading video';
+        setShowToast({ message: errorMsg, type: 'error' });
+        setMessage({ type: 'error', text: errorMsg });
       }
-    } catch (error) {
-      setShowToast({ message: 'An error occurred while uploading the video.', type: 'error' });
-      setMessage({ type: 'error', text: 'An error occurred while uploading the video.' });
+    } catch (error: any) {
+      console.error("=== UPLOAD EXCEPTION (Client) ===");
+      console.error("Error:", error);
+      console.error("Message:", error?.message);
+      console.error("Stack:", error?.stack);
+      console.error("=================================");
+      
+      const errorMsg = error?.message || 'An error occurred while uploading the video.';
+      setShowToast({ message: errorMsg, type: 'error' });
+      setMessage({ type: 'error', text: errorMsg });
     } finally {
       setUploading(false);
       // Reset file input after upload completes
