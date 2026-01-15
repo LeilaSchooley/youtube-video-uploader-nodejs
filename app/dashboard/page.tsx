@@ -70,6 +70,13 @@ export default function Dashboard() {
     currentFileName: string;
     message: string;
     status: string;
+    copyStats?: {
+      videosCopied: number;
+      videosSkipped: number;
+      thumbnailsCopied: number;
+      thumbnailsSkipped: number;
+      errors: string[];
+    };
   } | null>(null);
   const [uploadProgressInterval, setUploadProgressInterval] =
     useState<NodeJS.Timeout | null>(null);
@@ -854,6 +861,7 @@ export default function Dashboard() {
               currentFileName: progressData.currentFileName || "",
               message: progressData.message || "Processing...",
               status: progressData.status || "copying",
+              copyStats: progressData.copyStats,
             });
 
             // Stop polling if completed or error
@@ -2394,43 +2402,139 @@ export default function Dashboard() {
 
                 {/* Real-time upload progress display */}
                 {uploadProgress && csvUploading && (
-                  <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg dark:bg-blue-900 dark:border-blue-700">
-                    <div className="flex items-center gap-3 mb-2">
-                      <div className="animate-spin text-blue-600 dark:text-blue-400">
-                        ⏳
-                      </div>
-                      <div className="flex-1">
-                        <div className="font-semibold text-blue-900 dark:text-blue-100">
-                          {uploadProgress.message}
+                  <div className="mb-4 p-5 bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl dark:from-blue-900/30 dark:to-indigo-900/30 dark:border-blue-700 shadow-sm">
+                    {/* Header */}
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className="relative">
+                        <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-800 flex items-center justify-center">
+                          <div className="animate-spin text-xl">📤</div>
                         </div>
                         {uploadProgress.totalFiles > 0 && (
-                          <div className="text-sm text-blue-700 dark:text-blue-300 mt-1">
-                            Uploading video {uploadProgress.currentFile} /{" "}
-                            {uploadProgress.totalFiles}
-                            {uploadProgress.currentFileName && (
-                              <span className="ml-2 text-blue-600 dark:text-blue-400">
-                                ({uploadProgress.currentFileName})
-                              </span>
-                            )}
-                          </div>
-                        )}
-                        {uploadProgress.totalFiles > 0 && (
-                          <div className="mt-2 w-full bg-blue-200 rounded-full h-2.5 dark:bg-blue-700">
-                            <div
-                              className="bg-blue-600 h-2.5 rounded-full transition-all duration-300 dark:bg-blue-400"
-                              style={{
-                                width: `${Math.min(
-                                  100,
-                                  (uploadProgress.currentFile /
-                                    uploadProgress.totalFiles) *
-                                    100
-                                )}%`,
-                              }}
-                            ></div>
+                          <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-blue-600 text-white text-xs flex items-center justify-center font-bold">
+                            {uploadProgress.currentFile}
                           </div>
                         )}
                       </div>
+                      <div className="flex-1">
+                        <div className="font-bold text-blue-900 dark:text-blue-100 text-lg">
+                          Copying Files to Server
+                        </div>
+                        <div className="text-sm text-blue-700 dark:text-blue-300">
+                          {uploadProgress.message || "Preparing files..."}
+                        </div>
+                      </div>
                     </div>
+
+                    {/* Current file being processed */}
+                    {uploadProgress.currentFileName && (
+                      <div className="mb-4 p-3 bg-white/60 dark:bg-gray-800/60 rounded-lg border border-blue-100 dark:border-blue-800">
+                        <div className="flex items-center gap-2">
+                          <span className="text-blue-500">📁</span>
+                          <span className="text-sm font-medium text-gray-700 dark:text-gray-300 truncate">
+                            {uploadProgress.currentFileName}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Progress bar */}
+                    {uploadProgress.totalFiles > 0 && (
+                      <div className="mb-4">
+                        <div className="flex justify-between text-sm mb-2">
+                          <span className="text-blue-800 dark:text-blue-200 font-medium">
+                            Processing file {uploadProgress.currentFile} of{" "}
+                            {uploadProgress.totalFiles}
+                          </span>
+                          <span className="text-blue-600 dark:text-blue-400 font-bold">
+                            {Math.round(
+                              (uploadProgress.currentFile /
+                                uploadProgress.totalFiles) *
+                                100
+                            )}
+                            %
+                          </span>
+                        </div>
+                        <div className="w-full bg-blue-200 rounded-full h-3 dark:bg-blue-800 overflow-hidden">
+                          <div
+                            className="bg-gradient-to-r from-blue-500 to-indigo-500 h-3 rounded-full transition-all duration-500 ease-out relative"
+                            style={{
+                              width: `${Math.min(
+                                100,
+                                (uploadProgress.currentFile /
+                                  uploadProgress.totalFiles) *
+                                  100
+                              )}%`,
+                            }}
+                          >
+                            <div className="absolute inset-0 bg-white/20 animate-pulse"></div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Copy statistics */}
+                    {uploadProgress.copyStats && (
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div className="bg-green-100 dark:bg-green-900/40 rounded-lg p-3 text-center">
+                          <div className="text-2xl font-bold text-green-700 dark:text-green-300">
+                            {uploadProgress.copyStats.videosCopied}
+                          </div>
+                          <div className="text-xs text-green-600 dark:text-green-400">
+                            Videos Copied
+                          </div>
+                        </div>
+                        <div className="bg-purple-100 dark:bg-purple-900/40 rounded-lg p-3 text-center">
+                          <div className="text-2xl font-bold text-purple-700 dark:text-purple-300">
+                            {uploadProgress.copyStats.thumbnailsCopied}
+                          </div>
+                          <div className="text-xs text-purple-600 dark:text-purple-400">
+                            Thumbnails
+                          </div>
+                        </div>
+                        <div className="bg-yellow-100 dark:bg-yellow-900/40 rounded-lg p-3 text-center">
+                          <div className="text-2xl font-bold text-yellow-700 dark:text-yellow-300">
+                            {uploadProgress.copyStats.videosSkipped}
+                          </div>
+                          <div className="text-xs text-yellow-600 dark:text-yellow-400">
+                            Skipped
+                          </div>
+                        </div>
+                        <div className="bg-red-100 dark:bg-red-900/40 rounded-lg p-3 text-center">
+                          <div className="text-2xl font-bold text-red-700 dark:text-red-300">
+                            {uploadProgress.copyStats.errors.length}
+                          </div>
+                          <div className="text-xs text-red-600 dark:text-red-400">
+                            Errors
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Error messages */}
+                    {uploadProgress.copyStats &&
+                      uploadProgress.copyStats.errors.length > 0 && (
+                        <div className="mt-3 p-3 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 rounded-lg">
+                          <div className="text-sm font-medium text-red-800 dark:text-red-200 mb-2">
+                            ⚠️ Errors encountered:
+                          </div>
+                          <ul className="text-xs text-red-700 dark:text-red-300 space-y-1 max-h-20 overflow-y-auto">
+                            {uploadProgress.copyStats.errors
+                              .slice(0, 5)
+                              .map((err, idx) => (
+                                <li key={idx} className="truncate">
+                                  • {err}
+                                </li>
+                              ))}
+                            {uploadProgress.copyStats.errors.length > 5 && (
+                              <li className="text-red-500">
+                                ...and{" "}
+                                {uploadProgress.copyStats.errors.length - 5}{" "}
+                                more
+                              </li>
+                            )}
+                          </ul>
+                        </div>
+                      )}
                   </div>
                 )}
 
@@ -2446,9 +2550,9 @@ export default function Dashboard() {
                   {csvUploading ? (
                     <span className="flex items-center gap-2">
                       <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                      {uploadProgress
-                        ? "Copying files..."
-                        : "Uploading Files..."}
+                      {uploadProgress && uploadProgress.totalFiles > 0
+                        ? `Copying ${uploadProgress.currentFile}/${uploadProgress.totalFiles}...`
+                        : "Starting upload..."}
                     </span>
                   ) : !selectedCsvFile ? (
                     "Please select a CSV file first"

@@ -77,7 +77,20 @@ async function videoAlreadyExists(
     return exactMatch;
   } catch (error: any) {
     // If there's an error checking, log it but don't block the upload
-    console.error("Error checking for existing video:", error?.message);
+    const errorMessage = error?.message || "Unknown error";
+    const errorCode = error?.code;
+    
+    if (errorCode === 403 || errorMessage.includes("Insufficient Permission") || errorMessage.includes("insufficient")) {
+      console.warn(
+        `Insufficient permissions to check for existing videos. ` +
+        `Please re-authenticate to grant YouTube read access. Error: ${errorMessage}`
+      );
+      console.warn(
+        `The duplicate check will be skipped. Videos will be uploaded even if they already exist.`
+      );
+    } else {
+      console.error("Error checking for existing video:", errorMessage);
+    }
     return false; // Assume video doesn't exist if check fails
   }
 }
