@@ -74,10 +74,42 @@ async function processQueueItem(item: QueueItem): Promise<void> {
     await new Promise<void>((resolve, reject) => {
       csvStream
         .on("data", (row: CSVRow) => {
+          console.log(
+            `[WORKER] [${new Date().toISOString()}] CSV Row ${
+              csvData.length + 1
+            } parsed:`,
+            {
+              keys: Object.keys(row),
+              youtube_title: row.youtube_title
+                ? `"${row.youtube_title.substring(0, 50)}..."`
+                : "MISSING",
+              youtube_description: row.youtube_description
+                ? `"${row.youtube_description.substring(0, 50)}..."`
+                : "MISSING",
+              path: row.path || "MISSING",
+              thumbnail_path: row.thumbnail_path || "MISSING",
+              privacyStatus: row.privacyStatus || "MISSING",
+              scheduleTime: row.scheduleTime || "MISSING",
+              fullRow: row,
+            }
+          );
           csvData.push(row);
         })
-        .on("end", resolve)
-        .on("error", reject);
+        .on("end", () => {
+          console.log(
+            `[WORKER] [${new Date().toISOString()}] CSV parsing complete. Total rows: ${
+              csvData.length
+            }`
+          );
+          resolve();
+        })
+        .on("error", (error) => {
+          console.error(
+            `[WORKER] [ERROR] [${new Date().toISOString()}] CSV parsing error:`,
+            error
+          );
+          reject(error);
+        });
     });
 
     // Calculate scheduled dates
@@ -159,9 +191,67 @@ async function processQueueItem(item: QueueItem): Promise<void> {
         progress[i] = { index: i, status: "Pending" };
       }
 
-      // Validate required fields
-      if (!youtube_title || !youtube_description) {
-        progress[i] = { index: i, status: "Missing required fields" };
+      // Log row data for debugging
+      console.log(
+        `[WORKER] [${new Date().toISOString()}] Video ${i + 1}/${
+          csvData.length
+        } - Processing row:`,
+        {
+          index: i,
+          has_youtube_title: !!youtube_title,
+          youtube_title: youtube_title
+            ? `"${youtube_title.substring(0, 50)}..."`
+            : "NULL/EMPTY",
+          has_youtube_description: !!youtube_description,
+          youtube_description: youtube_description
+            ? `"${youtube_description.substring(0, 50)}..."`
+            : "NULL/EMPTY",
+          has_path: !!path,
+          path: path || "NULL/EMPTY",
+          has_thumbnail_path: !!thumbnail_path,
+          thumbnail_path: thumbnail_path || "NULL/EMPTY",
+          privacyStatus: privacyStatus || "NULL/EMPTY (will default to public)",
+          scheduleTime: scheduleTime || "NULL/EMPTY",
+          allKeys: Object.keys(row),
+          rowValues: Object.entries(row).map(([key, value]) => ({
+            key,
+            value:
+              typeof value === "string"
+                ? value.length > 50
+                  ? value.substring(0, 50) + "..."
+                  : value
+                : String(value || ""),
+            isEmpty:
+              typeof value === "string" ? value.trim().length === 0 : !value,
+          })),
+        }
+      );
+
+      // Validate required fields with detailed error messages
+      const missingFields: string[] = [];
+      if (!youtube_title || youtube_title.trim().length === 0) {
+        missingFields.push("youtube_title");
+      }
+      if (!youtube_description || youtube_description.trim().length === 0) {
+        missingFields.push("youtube_description");
+      }
+
+      if (missingFields.length > 0) {
+        const errorMsg = `Missing required fields: ${missingFields.join(", ")}`;
+        console.error(
+          `[WORKER] [ERROR] [${new Date().toISOString()}] Video ${
+            i + 1
+          }: ${errorMsg}`
+        );
+        console.error(
+          `[WORKER] [ERROR] Available fields in CSV row:`,
+          Object.keys(row)
+        );
+        console.error(
+          `[WORKER] [ERROR] Row data:`,
+          JSON.stringify(row, null, 2)
+        );
+        progress[i] = { index: i, status: errorMsg };
         updateProgress(item.id, progress);
         continue;
       }
@@ -240,13 +330,14 @@ async function processQueueItem(item: QueueItem): Promise<void> {
       // Upload video
       const uploadPrivacyStatus = publishDate ? "private" : finalPrivacyStatus;
 
+      // At this point, youtube_title and youtube_description are guaranteed to be strings (validated above)
       const requestBody: {
         snippet: { title: string; description: string };
         status: { privacyStatus: string; publishAt?: string };
       } = {
         snippet: {
-          title: youtube_title,
-          description: youtube_description,
+          title: youtube_title as string, // Type assertion: validated above
+          description: youtube_description as string, // Type assertion: validated above
         },
         status: { privacyStatus: uploadPrivacyStatus },
       };
@@ -256,9 +347,82 @@ async function processQueueItem(item: QueueItem): Promise<void> {
       }
 
       try {
-        // Check if video file exists
-        if (!path || !fileExists(path)) {
-          progress[i] = { index: i, status: "Video file not found" };
+        // Check if video file exists with detailed logging
+        if (!path) {
+          const errorMsg = "Video path is missing in CSV";
+          console.error(
+            `[WORKER] [ERROR] [${new Date().toISOString()}] Video ${
+              i + 1
+            }: ${errorMsg}`
+          );
+          progress[i] = { index: i, status: errorMsg };
+          updateProgress(item.id, progress);
+          continue;
+        }
+
+        const fileExistsResult = fileExists(path);
+        if (!fileExistsResult) {
+          const errorMsg = `Video file not found at: ${path}`;
+          console.error(
+            `[WORKER] [ERROR] [${new Date().toISOString()}] Video ${
+              i + 1
+            }: ${errorMsg}`
+          );
+          console.error(
+            `[WORKER] [ERROR] Current working directory: ${process.cwd()}`
+          );
+          console.error(`[WORKER] [ERROR] Platform: ${process.platform}`);
+          console.error(
+            `[WORKER] [ERROR] File path type: ${
+              path.startsWith("/")
+                ? "absolute (Unix)"
+                : path.match(/^[A-Z]:/)
+                ? "absolute (Windows)"
+                : "relative"
+            }`
+          );
+
+          // Try to provide helpful error message
+          let helpfulError = errorMsg;
+          if (path.includes("\\") || path.match(/^[A-Z]:/i)) {
+            helpfulError +=
+              " (Windows path detected - ensure files were copied to server storage)";
+          }
+
+          progress[i] = { index: i, status: helpfulError };
+          updateProgress(item.id, progress);
+          continue;
+        }
+
+        // Verify it's actually a file
+        try {
+          const stats = fs.statSync(path);
+          if (!stats.isFile()) {
+            const errorMsg = `Path exists but is not a file: ${path}`;
+            console.error(
+              `[WORKER] [ERROR] [${new Date().toISOString()}] Video ${
+                i + 1
+              }: ${errorMsg}`
+            );
+            progress[i] = { index: i, status: errorMsg };
+            updateProgress(item.id, progress);
+            continue;
+          }
+          console.log(
+            `[WORKER] [${new Date().toISOString()}] Video ${
+              i + 1
+            }: File verified (${(stats.size / 1024 / 1024).toFixed(2)} MB)`
+          );
+        } catch (statError: any) {
+          const errorMsg = `Cannot access file: ${
+            statError?.message || "Unknown error"
+          }`;
+          console.error(
+            `[WORKER] [ERROR] [${new Date().toISOString()}] Video ${
+              i + 1
+            }: ${errorMsg}`
+          );
+          progress[i] = { index: i, status: errorMsg };
           updateProgress(item.id, progress);
           continue;
         }

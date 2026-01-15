@@ -107,11 +107,30 @@ export async function POST(request: NextRequest) {
         csvStream
           .pipe(csvParser())
           .on("data", (row: CSVRow) => {
+            console.log(`[UPLOAD-QUEUE] CSV Row ${csvData.length + 1} parsed:`, {
+              keys: Object.keys(row),
+              youtube_title: row.youtube_title ? `"${row.youtube_title.substring(0, 50)}..."` : 'MISSING',
+              youtube_description: row.youtube_description ? `"${row.youtube_description.substring(0, 50)}..."` : 'MISSING',
+              path: row.path || 'MISSING',
+              thumbnail_path: row.thumbnail_path || 'MISSING',
+            });
             csvData.push(row);
           })
-          .on("end", resolve)
+          .on("end", () => {
+            console.log(`[UPLOAD-QUEUE] CSV parsing complete. Total rows: ${csvData.length}`);
+            if (csvData.length > 0) {
+              console.log(`[UPLOAD-QUEUE] First row sample:`, {
+                keys: Object.keys(csvData[0]),
+                values: Object.entries(csvData[0]).map(([key, value]) => ({
+                  key,
+                  value: typeof value === 'string' ? (value.length > 100 ? value.substring(0, 100) + '...' : value) : value
+                }))
+              });
+            }
+            resolve();
+          })
           .on("error", (err) => {
-            console.error("CSV parsing error:", err);
+            console.error("[UPLOAD-QUEUE] [ERROR] CSV parsing error:", err);
             reject(new Error(`Failed to parse CSV file: ${err.message}`));
           });
       });
@@ -132,6 +151,78 @@ export async function POST(request: NextRequest) {
 
     console.log(`Parsed CSV with ${csvData.length} rows`);
 
+    // Helper function to normalize paths (handle Windows paths on Linux)
+    const normalizePath = (filePath: string): string => {
+      if (!filePath) return filePath;
+      
+      // Convert Windows path separators to forward slashes
+      let normalized = filePath.replace(/\\/g, '/');
+      
+      // If it's a Windows absolute path (C:/...), try to map it
+      // For now, we'll just normalize separators and let fs.existsSync handle it
+      // In production, you might need to mount Windows drives or use network paths
+      
+      return normalized;
+    };
+
+    // Helper function to check if file exists with detailed logging
+    const checkFileExists = (filePath: string, fileType: string, index: number): { exists: boolean; normalizedPath: string; error?: string } => {
+      const normalizedPath = normalizePath(filePath);
+      
+      console.log(`[UPLOAD-QUEUE] Checking ${fileType} ${index + 1}:`, {
+        originalPath: filePath,
+        normalizedPath: normalizedPath,
+        platform: process.platform,
+        cwd: process.cwd()
+      });
+      
+      try {
+        const exists = fs.existsSync(normalizedPath);
+        if (!exists) {
+          // Try original path too (in case it's already correct)
+          const originalExists = fs.existsSync(filePath);
+          if (originalExists) {
+            console.log(`[UPLOAD-QUEUE] File exists at original path: ${filePath}`);
+            return { exists: true, normalizedPath: filePath };
+          }
+          
+          // Check if it's a Windows path on Linux
+          if (filePath.match(/^[A-Z]:[\\\/]/i)) {
+            return {
+              exists: false,
+              normalizedPath: normalizedPath,
+              error: `Windows path detected on ${process.platform} server. File must be accessible from server. Original: ${filePath}`
+            };
+          }
+          
+          return {
+            exists: false,
+            normalizedPath: normalizedPath,
+            error: `File not found: ${normalizedPath}`
+          };
+        }
+        
+        // Check if it's actually a file (not a directory)
+        const stats = fs.statSync(normalizedPath);
+        if (!stats.isFile()) {
+          return {
+            exists: false,
+            normalizedPath: normalizedPath,
+            error: `Path exists but is not a file: ${normalizedPath}`
+          };
+        }
+        
+        console.log(`[UPLOAD-QUEUE] ✓ ${fileType} ${index + 1} found: ${normalizedPath} (${(stats.size / 1024 / 1024).toFixed(2)} MB)`);
+        return { exists: true, normalizedPath: normalizedPath };
+      } catch (error: any) {
+        return {
+          exists: false,
+          normalizedPath: normalizedPath,
+          error: `Error checking file: ${error?.message || 'Unknown error'}`
+        };
+      }
+    };
+
     // Copy video and thumbnail files to server storage
     const updatedRows: CSVRow[] = [];
     const copyStats = {
@@ -148,37 +239,91 @@ export async function POST(request: NextRequest) {
 
       // Copy video file if it exists
       if (row.path) {
-        if (fs.existsSync(row.path)) {
+        const fileCheck = checkFileExists(row.path, 'Video', i);
+        
+        if (fileCheck.exists) {
           try {
-            const videoFilename = path.basename(row.path);
+            // Sanitize filename to handle special characters
+            const videoFilename = path.basename(fileCheck.normalizedPath)
+              .replace(/[<>:"|?*]/g, '_') // Replace invalid filename chars
+              .replace(/\s+/g, '_'); // Replace spaces with underscores
+            
             const videoDest = path.join(uploadDir, "videos", videoFilename);
-            fs.copyFileSync(row.path, videoDest);
+            
+            console.log(`[UPLOAD-QUEUE] Copying video ${i + 1}: ${fileCheck.normalizedPath} -> ${videoDest}`);
+            
+            // Ensure destination directory exists
+            const destDir = path.dirname(videoDest);
+            if (!fs.existsSync(destDir)) {
+              fs.mkdirSync(destDir, { recursive: true });
+            }
+            
+            fs.copyFileSync(fileCheck.normalizedPath, videoDest);
+            
+            // Verify copy succeeded
+            if (!fs.existsSync(videoDest)) {
+              throw new Error('Copy verification failed - destination file not found');
+            }
+            
             updatedRow.path = videoDest;
             copyStats.videosCopied++;
+            console.log(`[UPLOAD-QUEUE] ✓ Video ${i + 1} copied successfully`);
           } catch (error: any) {
-            copyStats.errors.push(`Video ${i + 1}: ${error?.message || 'Copy failed'}`);
+            const errorMsg = `Video ${i + 1}: Copy failed - ${error?.message || 'Unknown error'}. Source: ${row.path}`;
+            console.error(`[UPLOAD-QUEUE] [ERROR] ${errorMsg}`, error);
+            copyStats.errors.push(errorMsg);
             copyStats.videosSkipped++;
+            // Don't add row if video copy failed - it's required
+            continue;
           }
         } else {
-          copyStats.errors.push(`Video ${i + 1}: File not found at ${row.path}`);
+          const errorMsg = `Video ${i + 1}: ${fileCheck.error || 'File not found'}. Path: ${row.path}`;
+          console.error(`[UPLOAD-QUEUE] [ERROR] ${errorMsg}`);
+          copyStats.errors.push(errorMsg);
           copyStats.videosSkipped++;
+          // Don't add row if video file doesn't exist - it's required
+          continue;
         }
+      } else {
+        const errorMsg = `Video ${i + 1}: No path specified in CSV`;
+        console.error(`[UPLOAD-QUEUE] [ERROR] ${errorMsg}`);
+        copyStats.errors.push(errorMsg);
+        copyStats.videosSkipped++;
+        continue;
       }
 
-      // Copy thumbnail file if it exists
+      // Copy thumbnail file if it exists (optional)
       if (row.thumbnail_path) {
-        if (fs.existsSync(row.thumbnail_path)) {
+        const fileCheck = checkFileExists(row.thumbnail_path, 'Thumbnail', i);
+        
+        if (fileCheck.exists) {
           try {
-            const thumbFilename = path.basename(row.thumbnail_path);
+            const thumbFilename = path.basename(fileCheck.normalizedPath)
+              .replace(/[<>:"|?*]/g, '_')
+              .replace(/\s+/g, '_');
+            
             const thumbDest = path.join(uploadDir, "thumbnails", thumbFilename);
-            fs.copyFileSync(row.thumbnail_path, thumbDest);
+            
+            console.log(`[UPLOAD-QUEUE] Copying thumbnail ${i + 1}: ${fileCheck.normalizedPath} -> ${thumbDest}`);
+            
+            const destDir = path.dirname(thumbDest);
+            if (!fs.existsSync(destDir)) {
+              fs.mkdirSync(destDir, { recursive: true });
+            }
+            
+            fs.copyFileSync(fileCheck.normalizedPath, thumbDest);
             updatedRow.thumbnail_path = thumbDest;
             copyStats.thumbnailsCopied++;
+            console.log(`[UPLOAD-QUEUE] ✓ Thumbnail ${i + 1} copied successfully`);
           } catch (error: any) {
-            copyStats.errors.push(`Thumbnail ${i + 1}: ${error?.message || 'Copy failed'}`);
+            const errorMsg = `Thumbnail ${i + 1}: Copy failed - ${error?.message || 'Unknown error'}`;
+            console.error(`[UPLOAD-QUEUE] [ERROR] ${errorMsg}`, error);
+            copyStats.errors.push(errorMsg);
             copyStats.thumbnailsSkipped++;
+            // Thumbnail is optional, so continue even if copy fails
           }
         } else {
+          console.warn(`[UPLOAD-QUEUE] Thumbnail ${i + 1} not found: ${row.thumbnail_path} (optional, continuing)`);
           copyStats.thumbnailsSkipped++;
         }
       }
@@ -186,10 +331,34 @@ export async function POST(request: NextRequest) {
       updatedRows.push(updatedRow);
     }
 
+    // Fail the entire job if no videos were copied successfully
+    if (copyStats.videosCopied === 0) {
+      console.error(`[UPLOAD-QUEUE] [ERROR] No videos were copied successfully. Errors:`, copyStats.errors);
+      return NextResponse.json(
+        {
+          error: `Failed to copy video files. ${copyStats.errors.length} error(s): ${copyStats.errors.slice(0, 3).join('; ')}${copyStats.errors.length > 3 ? '...' : ''}`,
+          details: {
+            videosCopied: copyStats.videosCopied,
+            videosSkipped: copyStats.videosSkipped,
+            errors: copyStats.errors,
+          },
+        },
+        { status: 400 }
+      );
+    }
+
     // Write updated CSV with server paths
     // Note: CSV fields with newlines must be quoted, and quotes must be escaped
     if (updatedRows.length > 0) {
       const headers = Object.keys(updatedRows[0]);
+      console.log(`[UPLOAD-QUEUE] Writing CSV with headers:`, headers);
+      console.log(`[UPLOAD-QUEUE] First row before writing:`, {
+        youtube_title: updatedRows[0].youtube_title ? `"${updatedRows[0].youtube_title.substring(0, 50)}..."` : 'MISSING',
+        youtube_description: updatedRows[0].youtube_description ? `"${updatedRows[0].youtube_description.substring(0, 50)}..."` : 'MISSING',
+        path: updatedRows[0].path || 'MISSING',
+        allKeys: Object.keys(updatedRows[0])
+      });
+      
       const csvContent = [
         headers.join(","),
         ...updatedRows.map(row => 
@@ -202,10 +371,13 @@ export async function POST(request: NextRequest) {
           }).join(",")
         )
       ].join("\n");
+      
       fs.writeFileSync(csvPath, csvContent, 'utf8');
+      console.log(`[UPLOAD-QUEUE] CSV written to: ${csvPath}`);
+      console.log(`[UPLOAD-QUEUE] CSV content preview (first 500 chars):`, csvContent.substring(0, 500));
     }
 
-    // Add to queue
+    // Add to queue only if we have successfully copied videos
     const queueId = addToQueue({
       sessionId,
       userId: userId,
@@ -213,14 +385,22 @@ export async function POST(request: NextRequest) {
       uploadDir,
       videosPerDay: videosPerDay || 0,
       startDate: scheduleStartDate || new Date().toISOString(),
-      totalVideos: csvData.length,
+      totalVideos: updatedRows.length, // Use actual copied rows, not original CSV length
     });
+
+    console.log(`[UPLOAD-QUEUE] Job ${queueId} created with ${updatedRows.length} videos ready for upload`);
+
+    // Build response message
+    let message = `Successfully queued ${updatedRows.length} video(s) for processing`;
+    if (copyStats.errors.length > 0) {
+      message += `. ${copyStats.errors.length} error(s) occurred during file copy.`;
+    }
 
     return NextResponse.json({
       success: true,
       jobId: queueId,
-      message: "Files uploaded and queued for processing",
-      totalVideos: csvData.length,
+      message: message,
+      totalVideos: updatedRows.length,
       copyStats: {
         videosCopied: copyStats.videosCopied,
         videosSkipped: copyStats.videosSkipped,
