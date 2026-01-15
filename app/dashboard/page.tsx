@@ -256,10 +256,46 @@ export default function Dashboard() {
         const newQueueLength = data.queue.length;
         const newProcessingCount = data.queue.filter((j: any) => j.status === 'processing').length;
         
+        // Only log when there are actual changes (not just polling)
         if (newQueueLength !== prevQueueLength || newProcessingCount !== prevProcessingCount) {
           const logMsg = `Queue updated: ${prevQueueLength}→${newQueueLength} jobs, ${prevProcessingCount}→${newProcessingCount} processing`;
           console.log(`[DEBUG] ${logMsg}`);
           addDebugLog(logMsg, 'info');
+        }
+        
+        // Check for stuck pending jobs
+        const pendingJobs = data.queue.filter((j: any) => j.status === 'pending');
+        if (pendingJobs.length > 0) {
+          pendingJobs.forEach((job: any) => {
+            const ageSeconds = (Date.now() - new Date(job.createdAt).getTime()) / 1000;
+            if (ageSeconds > 15) { // If pending for more than 15 seconds
+              // Only log once per job to avoid spam
+              const lastLog = debugLogs[debugLogs.length - 1];
+              if (!lastLog || !lastLog.message.includes(job.id.substring(0, 15))) {
+                const warningMsg = `⚠️ Job ${job.id.substring(0, 20)}... stuck in pending for ${Math.round(ageSeconds)}s. Is worker running?`;
+                console.warn(`[DEBUG] ${warningMsg}`);
+                addDebugLog(warningMsg, 'error');
+              }
+            }
+          });
+        }
+        
+        // Check for stuck pending jobs (only log once per job to avoid spam)
+        const pendingJobs = data.queue.filter((j: any) => j.status === 'pending');
+        if (pendingJobs.length > 0) {
+          pendingJobs.forEach((job: any) => {
+            const ageSeconds = (Date.now() - new Date(job.createdAt).getTime()) / 1000;
+            // Log warning if stuck for more than 15 seconds, but only every 10 seconds to avoid spam
+            if (ageSeconds > 15 && Math.floor(ageSeconds) % 10 === 0) {
+              const warningMsg = `⚠️ Job ${job.id.substring(0, 20)}... stuck in pending for ${Math.round(ageSeconds)}s. Check if worker is running!`;
+              console.warn(`[DEBUG] ${warningMsg}`);
+              // Only add to debug log if not already there
+              const lastLog = debugLogs[debugLogs.length - 1];
+              if (!lastLog || !lastLog.message.includes(job.id.substring(0, 15))) {
+                addDebugLog(warningMsg, 'error');
+              }
+            }
+          });
         }
       }
     } catch (error) {
@@ -288,12 +324,15 @@ export default function Dashboard() {
           p.status.includes("Uploaded") || p.status.includes("Scheduled") || p.status.includes("scheduled")
         ).length || 0;
         
+        // Only log meaningful changes
         if (data.job.status !== prevStatus || newProgressCount !== prevProgressCount || newCompletedCount !== prevCompletedCount) {
-          const statusChange = prevStatus !== data.job.status ? `Status: ${prevStatus}→${data.job.status}` : '';
+          const statusChange = prevStatus && prevStatus !== data.job.status ? `Status: ${prevStatus}→${data.job.status}` : '';
           const progressChange = newCompletedCount !== prevCompletedCount ? `Completed: ${prevCompletedCount}→${newCompletedCount}` : '';
           const logMsg = `Job ${jobId.substring(0, 20)}... ${statusChange} ${progressChange}`.trim();
-          console.log(`[DEBUG] ${logMsg}`);
-          addDebugLog(logMsg, newCompletedCount > prevCompletedCount ? 'success' : 'info');
+          if (logMsg.length > 20) { // Only log if there's actual content
+            console.log(`[DEBUG] ${logMsg}`);
+            addDebugLog(logMsg, newCompletedCount > prevCompletedCount ? 'success' : data.job.status === 'processing' ? 'info' : 'info');
+          }
         }
       }
     } catch (error) {
@@ -1236,6 +1275,20 @@ export default function Dashboard() {
                       {job.videosPerDay > 0 && (
                         <div>📊 Schedule: {job.videosPerDay} videos/day starting {new Date(job.startDate).toLocaleDateString()}</div>
                       )}
+                      {job.status === 'pending' && (() => {
+                        const ageSeconds = (Date.now() - new Date(job.createdAt).getTime()) / 1000;
+                        if (ageSeconds > 10) {
+                          return (
+                            <div className="mt-2 p-2 bg-yellow-100 dark:bg-yellow-900/30 border border-yellow-300 dark:border-yellow-700 rounded-lg">
+                              <div className="flex items-center gap-2 text-yellow-800 dark:text-yellow-200 font-semibold text-sm">
+                                <span>⚠️</span>
+                                <span>Waiting for worker... ({Math.round(ageSeconds)}s). Make sure worker is running: <code className="bg-yellow-200 dark:bg-yellow-800 px-1 rounded">npm run worker</code></span>
+                              </div>
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
                       {job.status === 'processing' && job.progress && job.progress.length > 0 && job.progress[0] && (
                         job.progress[0].status.includes("Uploading") || job.progress[0].status === "Pending" ? (
                           <div className="mt-2 p-2 bg-green-100 dark:bg-green-900/30 border border-green-300 dark:border-green-700 rounded-lg">

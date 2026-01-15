@@ -5,6 +5,7 @@ import { getOAuthClient } from "./lib/auth";
 import { getSession, getAllSessions } from "./lib/session";
 import { 
   getNextPendingItem, 
+  getQueue,
   markAsProcessing, 
   markAsCompleted, 
   markAsFailed, 
@@ -359,19 +360,28 @@ async function runWorker(): Promise<void> {
   while (true) {
     try {
       checkCount++;
+      const allQueue = getQueue(); // Import getQueue if needed
+      const pendingItems = allQueue.filter(item => item.status === "pending");
+      
+      // Log every check to see what's happening
+      if (checkCount % 6 === 0 || pendingItems.length > 0) { // Log every 30 seconds or when items found
+        console.log(`[WORKER] [${new Date().toISOString()}] 🔍 Check #${checkCount}: Found ${pendingItems.length} pending job(s)`);
+        if (pendingItems.length > 0) {
+          pendingItems.forEach(item => {
+            console.log(`[WORKER]   - Job ${item.id}: status=${item.status}, videos=${item.totalVideos || 0}, videosPerDay=${item.videosPerDay}`);
+          });
+        }
+      }
+      
       const item = getNextPendingItem();
       
       if (item) {
-        console.log(`[WORKER] [${new Date().toISOString()}] 📦 Found pending job: ${item.id}`);
+        console.log(`[WORKER] [${new Date().toISOString()}] 📦 Found pending job: ${item.id}, processing now...`);
         await processQueueItem(item);
         // After processing, check again immediately for more items
         continue;
       } else {
         // No pending items, wait before checking again
-        // Log every 12th check (once per minute) to show worker is alive
-        if (checkCount % 12 === 0) {
-          console.log(`[WORKER] [${new Date().toISOString()}] ⏳ No pending items. Worker is waiting... (check #${checkCount})`);
-        }
         await new Promise(resolve => setTimeout(resolve, 5000)); // Check every 5 seconds
       }
     } catch (error) {
