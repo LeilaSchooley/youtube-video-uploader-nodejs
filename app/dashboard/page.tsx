@@ -32,6 +32,9 @@ export default function Dashboard() {
   const [showProgress, setShowProgress] = useState<boolean>(false);
   const [videosPerDay, setVideosPerDay] = useState<string>('');
   const [enableScheduling, setEnableScheduling] = useState<boolean>(false);
+  const [uploadInterval, setUploadInterval] = useState<string>('day'); // Default: per day
+  const [videosPerInterval, setVideosPerInterval] = useState<string>('10'); // Default: 10 videos per interval
+  const [customIntervalMinutes, setCustomIntervalMinutes] = useState<string>(''); // For custom interval
   const [queue, setQueue] = useState<any[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [jobStatus, setJobStatus] = useState<any>(null);
@@ -43,14 +46,19 @@ export default function Dashboard() {
   const [selectedVideoFile, setSelectedVideoFile] = useState<File | null>(null);
   const [selectedCsvFile, setSelectedCsvFile] = useState<File | null>(null);
   const [selectedVideoFiles, setSelectedVideoFiles] = useState<File[]>([]); // For CSV bulk upload
+  const [selectedThumbnailFiles, setSelectedThumbnailFiles] = useState<File[]>([]); // For CSV bulk upload thumbnails
   const [showDebugPanel, setShowDebugPanel] = useState<boolean>(false);
   const [debugLogs, setDebugLogs] = useState<Array<{ time: string; message: string; type: 'info' | 'success' | 'error' }>>([]);
   const [csvValidationErrors, setCsvValidationErrors] = useState<string[]>([]);
   const [jobFiles, setJobFiles] = useState<any>(null);
   const [loadingFiles, setLoadingFiles] = useState<boolean>(false);
+  const [allFiles, setAllFiles] = useState<any>(null);
+  const [loadingAllFiles, setLoadingAllFiles] = useState<boolean>(false);
+  const [showAllFiles, setShowAllFiles] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const csvFileInputRef = useRef<HTMLInputElement>(null);
   const videoFilesInputRef = useRef<HTMLInputElement>(null);
+  const thumbnailFilesInputRef = useRef<HTMLInputElement>(null);
   
   // Add debug log helper
   const addDebugLog = useCallback((message: string, type: 'info' | 'success' | 'error' = 'info') => {
@@ -329,6 +337,9 @@ export default function Dashboard() {
       if (res.ok) {
         setShowToast({ message: data.message || 'File deleted successfully', type: 'success' });
         fetchJobFiles(jobId); // Refresh file list
+        if (showAllFiles) {
+          fetchAllFiles(); // Refresh all files view
+        }
       } else {
         setShowToast({ message: data.error || 'Failed to delete file', type: 'error' });
       }
@@ -350,11 +361,29 @@ export default function Dashboard() {
       if (res.ok) {
         setShowToast({ message: data.message || 'All files deleted successfully', type: 'success' });
         fetchJobFiles(jobId); // Refresh file list
+        if (showAllFiles) {
+          fetchAllFiles(); // Refresh all files view
+        }
       } else {
         setShowToast({ message: data.error || 'Failed to delete files', type: 'error' });
       }
     } catch (error) {
       setShowToast({ message: 'An error occurred while deleting files', type: 'error' });
+    }
+  };
+
+  const fetchAllFiles = async () => {
+    try {
+      setLoadingAllFiles(true);
+      const res = await fetch('/api/list-all-files');
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setAllFiles(data);
+      }
+    } catch (error) {
+      console.error('[ERROR] Error fetching all files:', error);
+    } finally {
+      setLoadingAllFiles(false);
     }
   };
 
@@ -531,14 +560,34 @@ export default function Dashboard() {
     });
     
     if (enableScheduling) {
-        if (!videosPerDay) {
-          setShowToast({ message: 'Please fill in videos per day when scheduling is enabled.', type: 'error' });
-          setMessage({ type: 'error', text: 'Please fill in videos per day when scheduling is enabled.' });
+        if (!videosPerInterval) {
+          setShowToast({ message: 'Please fill in videos per interval when scheduling is enabled.', type: 'error' });
+          setMessage({ type: 'error', text: 'Please fill in videos per interval when scheduling is enabled.' });
           setCsvUploading(false);
           return;
         }
-      formData.append('videosPerDay', videosPerDay);
+        if (uploadInterval === 'custom' && !customIntervalMinutes) {
+          setShowToast({ message: 'Please fill in custom interval minutes.', type: 'error' });
+          setMessage({ type: 'error', text: 'Please fill in custom interval minutes.' });
+          setCsvUploading(false);
+          return;
+        }
+      formData.append('videosPerInterval', videosPerInterval);
+      formData.append('uploadInterval', uploadInterval);
+      if (uploadInterval === 'custom') {
+        formData.append('customIntervalMinutes', customIntervalMinutes);
+      }
       formData.append('enableScheduling', 'true');
+      // Keep videosPerDay for backward compatibility (calculate from interval)
+      const intervalMinutes = uploadInterval === 'day' ? 1440 : 
+                             uploadInterval === '12hours' ? 720 :
+                             uploadInterval === '6hours' ? 360 :
+                             uploadInterval === 'hour' ? 60 :
+                             uploadInterval === '30mins' ? 30 :
+                             uploadInterval === '10mins' ? 10 :
+                             parseInt(customIntervalMinutes) || 1440;
+      const videosPerDayCalc = Math.round((1440 / intervalMinutes) * parseInt(videosPerInterval));
+      formData.append('videosPerDay', videosPerDayCalc.toString()); // For backward compatibility
     }
 
     try {
@@ -591,11 +640,19 @@ export default function Dashboard() {
         }
             setSelectedCsvFile(null); // Reset CSV file selection
             setSelectedVideoFiles([]); // Reset video files selection
+            setSelectedThumbnailFiles([]); // Reset thumbnail files selection
             setEnableScheduling(false);
             setVideosPerDay('');
+            setUploadInterval('day');
+            setVideosPerInterval('10');
+            setCustomIntervalMinutes('');
             // Reset video files input
             if (videoFilesInputRef.current) {
               videoFilesInputRef.current.value = '';
+            }
+            // Reset thumbnail files input
+            if (thumbnailFilesInputRef.current) {
+              thumbnailFilesInputRef.current.value = '';
             }
         
         // Immediately fetch queue and job status
@@ -1023,6 +1080,203 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* All Uploaded Files Section */}
+      <div className="card animate-fade-in">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-2xl font-bold text-gray-800 dark:text-white flex items-center gap-2">
+            <span className="text-3xl">📁</span>
+            <span>All Uploaded Files</span>
+          </h2>
+          <button
+            onClick={() => {
+              setShowAllFiles(!showAllFiles);
+              if (!showAllFiles && !allFiles) {
+                fetchAllFiles();
+              }
+            }}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors"
+          >
+            {showAllFiles ? 'Hide' : 'View All Files'}
+          </button>
+        </div>
+
+        {showAllFiles && (
+          <div>
+            {loadingAllFiles ? (
+              <div className="text-center py-8">
+                <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-800 dark:border-white mb-3"></div>
+                <p className="text-gray-600 dark:text-gray-400">Loading all files...</p>
+              </div>
+            ) : allFiles && allFiles.totalFiles > 0 ? (
+              <div className="space-y-6">
+                {/* Summary Stats */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-xl border border-blue-200 dark:border-blue-700">
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-blue-700 dark:text-blue-300">{allFiles.totalFiles}</div>
+                    <div className="text-xs text-blue-600 dark:text-blue-400 mt-1">Total Files</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-green-700 dark:text-green-300">{allFiles.videoCount}</div>
+                    <div className="text-xs text-green-600 dark:text-green-400 mt-1">Videos</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-purple-700 dark:text-purple-300">{allFiles.thumbnailCount}</div>
+                    <div className="text-xs text-purple-600 dark:text-purple-400 mt-1">Thumbnails</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-gray-700 dark:text-gray-300">{allFiles.totalSizeFormatted}</div>
+                    <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">Total Size</div>
+                  </div>
+                </div>
+
+                {/* Files Grouped by Job */}
+                <div className="space-y-4">
+                  <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-300">
+                    Files by Job ({allFiles.jobs} job{allFiles.jobs !== 1 ? 's' : ''})
+                  </h3>
+                  {allFiles.filesByJob.map((jobGroup: any) => (
+                    <div
+                      key={jobGroup.jobId}
+                      className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
+                    >
+                      <div className="flex items-center justify-between mb-3">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-sm text-gray-600 dark:text-gray-400">
+                              {jobGroup.jobId.substring(0, 20)}...
+                            </span>
+                            <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                              jobGroup.jobStatus === 'completed' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' :
+                              jobGroup.jobStatus === 'processing' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200' :
+                              jobGroup.jobStatus === 'failed' ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' :
+                              'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200'
+                            }`}>
+                              {jobGroup.jobStatus}
+                            </span>
+                          </div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                            Created: {new Date(jobGroup.jobCreatedAt).toLocaleString()}
+                          </div>
+                        </div>
+                        <div className="text-sm text-gray-600 dark:text-gray-400">
+                          {jobGroup.files.length} file{jobGroup.files.length !== 1 ? 's' : ''} • {((jobGroup.totalSize / 1024 / 1024).toFixed(2))} MB
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        {jobGroup.files.map((file: any, idx: number) => (
+                          <div
+                            key={idx}
+                            className="flex items-center justify-between p-2 bg-white dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-700"
+                          >
+                            <div className="flex items-center gap-3 flex-1 min-w-0">
+                              <span className="text-lg">
+                                {file.type === 'video' ? '📹' : file.type === 'thumbnail' ? '🖼️' : '📄'}
+                              </span>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium text-gray-800 dark:text-white truncate">
+                                  {file.fileName}
+                                </p>
+                                <p className="text-xs text-gray-500 dark:text-gray-400">
+                                  {file.sizeFormatted} • {file.type}
+                                </p>
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => {
+                                setSelectedJobId(jobGroup.jobId);
+                                setShowAllFiles(false);
+                                fetchJobFiles(jobGroup.jobId);
+                              }}
+                              className="ml-3 px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white text-xs font-semibold rounded-lg transition-colors flex-shrink-0"
+                              title="View job details"
+                            >
+                              View Job
+                            </button>
+                            <button
+                              onClick={() => handleDeleteFile(jobGroup.jobId, file.relativePath, file.fileName)}
+                              className="ml-2 px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold rounded-lg transition-colors flex-shrink-0"
+                              title={`Delete ${file.fileName}`}
+                            >
+                              🗑️
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* All Files List (Flat) */}
+                <div className="mt-6">
+                  <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-3">
+                    All Files ({allFiles.files.length})
+                  </h3>
+                  <div className="max-h-96 overflow-y-auto space-y-2">
+                    {allFiles.files.map((file: any, idx: number) => (
+                      <div
+                        key={idx}
+                        className="flex items-center justify-between p-3 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                      >
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          <span className="text-xl">
+                            {file.type === 'video' ? '📹' : file.type === 'thumbnail' ? '🖼️' : '📄'}
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-gray-800 dark:text-white truncate">
+                              {file.fileName}
+                            </p>
+                            <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                              <span>{file.sizeFormatted}</span>
+                              <span>•</span>
+                              <span className="font-mono">{file.jobId.substring(0, 15)}...</span>
+                              <span>•</span>
+                              <span className={`px-2 py-0.5 rounded text-xs ${
+                                file.jobStatus === 'completed' ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300' :
+                                file.jobStatus === 'processing' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300' :
+                                file.jobStatus === 'failed' ? 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300' :
+                                'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
+                              }`}>
+                                {file.jobStatus}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex gap-2 ml-3">
+                          <button
+                            onClick={() => {
+                              setSelectedJobId(file.jobId);
+                              setShowAllFiles(false);
+                              fetchJobFiles(file.jobId);
+                            }}
+                            className="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white text-xs font-semibold rounded-lg transition-colors flex-shrink-0"
+                            title="View job details"
+                          >
+                            View
+                          </button>
+                          <button
+                            onClick={() => handleDeleteFile(file.jobId, file.relativePath, file.fileName)}
+                            className="px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold rounded-lg transition-colors flex-shrink-0"
+                            title={`Delete ${file.fileName}`}
+                          >
+                            🗑️
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="text-center py-8 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                <div className="text-5xl mb-3">📭</div>
+                <p className="text-gray-600 dark:text-gray-400 font-medium">No files found on server</p>
+                <p className="text-sm text-gray-500 dark:text-gray-500 mt-2">Upload videos to see them here</p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Profile Section */}
       <div className="card animate-fade-in">
         <div className="flex items-center justify-between mb-6">
@@ -1387,6 +1641,89 @@ export default function Dashboard() {
             )}
           </div>
 
+          {/* Thumbnail Files Upload */}
+          <div>
+            <label htmlFor="thumbnailFiles" className="label">
+              Upload Thumbnail Files (Optional - matches CSV by filename)
+            </label>
+            <div 
+              className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all duration-200 ${
+                selectedThumbnailFiles.length > 0
+                  ? 'border-green-500 bg-green-50 dark:bg-green-900/20' 
+                  : 'border-gray-300 hover:border-blue-500 dark:border-gray-600 dark:hover:border-blue-400'
+              }`}
+              onClick={() => thumbnailFilesInputRef.current?.click()}
+              onDrop={(e) => {
+                e.preventDefault();
+                const files = Array.from(e.dataTransfer.files).filter(file => 
+                  file.type.startsWith('image/') || file.name.match(/\.(jpg|jpeg|png|gif|webp)$/i)
+                );
+                if (files.length > 0) {
+                  setSelectedThumbnailFiles(prev => [...prev, ...files]);
+                  if (thumbnailFilesInputRef.current) {
+                    const dataTransfer = new DataTransfer();
+                    [...selectedThumbnailFiles, ...files].forEach(file => dataTransfer.items.add(file));
+                    thumbnailFilesInputRef.current.files = dataTransfer.files;
+                  }
+                }
+              }}
+              onDragOver={(e) => e.preventDefault()}
+            >
+              <input
+                ref={thumbnailFilesInputRef}
+                type="file"
+                id="thumbnailFiles"
+                name="thumbnailFiles"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  const files = Array.from(e.target.files || []);
+                  if (files.length > 0) {
+                    setSelectedThumbnailFiles(prev => [...prev, ...files]);
+                  }
+                }}
+              />
+              {selectedThumbnailFiles.length > 0 ? (
+                <div>
+                  <div className="text-4xl mb-2">✅</div>
+                  <p className="text-green-700 dark:text-green-300 font-semibold mb-1">
+                    {selectedThumbnailFiles.length} thumbnail file{selectedThumbnailFiles.length !== 1 ? 's' : ''} selected
+                  </p>
+                  <div className="text-sm text-gray-600 dark:text-gray-400 max-h-32 overflow-y-auto mb-2 text-left px-4">
+                    {selectedThumbnailFiles.map((file, idx) => (
+                      <div key={idx} className="mb-1">
+                        • {file.name} ({(file.size / 1024 / 1024).toFixed(2)} MB)
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedThumbnailFiles([]);
+                      if (thumbnailFilesInputRef.current) {
+                        thumbnailFilesInputRef.current.value = '';
+                      }
+                    }}
+                    className="text-red-600 hover:underline font-semibold"
+                  >
+                    Clear all
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className="text-4xl mb-2">🖼️</div>
+                  <p className="text-gray-600 dark:text-gray-400 mb-1">Click to upload or drag and drop</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-500">Thumbnail images (multiple selection allowed)</p>
+                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                    Files will be matched to CSV rows by filename
+                  </p>
+                </>
+              )}
+            </div>
+          </div>
+
           <div className="p-4 bg-gray-50 border border-gray-300 rounded-lg">
             <label className="flex items-center gap-2 mb-4 cursor-pointer">
               <input
@@ -1609,9 +1946,21 @@ export default function Dashboard() {
                     </div>
                     <div className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
                       <div>📅 Created: {new Date(job.createdAt).toLocaleString()}</div>
-                      {job.videosPerDay > 0 && (
-                        <div>📊 Schedule: {job.videosPerDay} videos/day starting {new Date(job.startDate).toLocaleDateString()}</div>
-                      )}
+                      {(job.videosPerDay > 0 || job.uploadInterval) && (() => {
+                        const uploadInterval = job.uploadInterval || (job.videosPerDay > 0 ? 'day' : undefined);
+                        const videosPerInterval = job.videosPerInterval || job.videosPerDay || 0;
+                        const intervalDescription = uploadInterval === 'day' ? 'day' :
+                                                   uploadInterval === 'hour' ? 'hour' :
+                                                   uploadInterval === '12hours' ? '12 hours' :
+                                                   uploadInterval === '6hours' ? '6 hours' :
+                                                   uploadInterval === '30mins' ? '30 minutes' :
+                                                   uploadInterval === '10mins' ? '10 minutes' :
+                                                   uploadInterval === 'custom' ? `${job.customIntervalMinutes || 0} minutes` :
+                                                   'day';
+                        return (
+                          <div>📊 Schedule: {videosPerInterval} videos per {intervalDescription} starting {new Date(job.startDate).toLocaleString()}</div>
+                        );
+                      })()}
                       {job.status === 'pending' && (() => {
                         const ageSeconds = (Date.now() - new Date(job.createdAt).getTime()) / 1000;
                         if (ageSeconds > 10) {

@@ -7,8 +7,11 @@ export interface QueueItem {
   userId?: string; // Google user email/ID - persistent across sessions
   csvPath: string;
   uploadDir: string;
-  videosPerDay: number;
+  videosPerDay: number; // Deprecated: use uploadInterval and videosPerInterval instead
   startDate: string;
+  uploadInterval?: "day" | "hour" | "12hours" | "6hours" | "30mins" | "10mins" | "custom"; // Upload frequency
+  videosPerInterval?: number; // Number of videos per interval (e.g., 10 videos per hour)
+  customIntervalMinutes?: number; // Custom interval in minutes (only used when uploadInterval is "custom")
   status: "pending" | "processing" | "completed" | "failed" | "paused" | "cancelled";
   progress: Array<{ 
     index: number; 
@@ -44,8 +47,39 @@ function readQueue(): QueueItem[] {
   return [];
 }
 
+// Debounce queue writes to avoid excessive disk I/O for large jobs
+let writeQueueTimeout: NodeJS.Timeout | null = null;
+const QUEUE_WRITE_DEBOUNCE_MS = 1000; // Wait 1 second before writing
+
 function writeQueue(queue: QueueItem[]): void {
   try {
+    // Clear existing timeout
+    if (writeQueueTimeout) {
+      clearTimeout(writeQueueTimeout);
+    }
+    
+    // Debounce writes - only write after 1 second of no updates
+    writeQueueTimeout = setTimeout(() => {
+      try {
+        fs.writeFileSync(QUEUE_FILE, JSON.stringify(queue, null, 2));
+        writeQueueTimeout = null;
+      } catch (error) {
+        console.error("Error writing queue:", error);
+      }
+    }, QUEUE_WRITE_DEBOUNCE_MS);
+  } catch (error) {
+    console.error("Error scheduling queue write:", error);
+  }
+}
+
+// Force immediate write (for critical operations)
+function writeQueueImmediate(queue: QueueItem[]): void {
+  try {
+    // Clear any pending debounced write
+    if (writeQueueTimeout) {
+      clearTimeout(writeQueueTimeout);
+      writeQueueTimeout = null;
+    }
     fs.writeFileSync(QUEUE_FILE, JSON.stringify(queue, null, 2));
   } catch (error) {
     console.error("Error writing queue:", error);
@@ -67,7 +101,7 @@ export function addToQueue(item: Omit<QueueItem, "id" | "status" | "progress" | 
   };
   
   queue.push(queueItem);
-  writeQueue(queue);
+  writeQueueImmediate(queue); // Immediate write for new jobs
   return id;
 }
 
@@ -80,7 +114,7 @@ export function getQueueItem(id: string): QueueItem | undefined {
   return queue.find(item => item.id === id);
 }
 
-export function updateQueueItem(id: string, updates: Partial<QueueItem>): void {
+export function updateQueueItem(id: string, updates: Partial<QueueItem>, immediate: boolean = false): void {
   const queue = readQueue();
   const index = queue.findIndex(item => item.id === id);
   
@@ -90,7 +124,13 @@ export function updateQueueItem(id: string, updates: Partial<QueueItem>): void {
       ...updates,
       updatedAt: new Date().toISOString(),
     };
-    writeQueue(queue);
+    // Use immediate write for status changes (pending -> processing -> completed)
+    // Use debounced write for progress updates (frequent)
+    if (immediate || updates.status) {
+      writeQueueImmediate(queue);
+    } else {
+      writeQueue(queue);
+    }
   }
 }
 

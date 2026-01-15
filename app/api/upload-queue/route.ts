@@ -60,8 +60,15 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData();
     const csvFile = formData.get("csvFile") as File | null;
     const enableScheduling = formData.get("enableScheduling") === "true";
-    const videosPerDayStr = formData.get("videosPerDay") as string | null;
+    const videosPerDayStr = formData.get("videosPerDay") as string | null; // Backward compatibility
     const videosPerDay = enableScheduling && videosPerDayStr ? parseInt(videosPerDayStr) : null;
+    
+    // New interval-based scheduling
+    const uploadInterval = formData.get("uploadInterval") as string | null;
+    const videosPerIntervalStr = formData.get("videosPerInterval") as string | null;
+    const videosPerInterval = enableScheduling && videosPerIntervalStr ? parseInt(videosPerIntervalStr) : null;
+    const customIntervalMinutesStr = formData.get("customIntervalMinutes") as string | null;
+    const customIntervalMinutes = uploadInterval === "custom" && customIntervalMinutesStr ? parseInt(customIntervalMinutesStr) : undefined;
     
     // Get uploaded video files (can be multiple)
     const uploadedFiles: File[] = [];
@@ -79,6 +86,22 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Get uploaded thumbnail/image files (can be multiple)
+    const uploadedThumbnails: File[] = [];
+    const thumbnailsArray = formData.getAll("thumbnails") as (File | string)[];
+    for (const file of thumbnailsArray) {
+      if (file instanceof File && (file.type.startsWith('image/') || file.name.match(/\.(jpg|jpeg|png|gif|webp)$/i))) {
+        uploadedThumbnails.push(file);
+      }
+    }
+    // Also check for "thumbnailFiles" as alternative field name
+    const thumbnailFilesArray = formData.getAll("thumbnailFiles") as (File | string)[];
+    for (const file of thumbnailFilesArray) {
+      if (file instanceof File && (file.type.startsWith('image/') || file.name.match(/\.(jpg|jpeg|png|gif|webp)$/i))) {
+        uploadedThumbnails.push(file);
+      }
+    }
+
     if (!csvFile) {
       return NextResponse.json(
         { error: "No CSV file uploaded" },
@@ -86,11 +109,17 @@ export async function POST(request: NextRequest) {
       );
     }
     
-    console.log(`[UPLOAD-QUEUE] Received CSV + ${uploadedFiles.length} video file(s) for upload`);
+    console.log(`[UPLOAD-QUEUE] Received CSV + ${uploadedFiles.length} video file(s) + ${uploadedThumbnails.length} thumbnail file(s) for upload`);
 
-    if (enableScheduling && !videosPerDay) {
+    if (enableScheduling && !videosPerInterval) {
       return NextResponse.json(
-        { error: "Videos per day is required when scheduling is enabled" },
+        { error: "Videos per interval is required when scheduling is enabled" },
+        { status: 400 }
+      );
+    }
+    if (enableScheduling && uploadInterval === "custom" && !customIntervalMinutes) {
+      return NextResponse.json(
+        { error: "Custom interval minutes is required when using custom interval" },
         { status: 400 }
       );
     }
@@ -384,37 +413,86 @@ export async function POST(request: NextRequest) {
 
       // Copy thumbnail file if it exists (optional)
       if (row.thumbnail_path) {
-        const fileCheck = checkFileExists(row.thumbnail_path, 'Thumbnail', i);
+        const csvThumbFilename = extractFilename(row.thumbnail_path);
+        const uploadedThumbnail = uploadedThumbnailsMap.get(csvThumbFilename);
         
-        if (fileCheck.exists) {
+        let thumbnailCopied = false;
+        
+        // First, try to use uploaded thumbnail file if available
+        if (uploadedThumbnail) {
           try {
-            const thumbFilename = path.basename(fileCheck.normalizedPath)
+            const thumbFilename = uploadedThumbnail.name
               .replace(/[<>:"|?*]/g, '_')
               .replace(/\s+/g, '_');
             
             const thumbDest = path.join(uploadDir, "thumbnails", thumbFilename);
             
-            console.log(`[UPLOAD-QUEUE] Copying thumbnail ${i + 1}: ${fileCheck.normalizedPath} -> ${thumbDest}`);
+            console.log(`[UPLOAD-QUEUE] Saving uploaded thumbnail ${i + 1}: ${uploadedThumbnail.name} -> ${thumbDest}`);
             
             const destDir = path.dirname(thumbDest);
             if (!fs.existsSync(destDir)) {
               fs.mkdirSync(destDir, { recursive: true });
             }
             
-            fs.copyFileSync(fileCheck.normalizedPath, thumbDest);
+            await saveFile(uploadedThumbnail, thumbDest);
+            
+            if (!fs.existsSync(thumbDest)) {
+              throw new Error('Save verification failed - destination file not found');
+            }
+            
             updatedRow.thumbnail_path = thumbDest;
             copyStats.thumbnailsCopied++;
-            console.log(`[UPLOAD-QUEUE] ✓ Thumbnail ${i + 1} copied successfully`);
+            thumbnailCopied = true;
+            console.log(`[UPLOAD-QUEUE] ✓ Thumbnail ${i + 1} saved from upload: ${uploadedThumbnail.name}`);
           } catch (error: any) {
-            const errorMsg = `Thumbnail ${i + 1}: Copy failed - ${error?.message || 'Unknown error'}`;
+            const errorMsg = `Thumbnail ${i + 1}: Failed to save uploaded thumbnail - ${error?.message || 'Unknown error'}`;
             console.error(`[UPLOAD-QUEUE] [ERROR] ${errorMsg}`, error);
             copyStats.errors.push(errorMsg);
             copyStats.thumbnailsSkipped++;
-            // Thumbnail is optional, so continue even if copy fails
+            // Thumbnail is optional, so continue even if save fails
           }
         } else {
-          console.warn(`[UPLOAD-QUEUE] Thumbnail ${i + 1} not found: ${row.thumbnail_path} (optional, continuing)`);
-          copyStats.thumbnailsSkipped++;
+          // No uploaded thumbnail found, try to copy from server path
+          console.log(`[UPLOAD-QUEUE] No uploaded thumbnail found for "${csvThumbFilename}", checking server path: ${row.thumbnail_path}`);
+          
+          const fileCheck = checkFileExists(row.thumbnail_path, 'Thumbnail', i);
+          
+          if (fileCheck.exists) {
+            try {
+              const thumbFilename = path.basename(fileCheck.normalizedPath)
+                .replace(/[<>:"|?*]/g, '_')
+                .replace(/\s+/g, '_');
+              
+              const thumbDest = path.join(uploadDir, "thumbnails", thumbFilename);
+              
+              console.log(`[UPLOAD-QUEUE] Copying thumbnail ${i + 1} from server: ${fileCheck.normalizedPath} -> ${thumbDest}`);
+              
+              const destDir = path.dirname(thumbDest);
+              if (!fs.existsSync(destDir)) {
+                fs.mkdirSync(destDir, { recursive: true });
+              }
+              
+              fs.copyFileSync(fileCheck.normalizedPath, thumbDest);
+              
+              if (!fs.existsSync(thumbDest)) {
+                throw new Error('Copy verification failed - destination file not found');
+              }
+              
+              updatedRow.thumbnail_path = thumbDest;
+              copyStats.thumbnailsCopied++;
+              thumbnailCopied = true;
+              console.log(`[UPLOAD-QUEUE] ✓ Thumbnail ${i + 1} copied successfully from server`);
+            } catch (error: any) {
+              const errorMsg = `Thumbnail ${i + 1}: Copy failed - ${error?.message || 'Unknown error'}. Source: ${row.thumbnail_path}`;
+              console.error(`[UPLOAD-QUEUE] [ERROR] ${errorMsg}`, error);
+              copyStats.errors.push(errorMsg);
+              copyStats.thumbnailsSkipped++;
+              // Thumbnail is optional, so continue even if copy fails
+            }
+          } else {
+            console.warn(`[UPLOAD-QUEUE] Thumbnail ${i + 1} not found: ${row.thumbnail_path} (optional, continuing)`);
+            copyStats.thumbnailsSkipped++;
+          }
         }
       }
 
@@ -495,8 +573,11 @@ export async function POST(request: NextRequest) {
       userId: userId,
       csvPath,
       uploadDir,
-      videosPerDay: videosPerDay || 0,
+      videosPerDay: videosPerDay || 0, // Backward compatibility
       startDate: scheduleStartDate || new Date().toISOString(),
+      uploadInterval: enableScheduling && uploadInterval ? uploadInterval as "day" | "hour" | "12hours" | "6hours" | "30mins" | "10mins" | "custom" : undefined,
+      videosPerInterval: videosPerInterval || undefined,
+      customIntervalMinutes: customIntervalMinutes,
       totalVideos: updatedRows.length, // Use actual copied rows, not original CSV length
     });
 
