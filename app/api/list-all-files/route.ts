@@ -9,6 +9,60 @@ import path from "path";
 
 export const dynamic = "force-dynamic";
 
+interface FileInfo {
+  jobId: string;
+  jobStatus: string;
+  jobCreatedAt: string;
+  fileName: string;
+  filePath: string;
+  relativePath: string;
+  size: number;
+  sizeFormatted: string;
+  type: "video" | "thumbnail" | "csv" | "other";
+  jobSessionId: string;
+  isOrphan?: boolean; // File exists but job not in queue
+}
+
+/**
+ * Recursively scan a directory and return all files
+ */
+function scanDirectory(dir: string, relativeTo: string = ""): Array<{ name: string; path: string; relativePath: string; size: number }> {
+  const results: Array<{ name: string; path: string; relativePath: string; size: number }> = [];
+  
+  if (!fs.existsSync(dir)) {
+    return results;
+  }
+  
+  try {
+    const items = fs.readdirSync(dir);
+    for (const item of items) {
+      const fullPath = path.join(dir, item);
+      const relPath = relativeTo ? `${relativeTo}/${item}` : item;
+      
+      try {
+        const stats = fs.statSync(fullPath);
+        if (stats.isFile()) {
+          results.push({
+            name: item,
+            path: fullPath,
+            relativePath: relPath,
+            size: stats.size,
+          });
+        } else if (stats.isDirectory()) {
+          // Recursively scan subdirectories
+          results.push(...scanDirectory(fullPath, relPath));
+        }
+      } catch (error) {
+        // Skip items that can't be accessed
+      }
+    }
+  } catch (error) {
+    // Skip directories that can't be read
+  }
+  
+  return results;
+}
+
 /**
  * List all uploaded files across all jobs for the current user
  */
@@ -56,105 +110,138 @@ export async function GET(request: NextRequest) {
       return matchesUser;
     });
 
+    // Create a set of known job IDs for quick lookup
+    const knownJobIds = new Set(userJobs.map(job => job.id));
+
     const uploadsDir = path.join(process.cwd(), "uploads");
-    const allFiles: Array<{
-      jobId: string;
-      jobStatus: string;
-      jobCreatedAt: string;
-      fileName: string;
-      filePath: string;
-      relativePath: string;
-      size: number;
-      sizeFormatted: string;
-      type: "video" | "thumbnail" | "csv";
-      jobSessionId: string;
-    }> = [];
+    const allFiles: FileInfo[] = [];
 
-    // Iterate through all user jobs
+    // Helper to determine file type from path
+    const getFileType = (relativePath: string): "video" | "thumbnail" | "csv" | "other" => {
+      if (relativePath.includes("/videos/") || relativePath.startsWith("videos/")) return "video";
+      if (relativePath.includes("/thumbnails/") || relativePath.startsWith("thumbnails/")) return "thumbnail";
+      if (relativePath.endsWith(".csv")) return "csv";
+      return "other";
+    };
+
+    // Helper to format size
+    const formatSize = (bytes: number, type: "video" | "thumbnail" | "csv" | "other"): string => {
+      if (type === "video" || bytes > 1024 * 1024) {
+        return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+      }
+      return `${(bytes / 1024).toFixed(2)} KB`;
+    };
+
+    // Sanitize userId to match storage.ts pattern
+    const safeUserId = userId ? userId.replace(/[^a-zA-Z0-9._-]/g, '_') : null;
+
+    // Method 1: Scan files from known jobs in queue
     for (const job of userJobs) {
-      const jobDir = path.join(uploadsDir, job.sessionId, job.id);
+      // Try multiple possible paths (userId-based and sessionId-based for backward compatibility)
+      const possiblePaths = [];
       
-      if (!fs.existsSync(jobDir)) {
-        continue; // Skip if directory doesn't exist
+      // Try userId-based path (new format)
+      if (safeUserId) {
+        possiblePaths.push(path.join(uploadsDir, safeUserId, job.id));
+      }
+      
+      // Try job.userId-based path (if different from current user)
+      if (job.userId) {
+        const safeJobUserId = job.userId.replace(/[^a-zA-Z0-9._-]/g, '_');
+        possiblePaths.push(path.join(uploadsDir, safeJobUserId, job.id));
+      }
+      
+      // Try sessionId-based path (old format - backward compatibility)
+      possiblePaths.push(path.join(uploadsDir, job.sessionId, job.id));
+      
+      // Find the first path that exists
+      let jobDir: string | null = null;
+      for (const p of possiblePaths) {
+        if (fs.existsSync(p)) {
+          jobDir = p;
+          break;
+        }
+      }
+      
+      if (!jobDir) {
+        continue; // Skip if no directory exists
       }
 
-      const videosDir = path.join(jobDir, "videos");
-      const thumbnailsDir = path.join(jobDir, "thumbnails");
-      const csvPath = path.join(jobDir, "metadata.csv");
+      const scannedFiles = scanDirectory(jobDir);
+      for (const file of scannedFiles) {
+        const fileType = getFileType(file.relativePath);
+        allFiles.push({
+          jobId: job.id,
+          jobStatus: job.status,
+          jobCreatedAt: job.createdAt,
+          fileName: file.name,
+          filePath: file.path,
+          relativePath: file.relativePath,
+          size: file.size,
+          sizeFormatted: formatSize(file.size, fileType),
+          type: fileType,
+          jobSessionId: job.sessionId,
+          isOrphan: false,
+        });
+      }
+    }
 
-      // List video files
-      if (fs.existsSync(videosDir)) {
-        const videoFiles = fs.readdirSync(videosDir);
-        for (const file of videoFiles) {
-          const filePath = path.join(videosDir, file);
-          try {
-            const stats = fs.statSync(filePath);
-            if (stats.isFile()) {
-              allFiles.push({
-                jobId: job.id,
-                jobStatus: job.status,
-                jobCreatedAt: job.createdAt,
-                fileName: file,
-                filePath: filePath,
-                relativePath: `videos/${file}`,
-                size: stats.size,
-                sizeFormatted: `${(stats.size / 1024 / 1024).toFixed(2)} MB`,
-                type: "video",
-                jobSessionId: job.sessionId,
-              });
-            }
-          } catch (error) {
-            // Skip files that can't be accessed
+    // Method 2: Scan possible upload directories for orphan files
+    const dirsToScan: string[] = [];
+    
+    // Scan userId-based directory (new format)
+    if (safeUserId) {
+      dirsToScan.push(path.join(uploadsDir, safeUserId));
+    }
+    
+    // Scan sessionId-based directory (old format)
+    dirsToScan.push(path.join(uploadsDir, sessionId));
+    
+    for (const scanDir of dirsToScan) {
+      if (!fs.existsSync(scanDir)) continue;
+      
+      try {
+        const jobDirs = fs.readdirSync(scanDir);
+        for (const jobDirName of jobDirs) {
+          // Skip if this job is already processed from queue
+          if (knownJobIds.has(jobDirName)) {
+            continue;
           }
-        }
-      }
-
-      // List thumbnail files
-      if (fs.existsSync(thumbnailsDir)) {
-        const thumbnailFiles = fs.readdirSync(thumbnailsDir);
-        for (const file of thumbnailFiles) {
-          const filePath = path.join(thumbnailsDir, file);
+          
+          // This is an orphan job directory (not in queue)
+          const jobDir = path.join(scanDir, jobDirName);
+          let stats;
           try {
-            const stats = fs.statSync(filePath);
-            if (stats.isFile()) {
-              allFiles.push({
-                jobId: job.id,
-                jobStatus: job.status,
-                jobCreatedAt: job.createdAt,
-                fileName: file,
-                filePath: filePath,
-                relativePath: `thumbnails/${file}`,
-                size: stats.size,
-                sizeFormatted: `${(stats.size / 1024).toFixed(2)} KB`,
-                type: "thumbnail",
-                jobSessionId: job.sessionId,
-              });
-            }
-          } catch (error) {
-            // Skip files that can't be accessed
+            stats = fs.statSync(jobDir);
+          } catch {
+            continue;
           }
+          
+          if (!stats.isDirectory()) continue;
+          
+          const scannedFiles = scanDirectory(jobDir);
+          for (const file of scannedFiles) {
+            const fileType = getFileType(file.relativePath);
+            allFiles.push({
+              jobId: jobDirName,
+              jobStatus: "orphan", // Not in queue
+              jobCreatedAt: stats.birthtime.toISOString(),
+              fileName: file.name,
+              filePath: file.path,
+              relativePath: file.relativePath,
+              size: file.size,
+              sizeFormatted: formatSize(file.size, fileType),
+              type: fileType,
+              jobSessionId: sessionId,
+              isOrphan: true,
+            });
+          }
+          
+          // Add this job to known set to avoid duplicates
+          knownJobIds.add(jobDirName);
         }
-      }
-
-      // List CSV file if exists
-      if (fs.existsSync(csvPath)) {
-        try {
-          const stats = fs.statSync(csvPath);
-          allFiles.push({
-            jobId: job.id,
-            jobStatus: job.status,
-            jobCreatedAt: job.createdAt,
-            fileName: "metadata.csv",
-            filePath: csvPath,
-            relativePath: "metadata.csv",
-            size: stats.size,
-            sizeFormatted: `${(stats.size / 1024).toFixed(2)} KB`,
-            type: "csv",
-            jobSessionId: job.sessionId,
-          });
-        } catch (error) {
-          // Skip if can't access
-        }
+      } catch (error) {
+        console.error(`Error scanning directory ${scanDir}:`, error);
       }
     }
 
@@ -163,6 +250,7 @@ export async function GET(request: NextRequest) {
     const videoCount = allFiles.filter(f => f.type === "video").length;
     const thumbnailCount = allFiles.filter(f => f.type === "thumbnail").length;
     const csvCount = allFiles.filter(f => f.type === "csv").length;
+    const orphanCount = allFiles.filter(f => f.isOrphan).length;
 
     // Group by job for easier display
     const filesByJob = allFiles.reduce((acc, file) => {
@@ -173,6 +261,7 @@ export async function GET(request: NextRequest) {
           jobCreatedAt: file.jobCreatedAt,
           files: [],
           totalSize: 0,
+          isOrphan: file.isOrphan,
         };
       }
       acc[file.jobId].files.push(file);
@@ -182,9 +271,23 @@ export async function GET(request: NextRequest) {
       jobId: string;
       jobStatus: string;
       jobCreatedAt: string;
-      files: typeof allFiles;
+      files: FileInfo[];
       totalSize: number;
+      isOrphan?: boolean;
     }>);
+
+    // Debug info
+    const userUploadDir = safeUserId ? path.join(uploadsDir, safeUserId) : null;
+    const sessionUploadDir = path.join(uploadsDir, sessionId);
+    
+    console.log(`[LIST-ALL-FILES] Session: ${sessionId.substring(0, 10)}..., UserId: ${userId || 'N/A'}`);
+    console.log(`[LIST-ALL-FILES] Safe UserId: ${safeUserId || 'N/A'}`);
+    console.log(`[LIST-ALL-FILES] Queue jobs: ${userJobs.length}, Files found: ${allFiles.length}, Orphans: ${orphanCount}`);
+    console.log(`[LIST-ALL-FILES] Uploads dir: ${uploadsDir}, exists: ${fs.existsSync(uploadsDir)}`);
+    if (userUploadDir) {
+      console.log(`[LIST-ALL-FILES] User upload dir: ${userUploadDir}, exists: ${fs.existsSync(userUploadDir)}`);
+    }
+    console.log(`[LIST-ALL-FILES] Session upload dir: ${sessionUploadDir}, exists: ${fs.existsSync(sessionUploadDir)}`);
 
     return NextResponse.json({
       success: true,
@@ -194,9 +297,19 @@ export async function GET(request: NextRequest) {
       videoCount,
       thumbnailCount,
       csvCount,
+      orphanCount,
       files: allFiles,
       filesByJob: Object.values(filesByJob),
       jobs: userJobs.length,
+      debug: {
+        sessionId: sessionId.substring(0, 10) + "...",
+        userId: userId || "N/A",
+        safeUserId: safeUserId || "N/A",
+        uploadsDir,
+        uploadsDirExists: fs.existsSync(uploadsDir),
+        userDirExists: userUploadDir ? fs.existsSync(userUploadDir) : false,
+        sessionDirExists: fs.existsSync(sessionUploadDir),
+      },
     });
   } catch (error: any) {
     console.error("List all files error:", error);

@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { cookies } from "next/headers";
-import { getQueueItem } from "@/lib/queue";
+import { deleteStagingFile } from "@/lib/storage";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request: NextRequest) {
+/**
+ * Delete a file from staging area
+ */
+export async function DELETE(request: NextRequest) {
   try {
     const cookieStore = await cookies();
     const sessionId = cookieStore.get("sessionId")?.value;
@@ -26,42 +29,42 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url);
-    const jobId = searchParams.get("jobId");
+    const fileName = searchParams.get("fileName");
+    const type = searchParams.get("type") as "video" | "thumbnail" | null;
 
-    if (!jobId) {
+    if (!fileName) {
       return NextResponse.json(
-        { error: "jobId is required" },
+        { error: "fileName parameter is required" },
         { status: 400 }
       );
     }
 
-    const item = getQueueItem(jobId);
-    
-    if (!item) {
+    if (!type || (type !== "video" && type !== "thumbnail")) {
       return NextResponse.json(
-        { error: "Job not found" },
+        { error: "type parameter must be 'video' or 'thumbnail'" },
+        { status: 400 }
+      );
+    }
+
+    const deleted = deleteStagingFile(fileName, session.userId, sessionId, type);
+
+    if (!deleted) {
+      return NextResponse.json(
+        { error: "File not found" },
         { status: 404 }
       );
     }
 
-    if (item.sessionId !== sessionId) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 403 }
-      );
-    }
-
     return NextResponse.json({
-      job: item,
+      success: true,
+      message: "File deleted successfully",
     });
   } catch (error: any) {
-    console.error("Get queue status error:", error);
+    console.error("Delete staging file error:", error);
     return NextResponse.json(
-      { error: error?.message || "Failed to get queue status" },
+      { error: error?.message || "Failed to delete file" },
       { status: 500 }
     );
   }
 }
-
-
 

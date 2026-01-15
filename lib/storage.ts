@@ -17,15 +17,19 @@ if (!fs.existsSync(UPLOADS_DIR)) {
  * @param sessionId - Session ID (for backward compatibility, optional)
  * @returns Full path to upload directory
  */
-export function getUploadDir(userId: string | undefined, jobId: string, sessionId?: string): string {
+export function getUploadDir(
+  userId: string | undefined,
+  jobId: string,
+  sessionId?: string
+): string {
   // Use userId if available (persistent across sessions)
-  const userIdentifier = userId || sessionId || 'anonymous';
-  
+  const userIdentifier = userId || sessionId || "anonymous";
+
   // Sanitize userId to be filesystem-safe (replace @ and other special chars)
-  const safeUserId = userIdentifier.replace(/[^a-zA-Z0-9._-]/g, '_');
-  
+  const safeUserId = userIdentifier.replace(/[^a-zA-Z0-9._-]/g, "_");
+
   const dir = path.join(UPLOADS_DIR, safeUserId, jobId);
-  
+
   // Backward compatibility: Check if old sessionId-based path exists and migrate
   if (sessionId && userId && sessionId !== userId) {
     const oldDir = path.join(UPLOADS_DIR, sessionId, jobId);
@@ -36,7 +40,7 @@ export function getUploadDir(userId: string | undefined, jobId: string, sessionI
         fs.mkdirSync(dir, { recursive: true });
         fs.mkdirSync(path.join(dir, "videos"), { recursive: true });
         fs.mkdirSync(path.join(dir, "thumbnails"), { recursive: true });
-        
+
         // Copy files from old location to new location
         if (fs.existsSync(path.join(oldDir, "videos"))) {
           const oldVideos = fs.readdirSync(path.join(oldDir, "videos"));
@@ -48,7 +52,7 @@ export function getUploadDir(userId: string | undefined, jobId: string, sessionI
             }
           }
         }
-        
+
         if (fs.existsSync(path.join(oldDir, "thumbnails"))) {
           const oldThumbs = fs.readdirSync(path.join(oldDir, "thumbnails"));
           for (const file of oldThumbs) {
@@ -59,22 +63,24 @@ export function getUploadDir(userId: string | undefined, jobId: string, sessionI
             }
           }
         }
-        
+
         // Copy CSV if exists
         const oldCsv = path.join(oldDir, "metadata.csv");
         const newCsv = path.join(dir, "metadata.csv");
         if (fs.existsSync(oldCsv)) {
           fs.copyFileSync(oldCsv, newCsv);
         }
-        
-        console.log(`[STORAGE] Migration complete. Old directory can be manually removed: ${oldDir}`);
+
+        console.log(
+          `[STORAGE] Migration complete. Old directory can be manually removed: ${oldDir}`
+        );
       } catch (error) {
         console.error(`[STORAGE] Error migrating files:`, error);
         // Continue with new directory if migration fails
       }
     }
   }
-  
+
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
     fs.mkdirSync(path.join(dir, "videos"), { recursive: true });
@@ -83,7 +89,10 @@ export function getUploadDir(userId: string | undefined, jobId: string, sessionI
   return dir;
 }
 
-export async function saveFile(file: File, destination: string): Promise<string> {
+export async function saveFile(
+  file: File,
+  destination: string
+): Promise<string> {
   const buffer = Buffer.from(await file.arrayBuffer());
   fs.writeFileSync(destination, buffer);
   return destination;
@@ -104,17 +113,21 @@ export function getFileStream(filePath: string): Readable {
  * @param jobId - Job ID
  * @param sessionId - Session ID (for backward compatibility, optional)
  */
-export function deleteUploadDir(userId: string | undefined, jobId: string, sessionId?: string): void {
+export function deleteUploadDir(
+  userId: string | undefined,
+  jobId: string,
+  sessionId?: string
+): void {
   // Try userId-based path first
   if (userId) {
-    const safeUserId = userId.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const safeUserId = userId.replace(/[^a-zA-Z0-9._-]/g, "_");
     const dir = path.join(UPLOADS_DIR, safeUserId, jobId);
     if (fs.existsSync(dir)) {
       fs.rmSync(dir, { recursive: true, force: true });
       return;
     }
   }
-  
+
   // Fallback to sessionId-based path for backward compatibility
   if (sessionId) {
     const dir = path.join(UPLOADS_DIR, sessionId, jobId);
@@ -124,7 +137,11 @@ export function deleteUploadDir(userId: string | undefined, jobId: string, sessi
   }
 }
 
-export function cleanupUploadDir(userId: string | undefined, jobId: string, sessionId?: string): void {
+export function cleanupUploadDir(
+  userId: string | undefined,
+  jobId: string,
+  sessionId?: string
+): void {
   deleteUploadDir(userId, jobId, sessionId);
 }
 
@@ -136,11 +153,16 @@ export function cleanupUploadDir(userId: string | undefined, jobId: string, sess
  * @param sessionId - Session ID (for backward compatibility, optional)
  * @returns true if deleted, false if not found
  */
-export function deleteFile(userId: string | undefined, jobId: string, filePath: string, sessionId?: string): boolean {
+export function deleteFile(
+  userId: string | undefined,
+  jobId: string,
+  filePath: string,
+  sessionId?: string
+): boolean {
   // Try userId-based path first
   let jobDir: string | null = null;
   if (userId) {
-    const safeUserId = userId.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const safeUserId = userId.replace(/[^a-zA-Z0-9._-]/g, "_");
     jobDir = path.join(UPLOADS_DIR, safeUserId, jobId);
     if (!fs.existsSync(jobDir) && sessionId) {
       // Fallback to sessionId-based path
@@ -149,19 +171,19 @@ export function deleteFile(userId: string | undefined, jobId: string, filePath: 
   } else if (sessionId) {
     jobDir = path.join(UPLOADS_DIR, sessionId, jobId);
   }
-  
+
   if (!jobDir) {
     return false;
   }
-  
+
   const fullPath = path.join(jobDir, filePath);
-  
+
   // Security: Ensure the file path is within the job directory
   const normalizedPath = path.normalize(fullPath);
   if (!normalizedPath.startsWith(path.normalize(jobDir))) {
     throw new Error("Invalid file path - directory traversal detected");
   }
-  
+
   if (fs.existsSync(normalizedPath)) {
     try {
       fs.unlinkSync(normalizedPath);
@@ -181,7 +203,11 @@ export function deleteFile(userId: string | undefined, jobId: string, filePath: 
  * @param sessionId - Session ID (for backward compatibility, optional)
  * @returns Object with videos, thumbnails, and csv file info
  */
-export function listJobFiles(userId: string | undefined, jobId: string, sessionId?: string): {
+export function listJobFiles(
+  userId: string | undefined,
+  jobId: string,
+  sessionId?: string
+): {
   videos: Array<{ name: string; path: string; size: number }>;
   thumbnails: Array<{ name: string; path: string; size: number }>;
   csv?: { name: string; path: string; size: number };
@@ -189,7 +215,7 @@ export function listJobFiles(userId: string | undefined, jobId: string, sessionI
   // Try userId-based path first
   let jobDir: string | null = null;
   if (userId) {
-    const safeUserId = userId.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const safeUserId = userId.replace(/[^a-zA-Z0-9._-]/g, "_");
     jobDir = path.join(UPLOADS_DIR, safeUserId, jobId);
     if (!fs.existsSync(jobDir) && sessionId) {
       // Fallback to sessionId-based path
@@ -198,13 +224,13 @@ export function listJobFiles(userId: string | undefined, jobId: string, sessionI
   } else if (sessionId) {
     jobDir = path.join(UPLOADS_DIR, sessionId, jobId);
   }
-  
+
   if (!jobDir || !fs.existsSync(jobDir)) {
     return { videos: [], thumbnails: [] };
   }
   const videosDir = path.join(jobDir, "videos");
   const thumbnailsDir = path.join(jobDir, "thumbnails");
-  
+
   const result: {
     videos: Array<{ name: string; path: string; size: number }>;
     thumbnails: Array<{ name: string; path: string; size: number }>;
@@ -213,7 +239,7 @@ export function listJobFiles(userId: string | undefined, jobId: string, sessionI
     videos: [],
     thumbnails: [],
   };
-  
+
   // List video files
   if (fs.existsSync(videosDir)) {
     const videoFiles = fs.readdirSync(videosDir);
@@ -233,7 +259,7 @@ export function listJobFiles(userId: string | undefined, jobId: string, sessionI
       }
     }
   }
-  
+
   // List thumbnail files
   if (fs.existsSync(thumbnailsDir)) {
     const thumbnailFiles = fs.readdirSync(thumbnailsDir);
@@ -253,7 +279,7 @@ export function listJobFiles(userId: string | undefined, jobId: string, sessionI
       }
     }
   }
-  
+
   // List CSV file if exists
   const csvPath = path.join(jobDir, "metadata.csv");
   if (fs.existsSync(csvPath)) {
@@ -268,7 +294,253 @@ export function listJobFiles(userId: string | undefined, jobId: string, sessionI
       // Skip if can't access
     }
   }
-  
+
   return result;
 }
 
+/**
+ * Get staging directory for a user (where files are stored before CSV processing)
+ * @param userId - Google user email/ID (preferred, persistent)
+ * @param sessionId - Session ID (for backward compatibility, optional)
+ * @returns Full path to staging directory
+ */
+export function getStagingDir(
+  userId: string | undefined,
+  sessionId?: string
+): string {
+  const userIdentifier = userId || sessionId || "anonymous";
+  const safeUserId = userIdentifier.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const dir = path.join(UPLOADS_DIR, safeUserId, "staging");
+
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.mkdirSync(path.join(dir, "videos"), { recursive: true });
+    fs.mkdirSync(path.join(dir, "thumbnails"), { recursive: true });
+  }
+  return dir;
+}
+
+/**
+ * Save a file to staging area
+ * @param file - File to save
+ * @param userId - Google user email/ID
+ * @param sessionId - Session ID (optional)
+ * @param type - "video" or "thumbnail"
+ * @returns Object with saved file info
+ */
+export async function saveToStaging(
+  file: File,
+  userId: string | undefined,
+  sessionId?: string,
+  type: "video" | "thumbnail" = "video"
+): Promise<{ fileName: string; filePath: string; size: number }> {
+  const stagingDir = getStagingDir(userId, sessionId);
+  const subDir = type === "video" ? "videos" : "thumbnails";
+  const targetDir = path.join(stagingDir, subDir);
+
+  if (!fs.existsSync(targetDir)) {
+    fs.mkdirSync(targetDir, { recursive: true });
+  }
+
+  // Use original filename, but sanitize it
+  const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const destination = path.join(targetDir, sanitizedFileName);
+
+  await saveFile(file, destination);
+  const stats = fs.statSync(destination);
+
+  return {
+    fileName: sanitizedFileName,
+    filePath: destination,
+    size: stats.size,
+  };
+}
+
+/**
+ * List all files in staging area
+ * @param userId - Google user email/ID
+ * @param sessionId - Session ID (optional)
+ * @returns Object with videos and thumbnails
+ */
+export function listStagingFiles(
+  userId: string | undefined,
+  sessionId?: string
+): {
+  videos: Array<{
+    name: string;
+    path: string;
+    size: number;
+    uploadedAt: string;
+  }>;
+  thumbnails: Array<{
+    name: string;
+    path: string;
+    size: number;
+    uploadedAt: string;
+  }>;
+} {
+  const stagingDir = getStagingDir(userId, sessionId);
+  const videosDir = path.join(stagingDir, "videos");
+  const thumbnailsDir = path.join(stagingDir, "thumbnails");
+
+  const result: {
+    videos: Array<{
+      name: string;
+      path: string;
+      size: number;
+      uploadedAt: string;
+    }>;
+    thumbnails: Array<{
+      name: string;
+      path: string;
+      size: number;
+      uploadedAt: string;
+    }>;
+  } = {
+    videos: [],
+    thumbnails: [],
+  };
+
+  // List video files
+  if (fs.existsSync(videosDir)) {
+    const videoFiles = fs.readdirSync(videosDir);
+    for (const file of videoFiles) {
+      const filePath = path.join(videosDir, file);
+      try {
+        const stats = fs.statSync(filePath);
+        if (stats.isFile()) {
+          result.videos.push({
+            name: file,
+            path: `videos/${file}`,
+            size: stats.size,
+            uploadedAt: stats.birthtime.toISOString(),
+          });
+        }
+      } catch (error) {
+        // Skip files that can't be accessed
+      }
+    }
+  }
+
+  // List thumbnail files
+  if (fs.existsSync(thumbnailsDir)) {
+    const thumbnailFiles = fs.readdirSync(thumbnailsDir);
+    for (const file of thumbnailFiles) {
+      const filePath = path.join(thumbnailsDir, file);
+      try {
+        const stats = fs.statSync(filePath);
+        if (stats.isFile()) {
+          result.thumbnails.push({
+            name: file,
+            path: `thumbnails/${file}`,
+            size: stats.size,
+            uploadedAt: stats.birthtime.toISOString(),
+          });
+        }
+      } catch (error) {
+        // Skip files that can't be accessed
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Delete a file from staging area
+ * @param fileName - Name of the file to delete
+ * @param userId - Google user email/ID
+ * @param sessionId - Session ID (optional)
+ * @param type - "video" or "thumbnail"
+ * @returns true if deleted, false if not found
+ */
+export function deleteStagingFile(
+  fileName: string,
+  userId: string | undefined,
+  sessionId?: string,
+  type: "video" | "thumbnail" = "video"
+): boolean {
+  const stagingDir = getStagingDir(userId, sessionId);
+  const subDir = type === "video" ? "videos" : "thumbnails";
+  const filePath = path.join(stagingDir, subDir, fileName);
+
+  // Security: Ensure the file path is within the staging directory
+  const normalizedPath = path.normalize(filePath);
+  const normalizedStagingDir = path.normalize(stagingDir);
+  if (!normalizedPath.startsWith(normalizedStagingDir)) {
+    throw new Error("Invalid file path - directory traversal detected");
+  }
+
+  if (fs.existsSync(normalizedPath)) {
+    try {
+      fs.unlinkSync(normalizedPath);
+      return true;
+    } catch (error) {
+      console.error(`Error deleting staging file ${fileName}:`, error);
+      return false;
+    }
+  }
+  return false;
+}
+
+/**
+ * Move files from staging to job directory
+ * @param userId - Google user email/ID
+ * @param sessionId - Session ID (optional)
+ * @param jobId - Job ID
+ * @param videoFileName - Video filename to move (optional)
+ * @param thumbnailFileName - Thumbnail filename to move (optional)
+ * @returns Object with moved file paths
+ */
+export function moveStagingToJob(
+  userId: string | undefined,
+  sessionId: string | undefined,
+  jobId: string,
+  videoFileName?: string,
+  thumbnailFileName?: string
+): { videoPath?: string; thumbnailPath?: string } {
+  const stagingDir = getStagingDir(userId, sessionId);
+  const jobDir = getUploadDir(userId, jobId, sessionId);
+
+  const result: { videoPath?: string; thumbnailPath?: string } = {};
+
+  // Move video file
+  if (videoFileName) {
+    const stagingVideoPath = path.join(stagingDir, "videos", videoFileName);
+    const jobVideoPath = path.join(jobDir, "videos", videoFileName);
+
+    if (fs.existsSync(stagingVideoPath)) {
+      try {
+        fs.copyFileSync(stagingVideoPath, jobVideoPath);
+        // Optionally delete from staging after copy (or keep for reuse)
+        // fs.unlinkSync(stagingVideoPath);
+        result.videoPath = `videos/${videoFileName}`;
+      } catch (error) {
+        console.error(`Error moving video ${videoFileName}:`, error);
+      }
+    }
+  }
+
+  // Move thumbnail file
+  if (thumbnailFileName) {
+    const stagingThumbPath = path.join(
+      stagingDir,
+      "thumbnails",
+      thumbnailFileName
+    );
+    const jobThumbPath = path.join(jobDir, "thumbnails", thumbnailFileName);
+
+    if (fs.existsSync(stagingThumbPath)) {
+      try {
+        fs.copyFileSync(stagingThumbPath, jobThumbPath);
+        // Optionally delete from staging after copy
+        // fs.unlinkSync(stagingThumbPath);
+        result.thumbnailPath = `thumbnails/${thumbnailFileName}`;
+      } catch (error) {
+        console.error(`Error moving thumbnail ${thumbnailFileName}:`, error);
+      }
+    }
+  }
+
+  return result;
+}

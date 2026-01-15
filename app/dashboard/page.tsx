@@ -90,10 +90,27 @@ export default function Dashboard() {
   const [showBatchUpload, setShowBatchUpload] = useState<boolean>(true); // Expanded by default
   const [showBatchInstructions, setShowBatchInstructions] =
     useState<boolean>(false); // Collapsed by default
+  const [showStaging, setShowStaging] = useState<boolean>(true); // Expanded by default
+  const [stagingFiles, setStagingFiles] = useState<{
+    videos: Array<{ name: string; size: number; sizeFormatted: string; uploadedAt: string }>;
+    thumbnails: Array<{ name: string; size: number; sizeFormatted: string; uploadedAt: string }>;
+    totals: {
+      videoCount: number;
+      thumbnailCount: number;
+      totalVideoSize: number;
+      totalVideoSizeFormatted: string;
+      totalThumbnailSize: number;
+      totalThumbnailSizeFormatted: string;
+    };
+  } | null>(null);
+  const [loadingStaging, setLoadingStaging] = useState<boolean>(false);
+  const [uploadingToStaging, setUploadingToStaging] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const csvFileInputRef = useRef<HTMLInputElement>(null);
   const videoFilesInputRef = useRef<HTMLInputElement>(null);
   const thumbnailFilesInputRef = useRef<HTMLInputElement>(null);
+  const stagingVideoInputRef = useRef<HTMLInputElement>(null);
+  const stagingThumbnailInputRef = useRef<HTMLInputElement>(null);
 
   // Add debug log helper
   const addDebugLog = useCallback(
@@ -331,6 +348,22 @@ export default function Dashboard() {
     }
   }, []);
 
+  // Load staging section preference from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem("showStaging");
+    if (saved !== null) {
+      setShowStaging(saved === "true");
+    }
+  }, []);
+
+  // Fetch staging files on component load if expanded by default
+  useEffect(() => {
+    if (user?.authenticated && showStaging) {
+      fetchStagingFiles();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.authenticated, showStaging]);
+
   // Load batch instructions preference from localStorage
   useEffect(() => {
     const saved = localStorage.getItem("showBatchInstructions");
@@ -355,6 +388,81 @@ export default function Dashboard() {
     const newState = !showBatchUpload;
     setShowBatchUpload(newState);
     localStorage.setItem("showBatchUpload", String(newState));
+  };
+
+  const toggleStaging = () => {
+    const newState = !showStaging;
+    setShowStaging(newState);
+    localStorage.setItem("showStaging", String(newState));
+  };
+
+  const fetchStagingFiles = async () => {
+    setLoadingStaging(true);
+    try {
+      const response = await fetch("/api/staging/list");
+      const data = await response.json();
+      if (data.success) {
+        setStagingFiles(data);
+      } else {
+        setShowToast({ message: data.error || "Failed to load staging files", type: "error" });
+      }
+    } catch (error: any) {
+      setShowToast({ message: error.message || "Failed to load staging files", type: "error" });
+    } finally {
+      setLoadingStaging(false);
+    }
+  };
+
+  const uploadToStaging = async (file: File, type: "video" | "thumbnail") => {
+    setUploadingToStaging(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("type", type);
+
+      const response = await fetch("/api/staging/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        setShowToast({ message: `${type === "video" ? "Video" : "Thumbnail"} uploaded to staging!`, type: "success" });
+        await fetchStagingFiles();
+        // Clear input
+        if (type === "video" && stagingVideoInputRef.current) {
+          stagingVideoInputRef.current.value = "";
+        } else if (type === "thumbnail" && stagingThumbnailInputRef.current) {
+          stagingThumbnailInputRef.current.value = "";
+        }
+      } else {
+        setShowToast({ message: data.error || "Failed to upload file", type: "error" });
+      }
+    } catch (error: any) {
+      setShowToast({ message: error.message || "Failed to upload file", type: "error" });
+    } finally {
+      setUploadingToStaging(false);
+    }
+  };
+
+  const deleteStagingFile = async (fileName: string, type: "video" | "thumbnail") => {
+    if (!confirm(`Are you sure you want to delete ${fileName}?`)) return;
+
+    try {
+      const response = await fetch(`/api/staging/delete?fileName=${encodeURIComponent(fileName)}&type=${type}`, {
+        method: "DELETE",
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        setShowToast({ message: "File deleted from staging", type: "success" });
+        await fetchStagingFiles();
+      } else {
+        setShowToast({ message: data.error || "Failed to delete file", type: "error" });
+      }
+    } catch (error: any) {
+      setShowToast({ message: error.message || "Failed to delete file", type: "error" });
+    }
   };
 
   const toggleBatchInstructions = () => {
@@ -1739,8 +1847,23 @@ export default function Dashboard() {
                     No files found on server
                   </p>
                   <p className="text-sm text-gray-500 dark:text-gray-500 mt-2">
-                    Upload videos to see them here
+                    Upload videos using the batch upload form to see them here
                   </p>
+                  {allFiles?.debug && (
+                    <div className="mt-4 p-3 bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-700 rounded-lg text-left text-xs">
+                      <p className="font-semibold text-yellow-800 dark:text-yellow-200 mb-2">Debug Info:</p>
+                      <p className="text-yellow-700 dark:text-yellow-300">Session: {allFiles.debug.sessionId}</p>
+                      <p className="text-yellow-700 dark:text-yellow-300">User ID: {allFiles.debug.userId}</p>
+                      <p className="text-yellow-700 dark:text-yellow-300">Safe User ID: {allFiles.debug.safeUserId}</p>
+                      <p className="text-yellow-700 dark:text-yellow-300">Uploads dir exists: {allFiles.debug.uploadsDirExists ? "Yes" : "No"}</p>
+                      <p className="text-yellow-700 dark:text-yellow-300">User dir exists: {allFiles.debug.userDirExists ? "Yes" : "No"}</p>
+                      <p className="text-yellow-700 dark:text-yellow-300">Session dir exists: {allFiles.debug.sessionDirExists ? "Yes" : "No"}</p>
+                      <p className="text-yellow-700 dark:text-yellow-300">Jobs in queue: {allFiles.jobs}</p>
+                      <p className="text-yellow-700 dark:text-yellow-300 mt-2 text-xs">
+                        Files are stored in: <code className="bg-yellow-100 dark:bg-yellow-800 px-1 rounded">/uploads/{'<user-id>'}/{'<job-id>'}/</code>
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1891,6 +2014,190 @@ export default function Dashboard() {
                 {uploading ? "Uploading..." : "Upload Video"}
               </button>
             </form>
+          )}
+        </div>
+
+        {/* Staging Area - Upload Files Before CSV */}
+        <div className="card">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-2xl font-bold text-gray-800 dark:text-white flex items-center gap-2">
+              <span className="text-3xl">📁</span>
+              <span>Staging Area (Upload Files First)</span>
+            </h2>
+            <button
+              type="button"
+              onClick={toggleStaging}
+              className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg transition-colors"
+            >
+              {showStaging ? "Hide" : "Show"}
+            </button>
+          </div>
+          {showStaging && (
+            <>
+              <div className="mb-5 p-4 bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20 border border-purple-200 dark:border-purple-700 rounded-lg">
+                <p className="text-sm text-purple-900 dark:text-purple-100 font-medium">
+                  <strong>💡 Workflow:</strong> Upload videos and thumbnails individually here first. Then upload your CSV file in the "Batch Upload" section below. The CSV will automatically match files by filename.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                {/* Upload Video */}
+                <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6">
+                  <h3 className="text-lg font-semibold mb-3 text-gray-800 dark:text-white">Upload Video</h3>
+                  <input
+                    ref={stagingVideoInputRef}
+                    type="file"
+                    accept="video/*"
+                    className="mb-3 w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100 dark:file:bg-purple-900/30 dark:file:text-purple-300"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file && file.type.startsWith("video/")) {
+                        uploadToStaging(file, "video");
+                      }
+                    }}
+                    disabled={uploadingToStaging}
+                  />
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Upload MP4 or other video files</p>
+                </div>
+
+                {/* Upload Thumbnail */}
+                <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6">
+                  <h3 className="text-lg font-semibold mb-3 text-gray-800 dark:text-white">Upload Thumbnail</h3>
+                  <input
+                    ref={stagingThumbnailInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="mb-3 w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100 dark:file:bg-purple-900/30 dark:file:text-purple-300"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file && (file.type.startsWith("image/") || file.name.match(/\.(jpg|jpeg|png|gif|webp)$/i))) {
+                        uploadToStaging(file, "thumbnail");
+                      }
+                    }}
+                    disabled={uploadingToStaging}
+                  />
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Upload JPG, PNG, or other image files</p>
+                </div>
+              </div>
+
+              {/* Staged Files List */}
+              <div className="mt-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold text-gray-800 dark:text-white">Staged Files</h3>
+                  <button
+                    type="button"
+                    onClick={fetchStagingFiles}
+                    disabled={loadingStaging}
+                    className="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    {loadingStaging ? "Loading..." : "🔄 Refresh"}
+                  </button>
+                </div>
+
+                {loadingStaging ? (
+                  <div className="text-center py-8 text-gray-500">Loading...</div>
+                ) : stagingFiles ? (
+                  <>
+                    {/* Summary */}
+                    <div className="mb-4 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                        <div>
+                          <span className="text-gray-600 dark:text-gray-400">Videos:</span>
+                          <span className="ml-2 font-semibold text-gray-800 dark:text-white">{stagingFiles.totals.videoCount}</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-600 dark:text-gray-400">Thumbnails:</span>
+                          <span className="ml-2 font-semibold text-gray-800 dark:text-white">{stagingFiles.totals.thumbnailCount}</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-600 dark:text-gray-400">Video Size:</span>
+                          <span className="ml-2 font-semibold text-gray-800 dark:text-white">{stagingFiles.totals.totalVideoSizeFormatted}</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-600 dark:text-gray-400">Thumbnail Size:</span>
+                          <span className="ml-2 font-semibold text-gray-800 dark:text-white">{stagingFiles.totals.totalThumbnailSizeFormatted}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Videos List */}
+                    {stagingFiles.videos.length > 0 && (
+                      <div className="mb-4">
+                        <h4 className="text-md font-semibold mb-2 text-gray-700 dark:text-gray-300">Videos ({stagingFiles.videos.length})</h4>
+                        <div className="space-y-2">
+                          {stagingFiles.videos.map((video) => (
+                            <div
+                              key={video.name}
+                              className="flex items-center justify-between p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg"
+                            >
+                              <div className="flex-1">
+                                <p className="font-medium text-gray-800 dark:text-white">{video.name}</p>
+                                <p className="text-xs text-gray-500 dark:text-gray-400">
+                                  {video.sizeFormatted} • Uploaded {new Date(video.uploadedAt).toLocaleString()}
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => deleteStagingFile(video.name, "video")}
+                                className="ml-4 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition-colors"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Thumbnails List */}
+                    {stagingFiles.thumbnails.length > 0 && (
+                      <div className="mb-4">
+                        <h4 className="text-md font-semibold mb-2 text-gray-700 dark:text-gray-300">Thumbnails ({stagingFiles.thumbnails.length})</h4>
+                        <div className="space-y-2">
+                          {stagingFiles.thumbnails.map((thumb) => (
+                            <div
+                              key={thumb.name}
+                              className="flex items-center justify-between p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg"
+                            >
+                              <div className="flex-1">
+                                <p className="font-medium text-gray-800 dark:text-white">{thumb.name}</p>
+                                <p className="text-xs text-gray-500 dark:text-gray-400">
+                                  {thumb.sizeFormatted} • Uploaded {new Date(thumb.uploadedAt).toLocaleString()}
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => deleteStagingFile(thumb.name, "thumbnail")}
+                                className="ml-4 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition-colors"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {stagingFiles.videos.length === 0 && stagingFiles.thumbnails.length === 0 && (
+                      <div className="text-center py-8 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                        <p className="text-gray-600 dark:text-gray-400">No files in staging area</p>
+                        <p className="text-sm text-gray-500 dark:text-gray-500 mt-2">Upload videos and thumbnails above</p>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="text-center py-8 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                    <button
+                      type="button"
+                      onClick={fetchStagingFiles}
+                      className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg transition-colors"
+                    >
+                      Load Staging Files
+                    </button>
+                  </div>
+                )}
+              </div>
+            </>
           )}
         </div>
 

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession, setSession } from "@/lib/session";
 import { cookies } from "next/headers";
 import { addToQueue, getQueue } from "@/lib/queue";
-import { getUploadDir, saveFile } from "@/lib/storage";
+import { getUploadDir, saveFile, listStagingFiles, moveStagingToJob } from "@/lib/storage";
 import { getOAuthClient } from "@/lib/auth";
 import { google } from "googleapis";
 import { Readable } from "stream";
@@ -203,6 +203,22 @@ export async function POST(request: NextRequest) {
 
     console.log(`Parsed CSV with ${csvData.length} rows`);
 
+    // Get staged files (files uploaded individually before CSV)
+    const stagedFiles = listStagingFiles(userId, sessionId);
+    const stagedVideosMap = new Map<string, { name: string; path: string; size: number }>();
+    stagedFiles.videos.forEach(v => {
+      const filename = v.name.toLowerCase();
+      stagedVideosMap.set(filename, v);
+      console.log(`[UPLOAD-QUEUE] Indexed staged video: ${filename}`);
+    });
+    
+    const stagedThumbnailsMap = new Map<string, { name: string; path: string; size: number }>();
+    stagedFiles.thumbnails.forEach(t => {
+      const filename = t.name.toLowerCase();
+      stagedThumbnailsMap.set(filename, t);
+      console.log(`[UPLOAD-QUEUE] Indexed staged thumbnail: ${filename}`);
+    });
+
     // Create a map of uploaded files by filename for quick lookup
     const uploadedFilesMap = new Map<string, File>();
     uploadedFiles.forEach(file => {
@@ -315,9 +331,10 @@ export async function POST(request: NextRequest) {
       const row = csvData[i];
       const updatedRow = { ...row };
 
-      // Copy video file - try uploaded files first, then check server path
+      // Copy video file - try staged files first, then uploaded files, then server path
       if (row.path) {
         const csvFilename = extractFilename(row.path);
+        const stagedVideo = stagedVideosMap.get(csvFilename);
         const uploadedFile = uploadedFilesMap.get(csvFilename);
         
         // Update progress: Starting video copy
@@ -333,8 +350,35 @@ export async function POST(request: NextRequest) {
         
         let videoCopied = false;
         
-        // First, try to use uploaded file if available
-        if (uploadedFile) {
+        // First, try to use staged file if available
+        if (stagedVideo) {
+          try {
+            const moved = moveStagingToJob(userId, sessionId, jobId, stagedVideo.name);
+            if (moved.videoPath) {
+              updatedRow.path = path.join(uploadDir, moved.videoPath);
+              copyStats.videosCopied++;
+              videoCopied = true;
+              console.log(`[UPLOAD-QUEUE] ✓ Video ${i + 1} moved from staging: ${stagedVideo.name}`);
+              
+              setUploadProgress(sessionId, {
+                sessionId,
+                totalFiles: csvData.length,
+                currentFile: i + 1,
+                currentFileName: stagedVideo.name,
+                status: 'copying',
+                message: `✓ Video ${i + 1} / ${csvData.length} copied from staging`,
+                copyStats: { ...copyStats },
+              });
+            }
+          } catch (error: any) {
+            const errorMsg = `Video ${i + 1}: Failed to move staged file - ${error?.message || 'Unknown error'}`;
+            console.error(`[UPLOAD-QUEUE] [ERROR] ${errorMsg}`, error);
+            copyStats.errors.push(errorMsg);
+          }
+        }
+        
+        // Second, try to use uploaded file if available (and not already copied from staging)
+        if (!videoCopied && uploadedFile) {
           try {
             // Sanitize filename to handle special characters
             const videoFilename = uploadedFile.name
@@ -492,6 +536,7 @@ export async function POST(request: NextRequest) {
       // Copy thumbnail file if it exists (optional)
       if (row.thumbnail_path) {
         const csvThumbFilename = extractFilename(row.thumbnail_path);
+        const stagedThumbnail = stagedThumbnailsMap.get(csvThumbFilename);
         const uploadedThumbnail = uploadedThumbnailsMap.get(csvThumbFilename);
         
         // Update progress: Starting thumbnail copy
@@ -507,8 +552,35 @@ export async function POST(request: NextRequest) {
         
         let thumbnailCopied = false;
         
-        // First, try to use uploaded thumbnail file if available
-        if (uploadedThumbnail) {
+        // First, try to use staged thumbnail if available
+        if (stagedThumbnail) {
+          try {
+            const moved = moveStagingToJob(userId, sessionId, jobId, undefined, stagedThumbnail.name);
+            if (moved.thumbnailPath) {
+              updatedRow.thumbnail_path = path.join(uploadDir, moved.thumbnailPath);
+              copyStats.thumbnailsCopied++;
+              thumbnailCopied = true;
+              console.log(`[UPLOAD-QUEUE] ✓ Thumbnail ${i + 1} moved from staging: ${stagedThumbnail.name}`);
+              
+              setUploadProgress(sessionId, {
+                sessionId,
+                totalFiles: csvData.length,
+                currentFile: i + 1,
+                currentFileName: stagedThumbnail.name,
+                status: 'copying',
+                message: `✓ Thumbnail ${i + 1} / ${csvData.length} copied from staging`,
+                copyStats: { ...copyStats },
+              });
+            }
+          } catch (error: any) {
+            const errorMsg = `Thumbnail ${i + 1}: Failed to move staged thumbnail - ${error?.message || 'Unknown error'}`;
+            console.error(`[UPLOAD-QUEUE] [ERROR] ${errorMsg}`, error);
+            // Thumbnail is optional, so continue
+          }
+        }
+        
+        // Second, try to use uploaded thumbnail file if available (and not already copied from staging)
+        if (!thumbnailCopied && uploadedThumbnail) {
           try {
             const thumbFilename = uploadedThumbnail.name
               .replace(/[<>:"|?*]/g, '_')
