@@ -59,17 +59,23 @@ export async function POST(request: NextRequest) {
     }
 
     // Copy CSV file to new job directory
+    // Use userId from original job or current session for consistency
+    const targetUserId = userId || originalJob.userId;
     const newJobId = addToQueue({
       sessionId,
-      userId: userId,
+      userId: targetUserId,
       csvPath: "", // Will be set below
       uploadDir: "", // Will be set below
       videosPerDay: originalJob.videosPerDay,
       startDate: new Date().toISOString(), // New start date
+      uploadInterval: originalJob.uploadInterval,
+      videosPerInterval: originalJob.videosPerInterval,
+      customIntervalMinutes: originalJob.customIntervalMinutes,
       totalVideos: originalJob.totalVideos,
     });
 
-    const newUploadDir = getUploadDir(sessionId, newJobId);
+    // Use userId for persistent storage (fallback to sessionId for backward compatibility)
+    const newUploadDir = getUploadDir(targetUserId, newJobId, sessionId);
     const newCsvPath = path.join(newUploadDir, "metadata.csv");
 
     // Copy CSV file

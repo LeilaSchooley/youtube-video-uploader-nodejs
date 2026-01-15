@@ -9,7 +9,13 @@
     "start:next": "next start",
     "start:worker": "tsx worker.ts",
     "lint": "next lint",
-    "worker": "tsx worker.ts"
+    "worker": "tsx worker.ts",
+    "pm2:setup": "pm2 install pm2-logrotate && pm2 set pm2-logrotate:max_size 10M && pm2 set pm2-logrotate:retain 7 && pm2 set pm2-logrotate:compress true",
+    "pm2:start": "pm2 start ecosystem.config.js",
+    "pm2:stop": "pm2 stop ecosystem.config.js",
+    "pm2:restart": "pm2 restart ecosystem.config.js",
+    "pm2:logs": "pm2 logs",
+    "pm2:status": "pm2 status"
   },
   "keywords": [],
   "author": "",
@@ -19,14 +25,14 @@
     "date-fns": "^4.1.0",
     "dotenv": "^17.2.3",
     "googleapis": "^144.0.0",
-    "next": "^14.2.0",
-    "react": "^18.3.0",
-    "react-dom": "^18.3.0"
+    "next": "15.5.9",
+    "react": "19.2.3",
+    "react-dom": "19.2.3"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
-    "@types/react": "^18.3.0",
-    "@types/react-dom": "^18.3.0",
+    "@types/react": "19.2.8",
+    "@types/react-dom": "19.2.3",
     "autoprefixer": "^10.4.23",
     "concurrently": "^9.2.1",
     "postcss": "^8.5.6",

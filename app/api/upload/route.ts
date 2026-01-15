@@ -6,6 +6,8 @@ import { cookies } from "next/headers";
 import { Readable } from "stream";
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 300; // 5 minutes for large video uploads
+export const runtime = 'nodejs';
 
 export async function POST(request: NextRequest) {
   try {

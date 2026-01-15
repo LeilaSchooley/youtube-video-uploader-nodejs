@@ -45,7 +45,8 @@ export async function POST(request: NextRequest) {
       // Clean up files for jobs that will be deleted
       for (const job of jobsToDelete) {
         try {
-          deleteUploadDir(job.sessionId, job.id);
+          // Use userId if available, fallback to sessionId for backward compatibility
+          deleteUploadDir(job.userId, job.id, job.sessionId);
         } catch (cleanupError) {
           console.error(`Error cleaning up files for job ${job.id}:`, cleanupError);
           // Continue with deletion even if cleanup fails
@@ -99,7 +100,8 @@ export async function POST(request: NextRequest) {
       case "cancel":
         // Clean up uploaded files before cancelling
         try {
-          deleteUploadDir(job.sessionId, jobId);
+          // Use userId if available, fallback to sessionId for backward compatibility
+          deleteUploadDir(job.userId, jobId, job.sessionId);
         } catch (cleanupError) {
           console.error("Error cleaning up files:", cleanupError);
           // Continue with cancellation even if cleanup fails
@@ -109,7 +111,8 @@ export async function POST(request: NextRequest) {
       case "delete":
         // Clean up uploaded files before deleting
         try {
-          deleteUploadDir(job.sessionId, jobId);
+          // Use userId if available, fallback to sessionId for backward compatibility
+          deleteUploadDir(job.userId, jobId, job.sessionId);
         } catch (cleanupError) {
           console.error("Error cleaning up files:", cleanupError);
           // Continue with deletion even if cleanup fails

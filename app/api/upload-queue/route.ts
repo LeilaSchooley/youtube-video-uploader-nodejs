@@ -9,8 +9,11 @@ import { Readable } from "stream";
 import csvParser from "csv-parser";
 import fs from "fs";
 import path from "path";
+import { setUploadProgress } from "@/lib/upload-progress";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 300; // 5 minutes for large file uploads
+export const runtime = 'nodejs';
 
 interface CSVRow {
   youtube_title?: string;
@@ -129,7 +132,8 @@ export async function POST(request: NextRequest) {
 
     // Generate job ID
     const jobId = `job-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-    const uploadDir = getUploadDir(sessionId, jobId);
+    // Use userId for persistent storage across sessions
+    const uploadDir = getUploadDir(userId, jobId, sessionId);
     const csvPath = path.join(uploadDir, "metadata.csv");
 
     // Save CSV file
@@ -316,6 +320,17 @@ export async function POST(request: NextRequest) {
         const csvFilename = extractFilename(row.path);
         const uploadedFile = uploadedFilesMap.get(csvFilename);
         
+        // Update progress: Starting video copy
+        setUploadProgress(sessionId, {
+          sessionId,
+          totalFiles: csvData.length,
+          currentFile: i + 1,
+          currentFileName: csvFilename || `Video ${i + 1}`,
+          status: 'copying',
+          message: `Copying video ${i + 1} / ${csvData.length}...`,
+          copyStats: { ...copyStats },
+        });
+        
         let videoCopied = false;
         
         // First, try to use uploaded file if available
@@ -348,11 +363,33 @@ export async function POST(request: NextRequest) {
             copyStats.videosCopied++;
             videoCopied = true;
             console.log(`[UPLOAD-QUEUE] ✓ Video ${i + 1} saved from upload: ${uploadedFile.name}`);
+            
+            // Update progress: Video copied successfully
+            setUploadProgress(sessionId, {
+              sessionId,
+              totalFiles: csvData.length,
+              currentFile: i + 1,
+              currentFileName: uploadedFile.name,
+              status: 'copying',
+              message: `✓ Video ${i + 1} / ${csvData.length} copied`,
+              copyStats: { ...copyStats },
+            });
           } catch (error: any) {
             const errorMsg = `Video ${i + 1}: Failed to save uploaded file - ${error?.message || 'Unknown error'}`;
             console.error(`[UPLOAD-QUEUE] [ERROR] ${errorMsg}`, error);
             copyStats.errors.push(errorMsg);
             copyStats.videosSkipped++;
+            
+            // Update progress: Error
+            setUploadProgress(sessionId, {
+              sessionId,
+              totalFiles: csvData.length,
+              currentFile: i + 1,
+              currentFileName: csvFilename || `Video ${i + 1}`,
+              status: 'copying',
+              message: `❌ Video ${i + 1} failed: ${error?.message || 'Unknown error'}`,
+              copyStats: { ...copyStats },
+            });
             continue;
           }
         } else {
@@ -389,11 +426,33 @@ export async function POST(request: NextRequest) {
               copyStats.videosCopied++;
               videoCopied = true;
               console.log(`[UPLOAD-QUEUE] ✓ Video ${i + 1} copied from server path`);
+              
+              // Update progress: Video copied successfully
+              setUploadProgress(sessionId, {
+                sessionId,
+                totalFiles: csvData.length,
+                currentFile: i + 1,
+                currentFileName: videoFilename,
+                status: 'copying',
+                message: `✓ Video ${i + 1} / ${csvData.length} copied`,
+                copyStats: { ...copyStats },
+              });
             } catch (error: any) {
               const errorMsg = `Video ${i + 1}: Copy failed - ${error?.message || 'Unknown error'}. Source: ${row.path}`;
               console.error(`[UPLOAD-QUEUE] [ERROR] ${errorMsg}`, error);
               copyStats.errors.push(errorMsg);
               copyStats.videosSkipped++;
+              
+              // Update progress: Error
+              setUploadProgress(sessionId, {
+                sessionId,
+                totalFiles: csvData.length,
+                currentFile: i + 1,
+                currentFileName: csvFilename || `Video ${i + 1}`,
+                status: 'copying',
+                message: `❌ Video ${i + 1} failed: ${error?.message || 'Unknown error'}`,
+                copyStats: { ...copyStats },
+              });
               continue;
             }
           } else {
@@ -403,6 +462,17 @@ export async function POST(request: NextRequest) {
             console.error(`[UPLOAD-QUEUE] Available uploaded files:`, Array.from(uploadedFilesMap.keys()));
             copyStats.errors.push(errorMsg);
             copyStats.videosSkipped++;
+            
+            // Update progress: Error
+            setUploadProgress(sessionId, {
+              sessionId,
+              totalFiles: csvData.length,
+              currentFile: i + 1,
+              currentFileName: csvFilename || `Video ${i + 1}`,
+              status: 'copying',
+              message: `❌ Video ${i + 1} not found`,
+              copyStats: { ...copyStats },
+            });
             continue;
           }
         }
@@ -423,6 +493,17 @@ export async function POST(request: NextRequest) {
       if (row.thumbnail_path) {
         const csvThumbFilename = extractFilename(row.thumbnail_path);
         const uploadedThumbnail = uploadedThumbnailsMap.get(csvThumbFilename);
+        
+        // Update progress: Starting thumbnail copy
+        setUploadProgress(sessionId, {
+          sessionId,
+          totalFiles: csvData.length,
+          currentFile: i + 1,
+          currentFileName: csvThumbFilename || `Thumbnail ${i + 1}`,
+          status: 'copying',
+          message: `Copying thumbnail ${i + 1} / ${csvData.length}...`,
+          copyStats: { ...copyStats },
+        });
         
         let thumbnailCopied = false;
         
@@ -452,6 +533,17 @@ export async function POST(request: NextRequest) {
             copyStats.thumbnailsCopied++;
             thumbnailCopied = true;
             console.log(`[UPLOAD-QUEUE] ✓ Thumbnail ${i + 1} saved from upload: ${uploadedThumbnail.name}`);
+            
+            // Update progress: Thumbnail copied successfully
+            setUploadProgress(sessionId, {
+              sessionId,
+              totalFiles: csvData.length,
+              currentFile: i + 1,
+              currentFileName: uploadedThumbnail.name,
+              status: 'copying',
+              message: `✓ Thumbnail ${i + 1} / ${csvData.length} copied`,
+              copyStats: { ...copyStats },
+            });
           } catch (error: any) {
             const errorMsg = `Thumbnail ${i + 1}: Failed to save uploaded thumbnail - ${error?.message || 'Unknown error'}`;
             console.error(`[UPLOAD-QUEUE] [ERROR] ${errorMsg}`, error);
@@ -490,6 +582,17 @@ export async function POST(request: NextRequest) {
               copyStats.thumbnailsCopied++;
               thumbnailCopied = true;
               console.log(`[UPLOAD-QUEUE] ✓ Thumbnail ${i + 1} copied successfully from server`);
+              
+              // Update progress: Thumbnail copied successfully
+              setUploadProgress(sessionId, {
+                sessionId,
+                totalFiles: csvData.length,
+                currentFile: i + 1,
+                currentFileName: thumbFilename,
+                status: 'copying',
+                message: `✓ Thumbnail ${i + 1} / ${csvData.length} copied`,
+                copyStats: { ...copyStats },
+              });
             } catch (error: any) {
               const errorMsg = `Thumbnail ${i + 1}: Copy failed - ${error?.message || 'Unknown error'}. Source: ${row.thumbnail_path}`;
               console.error(`[UPLOAD-QUEUE] [ERROR] ${errorMsg}`, error);
@@ -574,6 +677,17 @@ export async function POST(request: NextRequest) {
       console.log(`[UPLOAD-QUEUE] CSV written to: ${csvPath}`);
       console.log(`[UPLOAD-QUEUE] CSV content preview (first 500 chars):`, csvContent.substring(0, 500));
     }
+
+    // Mark progress as completed
+    setUploadProgress(sessionId, {
+      sessionId,
+      totalFiles: csvData.length,
+      currentFile: csvData.length,
+      currentFileName: '',
+      status: 'completed',
+      message: `✓ All files copied successfully!`,
+      copyStats: { ...copyStats },
+    });
 
     // Add to queue only if we have successfully copied videos
     const queueId = addToQueue({

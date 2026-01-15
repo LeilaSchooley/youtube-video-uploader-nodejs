@@ -49,6 +49,8 @@ export default function Dashboard() {
   const [selectedThumbnailFiles, setSelectedThumbnailFiles] = useState<File[]>([]); // For CSV bulk upload thumbnails
   const [showDebugPanel, setShowDebugPanel] = useState<boolean>(false);
   const [debugLogs, setDebugLogs] = useState<Array<{ time: string; message: string; type: 'info' | 'success' | 'error' }>>([]);
+  const [uploadProgress, setUploadProgress] = useState<{ currentFile: number; totalFiles: number; currentFileName: string; message: string; status: string } | null>(null);
+  const [uploadProgressInterval, setUploadProgressInterval] = useState<NodeJS.Timeout | null>(null);
   const [csvValidationErrors, setCsvValidationErrors] = useState<string[]>([]);
   const [jobFiles, setJobFiles] = useState<any>(null);
   const [loadingFiles, setLoadingFiles] = useState<boolean>(false);
@@ -593,11 +595,58 @@ export default function Dashboard() {
     try {
       // Show copying message
       setMessage({ type: 'info', text: 'Copying files to server storage...' });
+      setUploadProgress({ currentFile: 0, totalFiles: 0, currentFileName: '', message: 'Starting upload...', status: 'copying' });
+      
+      // Get session ID from cookies for progress tracking
+      const getSessionIdFromCookies = (): string | null => {
+        const cookies = document.cookie.split(';');
+        for (const cookie of cookies) {
+          const [name, value] = cookie.trim().split('=');
+          if (name === 'sessionId') {
+            return decodeURIComponent(value);
+          }
+        }
+        return null;
+      };
+
+      const currentSessionId = getSessionIdFromCookies();
+      
+      // Start polling for progress updates
+      const progressPollInterval = setInterval(async () => {
+        try {
+          if (!currentSessionId) return;
+          const progressRes = await fetch(`/api/upload-progress?sessionId=${encodeURIComponent(currentSessionId)}`);
+          if (progressRes.ok) {
+            const progressData = await progressRes.json();
+            setUploadProgress({
+              currentFile: progressData.currentFile || 0,
+              totalFiles: progressData.totalFiles || 0,
+              currentFileName: progressData.currentFileName || '',
+              message: progressData.message || 'Processing...',
+              status: progressData.status || 'copying',
+            });
+            
+            // Stop polling if completed or error
+            if (progressData.status === 'completed' || progressData.status === 'error') {
+              clearInterval(progressPollInterval);
+              setUploadProgressInterval(null);
+            }
+          }
+        } catch (error) {
+          console.error('Error polling upload progress:', error);
+        }
+      }, 500); // Poll every 500ms for real-time updates
+      
+      setUploadProgressInterval(progressPollInterval);
       
       const res = await fetch('/api/upload-queue', {
         method: 'POST',
         body: formData,
       });
+
+      // Stop polling once request completes
+      clearInterval(progressPollInterval);
+      setUploadProgressInterval(null);
 
       const data = await res.json();
       if (res.ok && data.success) {
@@ -1763,6 +1812,40 @@ export default function Dashboard() {
             )}
           </div>
 
+          {/* Real-time upload progress display */}
+          {uploadProgress && csvUploading && (
+            <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg dark:bg-blue-900 dark:border-blue-700">
+              <div className="flex items-center gap-3 mb-2">
+                <div className="animate-spin text-blue-600 dark:text-blue-400">⏳</div>
+                <div className="flex-1">
+                  <div className="font-semibold text-blue-900 dark:text-blue-100">
+                    {uploadProgress.message}
+                  </div>
+                  {uploadProgress.totalFiles > 0 && (
+                    <div className="text-sm text-blue-700 dark:text-blue-300 mt-1">
+                      Uploading video {uploadProgress.currentFile} / {uploadProgress.totalFiles}
+                      {uploadProgress.currentFileName && (
+                        <span className="ml-2 text-blue-600 dark:text-blue-400">
+                          ({uploadProgress.currentFileName})
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  {uploadProgress.totalFiles > 0 && (
+                    <div className="mt-2 w-full bg-blue-200 rounded-full h-2.5 dark:bg-blue-700">
+                      <div
+                        className="bg-blue-600 h-2.5 rounded-full transition-all duration-300 dark:bg-blue-400"
+                        style={{
+                          width: `${Math.min(100, (uploadProgress.currentFile / uploadProgress.totalFiles) * 100)}%`,
+                        }}
+                      ></div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           <button
             type="submit"
             disabled={csvUploading || !selectedCsvFile}
@@ -1771,7 +1854,7 @@ export default function Dashboard() {
             {csvUploading ? (
               <span className="flex items-center gap-2">
                 <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                Uploading Files...
+                {uploadProgress ? 'Copying files...' : 'Uploading Files...'}
               </span>
             ) : !selectedCsvFile ? (
               'Please select a CSV file first'
