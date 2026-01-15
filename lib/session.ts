@@ -26,18 +26,22 @@ if (!fs.existsSync(DATA_DIR)) {
 const sessionsCache = new Map<string, SessionData>();
 
 // Load sessions from disk on startup
-function loadSessions(): void {
+export function loadSessions(): void {
   try {
     if (fs.existsSync(SESSIONS_FILE)) {
       const data = fs.readFileSync(SESSIONS_FILE, "utf8");
       const sessions = JSON.parse(data);
+      // Clear cache before reloading to avoid stale data
+      sessionsCache.clear();
       Object.entries(sessions).forEach(([id, sessionData]) => {
         sessionsCache.set(id, sessionData as SessionData);
       });
-      console.log(`Loaded ${sessionsCache.size} sessions from disk`);
+      console.log(`[SESSION] Loaded ${sessionsCache.size} sessions from disk`);
+    } else {
+      console.log(`[SESSION] No sessions file found at ${SESSIONS_FILE}`);
     }
   } catch (error) {
-    console.error("Error loading sessions:", error);
+    console.error("[SESSION] Error loading sessions:", error);
   }
 }
 

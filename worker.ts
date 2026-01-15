@@ -2,7 +2,12 @@ import dotenv from "dotenv";
 dotenv.config();
 
 import { getOAuthClient } from "./lib/auth";
-import { getSession, getAllSessions, setSession } from "./lib/session";
+import {
+  getSession,
+  getAllSessions,
+  setSession,
+  loadSessions,
+} from "./lib/session";
 import {
   getNextPendingItem,
   getQueue,
@@ -111,6 +116,16 @@ async function processQueueItem(item: QueueItem): Promise<void> {
   markAsProcessing(item.id);
 
   try {
+    // Reload sessions from disk to ensure we have the latest data
+    // This is critical because sessions might be updated by the web server
+    try {
+      loadSessions();
+    } catch (reloadError) {
+      console.warn(
+        `[WORKER] Warning: Could not reload sessions: ${reloadError}`
+      );
+    }
+
     // Get session - try by sessionId first, then find any session for this userId
     let session = getSession(item.sessionId);
 
@@ -118,16 +133,33 @@ async function processQueueItem(item: QueueItem): Promise<void> {
     if (!session && item.userId) {
       const allSessions = getAllSessions();
       const sessionsArray = Array.from(allSessions.values());
+      console.log(
+        `[WORKER] Session not found by sessionId ${item.sessionId.substring(
+          0,
+          10
+        )}..., searching ${sessionsArray.length} sessions for userId: ${
+          item.userId
+        }`
+      );
       for (const s of sessionsArray) {
         if (s.userId === item.userId && s.authenticated && s.tokens) {
           session = s;
+          console.log(`[WORKER] Found session by userId: ${item.userId}`);
           break;
         }
       }
     }
 
     if (!session || !session.authenticated || !session.tokens) {
-      throw new Error("Session not found or invalid");
+      const errorMsg = `Session not found or invalid. Job sessionId: ${
+        item.sessionId?.substring(0, 10) || "N/A"
+      }..., userId: ${item.userId || "N/A"}`;
+      console.error(`[WORKER] [ERROR] ${errorMsg}`);
+      console.error(
+        `[WORKER] [ERROR] Available sessions:`,
+        Array.from(getAllSessions().keys()).map((id) => id.substring(0, 10))
+      );
+      throw new Error(errorMsg);
     }
 
     const oAuthClient = getOAuthClient();
@@ -751,12 +783,40 @@ async function runWorker(): Promise<void> {
   console.log(
     `[WORKER] [${new Date().toISOString()}] 🚀 Worker started. Checking for pending items every 5 seconds...`
   );
+  console.log(
+    `[WORKER] [${new Date().toISOString()}] Working directory: ${process.cwd()}`
+  );
+  console.log(
+    `[WORKER] [${new Date().toISOString()}] Queue file location: ${path.join(
+      process.cwd(),
+      "data",
+      "queue.json"
+    )}`
+  );
+  console.log(
+    `[WORKER] [${new Date().toISOString()}] Sessions file location: ${path.join(
+      process.cwd(),
+      "data",
+      "sessions.json"
+    )}`
+  );
 
   let checkCount = 0;
   while (true) {
     try {
       checkCount++;
-      const allQueue = getQueue(); // Import getQueue if needed
+
+      // Reload sessions from disk on every check to ensure we have latest data
+      // This is critical because sessions are updated by the web server process
+      try {
+        loadSessions();
+      } catch (reloadError) {
+        console.warn(
+          `[WORKER] Warning: Could not reload sessions: ${reloadError}`
+        );
+      }
+
+      const allQueue = getQueue();
       const pendingItems = allQueue.filter((item) => item.status === "pending");
 
       // Log every check to see what's happening
