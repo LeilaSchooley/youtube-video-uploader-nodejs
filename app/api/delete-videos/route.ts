@@ -2,10 +2,50 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { cookies } from "next/headers";
 import { getQueueItem, getQueue } from "@/lib/queue";
+import { getOAuthClient } from "@/lib/auth";
+import { google } from "googleapis";
 import fs from "fs";
 import path from "path";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * Find the actual job directory, checking multiple possible paths
+ * Also handles staging directories (jobId="staging")
+ */
+function findJobDirectory(uploadsDir: string, jobId: string, sessionId: string, userId?: string): string | null {
+  const safeUserId = userId ? userId.replace(/[^a-zA-Z0-9._-]/g, '_') : null;
+  
+  // Try multiple possible paths
+  const possiblePaths = [];
+  
+  // Special handling for staging
+  if (jobId === "staging") {
+    // Staging is stored at uploads/{userId}/staging
+    if (safeUserId) {
+      possiblePaths.push(path.join(uploadsDir, safeUserId, "staging"));
+    }
+    possiblePaths.push(path.join(uploadsDir, sessionId, "staging"));
+  } else {
+    // Regular job directories
+    // Try userId-based path (new format)
+    if (safeUserId) {
+      possiblePaths.push(path.join(uploadsDir, safeUserId, jobId));
+    }
+    
+    // Try sessionId-based path (old format)
+    possiblePaths.push(path.join(uploadsDir, sessionId, jobId));
+  }
+  
+  // Find the first path that exists
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) {
+      return p;
+    }
+  }
+  
+  return null;
+}
 
 /**
  * Delete individual video files from a job
@@ -42,28 +82,119 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
+    const uploadsDir = path.join(process.cwd(), "uploads");
+    
+    // Get userId from session (or fetch from Google if not stored)
+    let userId = session?.userId;
+    if (!userId && session?.tokens) {
+      try {
+        const oAuthClient = getOAuthClient();
+        oAuthClient.setCredentials(session.tokens || {});
+        const oauth2 = google.oauth2({
+          version: "v2",
+          auth: oAuthClient,
+        });
+        const userInfo = await oauth2.userinfo.get();
+        userId = (userInfo.data.email || userInfo.data.id || undefined) as string | undefined;
+        if (userId) {
+          session.userId = userId;
+        }
+      } catch (error) {
+        console.log("[DELETE-VIDEOS] Could not fetch userId from Google, continuing with sessionId only");
+      }
+    }
+    
+    const safeUserId = userId ? userId.replace(/[^a-zA-Z0-9._-]/g, '_') : null;
+    
+    console.log(`[DELETE-VIDEOS] DELETE jobId=${jobId}, filePath=${filePath || 'N/A'}, deleteAll=${deleteAll}, sessionId=${sessionId?.substring(0, 10)}..., userId=${userId || 'N/A'}, safeUserId=${safeUserId || 'N/A'}`);
+
+    // Try to get the job from queue (may not exist for orphan files)
     const job = getQueueItem(jobId);
-    if (!job) {
+    
+    // Find the job directory - check multiple possible paths
+    let jobDir = findJobDirectory(uploadsDir, jobId, sessionId, userId);
+    
+    // If job exists in queue, also check its sessionId-based path
+    if (!jobDir && job) {
+      jobDir = findJobDirectory(uploadsDir, jobId, job.sessionId, job.userId);
+    }
+    
+    // If still not found, try scanning all possible user directories
+    if (!jobDir) {
+      // Try to find the directory by scanning user directories
+      const userDirs = [];
+      if (safeUserId) {
+        userDirs.push(path.join(uploadsDir, safeUserId));
+      }
+      userDirs.push(path.join(uploadsDir, sessionId));
+      
+      for (const userDir of userDirs) {
+        if (fs.existsSync(userDir)) {
+          // Check for job directory
+          const potentialJobDir = path.join(userDir, jobId);
+          if (fs.existsSync(potentialJobDir)) {
+            jobDir = potentialJobDir;
+            break;
+          }
+          // Check for staging if jobId is "staging"
+          if (jobId === "staging") {
+            const potentialStagingDir = path.join(userDir, "staging");
+            if (fs.existsSync(potentialStagingDir)) {
+              jobDir = potentialStagingDir;
+              break;
+            }
+          }
+        }
+      }
+    }
+    
+    console.log(`[DELETE-VIDEOS] Found jobDir: ${jobDir || 'NOT FOUND'}, job exists in queue: ${!!job}`);
+    
+    // Authorization check
+    if (job) {
+      // If job exists in queue, verify authorization
+      const isAuthorized = (userId && job.userId === userId) || 
+                          (!job.userId && job.sessionId === sessionId);
+      if (!isAuthorized) {
+        return NextResponse.json(
+          { error: "Job not found or unauthorized" },
+          { status: 403 }
+        );
+      }
+    }
+    
+    // If we found a directory (even without a queue entry), verify it's in the user's directory
+    if (jobDir) {
+      const normalizedJobDir = path.normalize(jobDir);
+      const userDir = safeUserId ? path.join(uploadsDir, safeUserId) : null;
+      const sessionDir = path.join(uploadsDir, sessionId);
+      
+      const isInUserDir = userDir && normalizedJobDir.startsWith(path.normalize(userDir));
+      const isInSessionDir = normalizedJobDir.startsWith(path.normalize(sessionDir));
+      
+      if (!isInUserDir && !isInSessionDir) {
+        console.log(`[DELETE-VIDEOS] Unauthorized: jobDir=${jobDir}, userDir=${userDir}, sessionDir=${sessionDir}`);
+        return NextResponse.json(
+          { error: "Unauthorized to delete these files" },
+          { status: 403 }
+        );
+      }
+    } else {
+      // No directory found - return 404
+      console.log(`[DELETE-VIDEOS] Directory not found for jobId=${jobId}, userId=${userId || 'N/A'}, sessionId=${sessionId?.substring(0, 10)}...`);
       return NextResponse.json(
-        { error: "Job not found" },
+        { error: "Job directory not found. The job may have been deleted or files may not exist." },
         { status: 404 }
       );
     }
 
-    // Check authorization
-    const userId = session?.userId;
-    const isAuthorized = (userId && job.userId === userId) || 
-                        (!job.userId && job.sessionId === sessionId);
-    
-    if (!isAuthorized) {
+    if (!fs.existsSync(jobDir)) {
       return NextResponse.json(
-        { error: "Job not found or unauthorized" },
-        { status: 403 }
+        { error: "Job directory not found" },
+        { status: 404 }
       );
     }
 
-    const uploadsDir = path.join(process.cwd(), "uploads");
-    const jobDir = path.join(uploadsDir, job.sessionId, jobId);
     const videosDir = path.join(jobDir, "videos");
     const thumbnailsDir = path.join(jobDir, "thumbnails");
 
@@ -207,28 +338,119 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    const uploadsDir = path.join(process.cwd(), "uploads");
+    
+    // Get userId from session (or fetch from Google if not stored)
+    let userId = session?.userId;
+    if (!userId && session?.tokens) {
+      try {
+        const oAuthClient = getOAuthClient();
+        oAuthClient.setCredentials(session.tokens || {});
+        const oauth2 = google.oauth2({
+          version: "v2",
+          auth: oAuthClient,
+        });
+        const userInfo = await oauth2.userinfo.get();
+        userId = (userInfo.data.email || userInfo.data.id || undefined) as string | undefined;
+        if (userId) {
+          session.userId = userId;
+        }
+      } catch (error) {
+        console.log("[DELETE-VIDEOS] GET: Could not fetch userId from Google, continuing with sessionId only");
+      }
+    }
+    
+    const safeUserId = userId ? userId.replace(/[^a-zA-Z0-9._-]/g, '_') : null;
+    
+    console.log(`[DELETE-VIDEOS] GET jobId=${jobId}, sessionId=${sessionId?.substring(0, 10)}..., userId=${userId || 'N/A'}, safeUserId=${safeUserId || 'N/A'}`);
+
+    // Try to get the job from queue (may not exist for orphan files)
     const job = getQueueItem(jobId);
-    if (!job) {
+    
+    // Find the job directory - check multiple possible paths
+    let jobDir = findJobDirectory(uploadsDir, jobId, sessionId, userId);
+    
+    // If job exists in queue, also check its sessionId-based path
+    if (!jobDir && job) {
+      jobDir = findJobDirectory(uploadsDir, jobId, job.sessionId, job.userId);
+    }
+    
+    // If still not found, try scanning all possible user directories
+    if (!jobDir) {
+      // Try to find the directory by scanning user directories
+      const userDirs = [];
+      if (safeUserId) {
+        userDirs.push(path.join(uploadsDir, safeUserId));
+      }
+      userDirs.push(path.join(uploadsDir, sessionId));
+      
+      for (const userDir of userDirs) {
+        if (fs.existsSync(userDir)) {
+          // Check for job directory
+          const potentialJobDir = path.join(userDir, jobId);
+          if (fs.existsSync(potentialJobDir)) {
+            jobDir = potentialJobDir;
+            break;
+          }
+          // Check for staging if jobId is "staging"
+          if (jobId === "staging") {
+            const potentialStagingDir = path.join(userDir, "staging");
+            if (fs.existsSync(potentialStagingDir)) {
+              jobDir = potentialStagingDir;
+              break;
+            }
+          }
+        }
+      }
+    }
+    
+    console.log(`[DELETE-VIDEOS] GET: Found jobDir: ${jobDir || 'NOT FOUND'}, job exists in queue: ${!!job}`);
+    
+    // Authorization check
+    if (job) {
+      // If job exists in queue, verify authorization
+      const isAuthorized = (userId && job.userId === userId) || 
+                          (!job.userId && job.sessionId === sessionId);
+      if (!isAuthorized) {
+        return NextResponse.json(
+          { error: "Job not found or unauthorized" },
+          { status: 403 }
+        );
+      }
+    }
+    
+    // If we found a directory (even without a queue entry), verify it's in the user's directory
+    if (jobDir) {
+      const normalizedJobDir = path.normalize(jobDir);
+      const userDir = safeUserId ? path.join(uploadsDir, safeUserId) : null;
+      const sessionDir = path.join(uploadsDir, sessionId);
+      
+      const isInUserDir = userDir && normalizedJobDir.startsWith(path.normalize(userDir));
+      const isInSessionDir = normalizedJobDir.startsWith(path.normalize(sessionDir));
+      
+      if (!isInUserDir && !isInSessionDir) {
+        console.log(`[DELETE-VIDEOS] GET: Unauthorized: jobDir=${jobDir}, userDir=${userDir}, sessionDir=${sessionDir}`);
+        return NextResponse.json(
+          { error: "Unauthorized to access these files" },
+          { status: 403 }
+        );
+      }
+    } else {
+      // No directory found - return 404
+      console.log(`[DELETE-VIDEOS] GET: Directory not found for jobId=${jobId}, userId=${userId || 'N/A'}, sessionId=${sessionId?.substring(0, 10)}...`);
       return NextResponse.json(
-        { error: "Job not found" },
+        { error: "Job directory not found. The job may have been deleted or files may not exist." },
         { status: 404 }
       );
     }
 
-    // Check authorization
-    const userId = session?.userId;
-    const isAuthorized = (userId && job.userId === userId) || 
-                        (!job.userId && job.sessionId === sessionId);
-    
-    if (!isAuthorized) {
+    if (!fs.existsSync(jobDir)) {
       return NextResponse.json(
-        { error: "Job not found or unauthorized" },
-        { status: 403 }
+        { error: "Job directory not found" },
+        { status: 404 }
       );
     }
 
-    const uploadsDir = path.join(process.cwd(), "uploads");
-    const jobDir = path.join(uploadsDir, job.sessionId, jobId);
     const videosDir = path.join(jobDir, "videos");
     const thumbnailsDir = path.join(jobDir, "thumbnails");
 

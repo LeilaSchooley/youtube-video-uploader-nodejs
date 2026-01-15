@@ -114,51 +114,87 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const job = getQueueItem(jobId);
-    if (!job) {
-      return NextResponse.json(
-        { error: "Job not found" },
-        { status: 404 }
-      );
-    }
-
-    // Check authorization
-    const userId = session?.userId;
-    const isAuthorized = (userId && job.userId === userId) || 
-                        (!job.userId && job.sessionId === sessionId);
-    
-    if (!isAuthorized) {
-      return NextResponse.json(
-        { error: "Job not found or unauthorized" },
-        { status: 403 }
-      );
-    }
-
     const uploadsDir = path.join(process.cwd(), "uploads");
-    const jobDir = path.join(uploadsDir, job.sessionId, jobId);
+    const userId = session?.userId;
+    const safeUserId = userId ? userId.replace(/[^a-zA-Z0-9._-]/g, '_') : null;
+
+    // Try to get the job from queue (may not exist for orphan files)
+    const job = getQueueItem(jobId);
     
-    // Also check userId-based path
-    let fullPath: string | null = null;
-    if (userId) {
-      const safeUserId = userId.replace(/[^a-zA-Z0-9._-]/g, '_');
-      const userIdJobDir = path.join(uploadsDir, safeUserId, jobId);
-      const userIdFilePath = path.join(userIdJobDir, filePath);
-      if (fs.existsSync(userIdFilePath)) {
-        fullPath = userIdFilePath;
+    // Find the job directory - check multiple possible paths
+    const possiblePaths: string[] = [];
+    if (safeUserId) {
+      possiblePaths.push(path.join(uploadsDir, safeUserId, jobId));
+    }
+    possiblePaths.push(path.join(uploadsDir, sessionId, jobId));
+    if (job) {
+      const safeJobUserId = job.userId ? job.userId.replace(/[^a-zA-Z0-9._-]/g, '_') : null;
+      if (safeJobUserId) {
+        possiblePaths.push(path.join(uploadsDir, safeJobUserId, jobId));
+      }
+      possiblePaths.push(path.join(uploadsDir, job.sessionId, jobId));
+    }
+    
+    // Find the actual job directory
+    let jobDir: string | null = null;
+    for (const p of possiblePaths) {
+      if (fs.existsSync(p)) {
+        jobDir = p;
+        break;
       }
     }
     
-    if (!fullPath) {
-      fullPath = path.join(jobDir, filePath);
+    // Authorization check
+    if (job) {
+      // If job exists in queue, verify authorization
+      const isAuthorized = (userId && job.userId === userId) || 
+                          (!job.userId && job.sessionId === sessionId);
+      if (!isAuthorized) {
+        return NextResponse.json(
+          { error: "Job not found or unauthorized" },
+          { status: 403 }
+        );
+      }
+    } else if (!jobDir) {
+      // If no job in queue and no directory found, it doesn't exist
+      return NextResponse.json(
+        { error: "Job or files not found" },
+        { status: 404 }
+      );
     }
+    
+    // If we found a directory without a queue entry, verify it's in the user's directory
+    if (!job && jobDir) {
+      const normalizedJobDir = path.normalize(jobDir);
+      const userDir = safeUserId ? path.join(uploadsDir, safeUserId) : null;
+      const sessionDir = path.join(uploadsDir, sessionId);
+      
+      const isInUserDir = userDir && normalizedJobDir.startsWith(path.normalize(userDir));
+      const isInSessionDir = normalizedJobDir.startsWith(path.normalize(sessionDir));
+      
+      if (!isInUserDir && !isInSessionDir) {
+        return NextResponse.json(
+          { error: "Unauthorized to access these files" },
+          { status: 403 }
+        );
+      }
+    }
+
+    if (!jobDir || !fs.existsSync(jobDir)) {
+      return NextResponse.json(
+        { error: "Job directory not found" },
+        { status: 404 }
+      );
+    }
+    
+    // Build the full path
+    const fullPath = path.join(jobDir, filePath);
     
     // Security: Ensure the file path is within the job directory
     const normalizedPath = path.normalize(fullPath);
     const normalizedJobDir = path.normalize(jobDir);
-    const normalizedUserIdJobDir = userId ? path.normalize(path.join(uploadsDir, userId.replace(/[^a-zA-Z0-9._-]/g, '_'), jobId)) : null;
     
-    if (!normalizedPath.startsWith(normalizedJobDir) && 
-        (!normalizedUserIdJobDir || !normalizedPath.startsWith(normalizedUserIdJobDir))) {
+    if (!normalizedPath.startsWith(normalizedJobDir)) {
       return NextResponse.json(
         { error: "Invalid file path" },
         { status: 400 }
