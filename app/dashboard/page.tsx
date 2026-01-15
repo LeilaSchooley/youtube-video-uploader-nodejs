@@ -654,7 +654,7 @@ export default function Dashboard() {
       if (successCount > 0) {
         setShowToast({
           message: `Deleted ${successCount} ${categoryName}${failCount > 0 ? ` (${failCount} failed)` : ""}`,
-          type: failCount > 0 ? "warning" : "success",
+          type: failCount > 0 ? "info" : "success",
         });
         fetchAllFiles(); // Refresh all files view
       } else {
@@ -3448,6 +3448,7 @@ export default function Dashboard() {
                   </div>
                   );
                 })}
+              </div>
             </div>
           )}
 
