@@ -108,56 +108,143 @@ async function videoAlreadyExists(
 async function processQueueItem(item: QueueItem): Promise<void> {
   const startTime = Date.now();
   console.log(
-    `[WORKER] [${new Date().toISOString()}] Starting to process queue item: ${
+    `[WORKER] [${new Date().toISOString()}] ========================================`
+  );
+  console.log(
+    `[WORKER] [${new Date().toISOString()}] 🎬 STARTING PROCESSING: Job ${
       item.id
     }`
   );
+  console.log(
+    `[WORKER] [${new Date().toISOString()}]   - Total Videos: ${
+      item.totalVideos || 0
+    }`
+  );
+  console.log(
+    `[WORKER] [${new Date().toISOString()}]   - Videos Per Day: ${
+      item.videosPerDay
+    }`
+  );
+  console.log(
+    `[WORKER] [${new Date().toISOString()}]   - Session ID: ${
+      item.sessionId?.substring(0, 20) || "N/A"
+    }...`
+  );
+  console.log(
+    `[WORKER] [${new Date().toISOString()}]   - User ID: ${
+      item.userId || "N/A"
+    }`
+  );
+  console.log(
+    `[WORKER] [${new Date().toISOString()}]   - CSV Path: ${item.csvPath}`
+  );
+  console.log(
+    `[WORKER] [${new Date().toISOString()}]   - Upload Dir: ${item.uploadDir}`
+  );
 
   markAsProcessing(item.id);
+  console.log(
+    `[WORKER] [${new Date().toISOString()}] ✅ Job marked as PROCESSING`
+  );
 
   try {
     // Reload sessions from disk to ensure we have the latest data
     // This is critical because sessions might be updated by the web server
+    console.log(
+      `[WORKER] [${new Date().toISOString()}] 🔄 Reloading sessions from disk...`
+    );
     try {
+      const sessionsBefore = getAllSessions().size;
       loadSessions();
+      const sessionsAfter = getAllSessions().size;
+      console.log(
+        `[WORKER] [${new Date().toISOString()}] ✅ Sessions reloaded: ${sessionsAfter} session(s) available`
+      );
+      if (sessionsAfter !== sessionsBefore) {
+        console.log(
+          `[WORKER] [${new Date().toISOString()}] 📊 Session count changed: ${sessionsBefore} → ${sessionsAfter}`
+        );
+      }
     } catch (reloadError) {
-      console.warn(
-        `[WORKER] Warning: Could not reload sessions: ${reloadError}`
+      console.error(
+        `[WORKER] [ERROR] [${new Date().toISOString()}] Failed to reload sessions:`,
+        reloadError
       );
     }
 
     // Get session - try by sessionId first, then find any session for this userId
+    console.log(
+      `[WORKER] [${new Date().toISOString()}] 🔍 Looking up session by sessionId: ${
+        item.sessionId?.substring(0, 20) || "N/A"
+      }...`
+    );
     let session = getSession(item.sessionId);
 
     // If session not found but userId exists, find any active session for this user
     if (!session && item.userId) {
-      const allSessions = getAllSessions();
-      const sessionsArray = Array.from(allSessions.values());
       console.log(
-        `[WORKER] Session not found by sessionId ${item.sessionId.substring(
-          0,
-          10
-        )}..., searching ${sessionsArray.length} sessions for userId: ${
+        `[WORKER] [${new Date().toISOString()}] ⚠️ Session not found by sessionId, searching by userId: ${
           item.userId
         }`
       );
+      const allSessions = getAllSessions();
+      const sessionsArray = Array.from(allSessions.values());
+      console.log(
+        `[WORKER] [${new Date().toISOString()}] 🔍 Searching ${
+          sessionsArray.length
+        } available session(s) for userId match...`
+      );
+
+      // Log all available sessions for debugging
+      allSessions.forEach((s, sessionId) => {
+        console.log(
+          `[WORKER]   - Session ${sessionId.substring(0, 10)}...: userId=${
+            s.userId || "N/A"
+          }, authenticated=${s.authenticated}, hasTokens=${!!s.tokens}`
+        );
+      });
+
       for (const s of sessionsArray) {
         if (s.userId === item.userId && s.authenticated && s.tokens) {
           session = s;
-          console.log(`[WORKER] Found session by userId: ${item.userId}`);
+          console.log(
+            `[WORKER] [${new Date().toISOString()}] ✅ Found matching session by userId: ${
+              item.userId
+            }`
+          );
           break;
         }
       }
     }
 
-    if (!session || !session.authenticated || !session.tokens) {
+    if (session) {
+      console.log(
+        `[WORKER] [${new Date().toISOString()}] ✅ Session found: authenticated=${
+          session.authenticated
+        }, hasTokens=${!!session.tokens}, hasRefreshToken=${!!session.tokens
+          ?.refresh_token}`
+      );
+    } else {
       const errorMsg = `Session not found or invalid. Job sessionId: ${
         item.sessionId?.substring(0, 10) || "N/A"
       }..., userId: ${item.userId || "N/A"}`;
-      console.error(`[WORKER] [ERROR] ${errorMsg}`);
       console.error(
-        `[WORKER] [ERROR] Available sessions:`,
-        Array.from(getAllSessions().keys()).map((id) => id.substring(0, 10))
+        `[WORKER] [ERROR] [${new Date().toISOString()}] ${errorMsg}`
+      );
+      const availableSessions = Array.from(getAllSessions().keys());
+      console.error(
+        `[WORKER] [ERROR] [${new Date().toISOString()}] Available sessions (${
+          availableSessions.length
+        }):`,
+        availableSessions.map((id) => id.substring(0, 10))
+      );
+      throw new Error(errorMsg);
+    }
+
+    if (!session.authenticated || !session.tokens) {
+      const errorMsg = `Session is not authenticated or missing tokens`;
+      console.error(
+        `[WORKER] [ERROR] [${new Date().toISOString()}] ${errorMsg}`
       );
       throw new Error(errorMsg);
     }
@@ -801,40 +888,99 @@ async function runWorker(): Promise<void> {
     )}`
   );
 
+  // Initial session load
+  try {
+    loadSessions();
+    const initialSessions = getAllSessions();
+    console.log(
+      `[WORKER] [${new Date().toISOString()}] ✅ Initial session load: ${
+        initialSessions.size
+      } session(s) loaded`
+    );
+    if (initialSessions.size > 0) {
+      initialSessions.forEach((session, sessionId) => {
+        console.log(
+          `[WORKER]   - Session ${sessionId.substring(0, 10)}...: userId=${
+            session.userId || "N/A"
+          }, authenticated=${session.authenticated}`
+        );
+      });
+    }
+  } catch (error) {
+    console.error(`[WORKER] [ERROR] Failed to load initial sessions:`, error);
+  }
+
   let checkCount = 0;
   while (true) {
     try {
       checkCount++;
+      const checkStartTime = Date.now();
 
       // Reload sessions from disk on every check to ensure we have latest data
       // This is critical because sessions are updated by the web server process
       try {
+        const sessionsBefore = getAllSessions().size;
         loadSessions();
+        const sessionsAfter = getAllSessions().size;
+        if (sessionsAfter !== sessionsBefore) {
+          console.log(
+            `[WORKER] [${new Date().toISOString()}] 🔄 Sessions reloaded: ${sessionsBefore} → ${sessionsAfter} sessions`
+          );
+        }
       } catch (reloadError) {
         console.warn(
-          `[WORKER] Warning: Could not reload sessions: ${reloadError}`
+          `[WORKER] [WARN] [${new Date().toISOString()}] Could not reload sessions: ${reloadError}`
         );
       }
 
       const allQueue = getQueue();
+      const queueStats = {
+        total: allQueue.length,
+        pending: allQueue.filter((item) => item.status === "pending").length,
+        processing: allQueue.filter((item) => item.status === "processing")
+          .length,
+        completed: allQueue.filter((item) => item.status === "completed")
+          .length,
+        failed: allQueue.filter((item) => item.status === "failed").length,
+        paused: allQueue.filter((item) => item.status === "paused").length,
+        cancelled: allQueue.filter((item) => item.status === "cancelled")
+          .length,
+      };
+
       const pendingItems = allQueue.filter((item) => item.status === "pending");
 
-      // Log every check to see what's happening
+      // Log detailed queue status every check or when items found
       if (checkCount % 6 === 0 || pendingItems.length > 0) {
-        // Log every 30 seconds or when items found
         console.log(
-          `[WORKER] [${new Date().toISOString()}] 🔍 Check #${checkCount}: Found ${
-            pendingItems.length
-          } pending job(s)`
+          `[WORKER] [${new Date().toISOString()}] 🔍 Check #${checkCount}: Queue Status - Total: ${
+            queueStats.total
+          }, Pending: ${queueStats.pending}, Processing: ${
+            queueStats.processing
+          }, Completed: ${queueStats.completed}, Failed: ${
+            queueStats.failed
+          }, Paused: ${queueStats.paused}, Cancelled: ${queueStats.cancelled}`
         );
         if (pendingItems.length > 0) {
+          console.log(
+            `[WORKER] [${new Date().toISOString()}] 📋 Found ${
+              pendingItems.length
+            } pending job(s):`
+          );
           pendingItems.forEach((item) => {
             console.log(
-              `[WORKER]   - Job ${item.id}: status=${item.status}, videos=${
-                item.totalVideos || 0
-              }, videosPerDay=${item.videosPerDay}`
+              `[WORKER]   - Job ${item.id.substring(0, 20)}...: status=${
+                item.status
+              }, videos=${item.totalVideos || 0}, videosPerDay=${
+                item.videosPerDay
+              }, userId=${item.userId || "N/A"}, sessionId=${
+                item.sessionId?.substring(0, 10) || "N/A"
+              }...`
             );
           });
+        } else if (checkCount % 6 === 0) {
+          console.log(
+            `[WORKER] [${new Date().toISOString()}] ✅ No pending jobs found`
+          );
         }
       }
 
@@ -842,24 +988,56 @@ async function runWorker(): Promise<void> {
 
       if (item) {
         console.log(
-          `[WORKER] [${new Date().toISOString()}] 📦 Found pending job: ${
-            item.id
-          }, processing now...`
+          `[WORKER] [${new Date().toISOString()}] 📦 Processing job: ${item.id.substring(
+            0,
+            20
+          )}...`
+        );
+        console.log(
+          `[WORKER] [${new Date().toISOString()}]   Details: ${
+            item.totalVideos || 0
+          } videos, ${item.videosPerDay} per day, userId=${
+            item.userId || "N/A"
+          }`
         );
         await processQueueItem(item);
+        console.log(
+          `[WORKER] [${new Date().toISOString()}] ✅ Finished processing job: ${item.id.substring(
+            0,
+            20
+          )}...`
+        );
         // After processing, check again immediately for more items
         continue;
       } else {
         // No pending items, wait before checking again
-        await new Promise((resolve) => setTimeout(resolve, 5000)); // Check every 5 seconds
+        const waitTime = 5000;
+        if (checkCount % 6 === 0) {
+          console.log(
+            `[WORKER] [${new Date().toISOString()}] ⏳ No pending jobs. Waiting ${
+              waitTime / 1000
+            }s before next check...`
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, waitTime)); // Check every 5 seconds
       }
     } catch (error) {
       console.error(
-        `[WORKER] [ERROR] [${new Date().toISOString()}] Worker error:`,
+        `[WORKER] [ERROR] [${new Date().toISOString()}] Worker loop error:`,
         error
       );
+      if (error instanceof Error) {
+        console.error(`[WORKER] [ERROR] Error message: ${error.message}`);
+        console.error(`[WORKER] [ERROR] Stack trace: ${error.stack}`);
+      }
       // On error, wait a bit before retrying
-      await new Promise((resolve) => setTimeout(resolve, 10000)); // Wait 10 seconds on error
+      const errorWaitTime = 10000;
+      console.log(
+        `[WORKER] [${new Date().toISOString()}] ⏳ Waiting ${
+          errorWaitTime / 1000
+        }s after error before retrying...`
+      );
+      await new Promise((resolve) => setTimeout(resolve, errorWaitTime)); // Wait 10 seconds on error
     }
   }
 }
