@@ -231,7 +231,9 @@ export default function Dashboard() {
     setMessage({ type: null, text: null });
     setSelectedVideoFile(null); // Reset file selection after upload starts
 
-    const formData = new FormData(e.currentTarget);
+    // Store form reference before async operation
+    const form = e.currentTarget;
+    const formData = new FormData(form);
 
     try {
       const res = await fetch('/api/upload', {
@@ -243,7 +245,10 @@ export default function Dashboard() {
       if (res.ok) {
         setShowToast({ message: data.message || 'Video uploaded successfully!', type: 'success' });
         setMessage({ type: null, text: null });
-        e.currentTarget.reset();
+        // Reset form using stored reference
+        if (form) {
+          form.reset();
+        }
       } else {
         console.error("=== UPLOAD ERROR (Client) ===");
         console.error("Error:", data.error);
