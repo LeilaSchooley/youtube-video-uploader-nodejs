@@ -206,13 +206,22 @@ export function updateProgress(id: string, progress: Array<{ index: number; stat
   const completed = progress.filter(p => 
     p.status.includes("Uploaded") || 
     p.status.includes("Scheduled") || 
-    p.status.includes("scheduled")
+    p.status.includes("scheduled") ||
+    p.status.includes("Already uploaded")
+  ).length;
+  const failed = progress.filter(p => 
+    p.status.includes("Failed") || 
+    p.status.includes("Missing") ||
+    p.status.includes("Invalid") ||
+    p.status.includes("not found") ||
+    p.status.includes("Cannot access")
   ).length;
   const processing = progress.filter(p => 
     p.status.includes("Uploading") || 
-    p.status === "Pending"
+    p.status === "Pending" ||
+    p.status.includes("Checking")
   ).length;
-  console.log(`[QUEUE] [${new Date().toISOString()}] Progress updated for ${id}: ${completed} completed, ${processing} processing, ${progress.length} total`);
+  console.log(`[QUEUE] [${new Date().toISOString()}] Progress updated for ${id}: ${completed} completed, ${failed} failed, ${processing} processing, ${progress.length} total`);
 }
 
 export function deleteAllCompletedJobs(userId?: string, sessionId?: string): { deleted: number; errors: string[] } {

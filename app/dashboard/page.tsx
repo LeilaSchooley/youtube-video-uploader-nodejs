@@ -1047,21 +1047,26 @@ export default function Dashboard() {
     (p) =>
       p.status.includes("Uploaded") ||
       p.status.includes("scheduled") ||
-      p.status.includes("Scheduled")
+      p.status.includes("Scheduled") ||
+      p.status.includes("Already uploaded")
   ).length;
 
   const failed = allProgress.filter(
     (p) =>
       p.status.includes("Failed") ||
       p.status.includes("Missing") ||
-      p.status.includes("Invalid")
+      p.status.includes("Invalid") ||
+      p.status.includes("not found") ||
+      p.status.includes("Cannot access") ||
+      p.status.includes("error")
   ).length;
 
   const pending = allProgress.filter(
     (p) =>
       p.status === "Pending" ||
       p.status.includes("Uploading") ||
-      p.status.includes("thumbnail")
+      p.status.includes("thumbnail") ||
+      p.status.includes("Checking")
   ).length;
 
   const processing = queue.filter((job) => job.status === "processing").length;
@@ -2968,19 +2973,24 @@ export default function Dashboard() {
                 (p: ProgressItem) =>
                   p.status.includes("Uploaded") ||
                   p.status.includes("Scheduled") ||
-                  p.status.includes("scheduled")
+                  p.status.includes("scheduled") ||
+                  p.status.includes("Already uploaded")
               ).length;
               const failed = progress.filter(
                 (p: ProgressItem) =>
                   p.status.includes("Failed") ||
                   p.status.includes("Missing") ||
-                  p.status.includes("Invalid")
+                  p.status.includes("Invalid") ||
+                  p.status.includes("not found") ||
+                  p.status.includes("Cannot access") ||
+                  p.status.includes("error")
               ).length;
               const processing = progress.filter(
                 (p: ProgressItem) =>
                   p.status.includes("Uploading") ||
                   p.status === "Pending" ||
-                  p.status.includes("thumbnail")
+                  p.status.includes("thumbnail") ||
+                  p.status.includes("Checking")
               ).length;
               const pending = totalVideos - completed - failed - processing;
               const progressPercentage =
@@ -3184,15 +3194,20 @@ export default function Dashboard() {
                           const isSuccess =
                             item.status.includes("Uploaded") ||
                             item.status.includes("Scheduled") ||
-                            item.status.includes("scheduled");
+                            item.status.includes("scheduled") ||
+                            item.status.includes("Already uploaded");
                           const isFailed =
                             item.status.includes("Failed") ||
                             item.status.includes("Missing") ||
-                            item.status.includes("Invalid");
+                            item.status.includes("Invalid") ||
+                            item.status.includes("not found") ||
+                            item.status.includes("Cannot access") ||
+                            item.status.includes("error");
                           const isProcessing =
                             item.status.includes("Uploading") ||
                             item.status === "Pending" ||
-                            item.status.includes("thumbnail");
+                            item.status.includes("thumbnail") ||
+                            item.status.includes("Checking");
 
                           // Format file size
                           const formatFileSize = (bytes?: number) => {
