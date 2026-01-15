@@ -120,6 +120,26 @@ export function cancelJob(id: string): void {
   }
 }
 
+export function deleteJob(id: string): void {
+  const queue = readQueue();
+  const index = queue.findIndex(item => item.id === id);
+  
+  if (index !== -1) {
+    const item = queue[index];
+    // Allow deletion of completed or failed jobs
+    if (item.status === "completed" || item.status === "failed" || item.status === "cancelled") {
+      // Remove from queue
+      queue.splice(index, 1);
+      writeQueue(queue);
+      console.log(`[QUEUE] Deleted ${item.status} job: ${id}`);
+    } else {
+      throw new Error(`Cannot delete job with status: ${item.status}. Only completed, failed, or cancelled jobs can be deleted.`);
+    }
+  } else {
+    throw new Error(`Job not found: ${id}`);
+  }
+}
+
 export function markAsProcessing(id: string): void {
   updateQueueItem(id, { status: "processing" });
 }
@@ -145,5 +165,32 @@ export function updateProgress(id: string, progress: Array<{ index: number; stat
     p.status === "Pending"
   ).length;
   console.log(`[QUEUE] [${new Date().toISOString()}] Progress updated for ${id}: ${completed} completed, ${processing} processing, ${progress.length} total`);
+}
+
+export function deleteAllCompletedJobs(userId?: string, sessionId?: string): { deleted: number; errors: string[] } {
+  const queue = readQueue();
+  const errors: string[] = [];
+  let deleted = 0;
+  
+  // Filter jobs that can be deleted (completed, failed, cancelled)
+  const jobsToDelete = queue.filter(item => {
+    const canDelete = item.status === "completed" || item.status === "failed" || item.status === "cancelled";
+    // If userId/sessionId provided, only delete jobs belonging to that user
+    if (userId || sessionId) {
+      const belongsToUser = (userId && item.userId === userId) || 
+                           (!item.userId && sessionId && item.sessionId === sessionId);
+      return canDelete && belongsToUser;
+    }
+    return canDelete;
+  });
+  
+  // Remove jobs from queue
+  const updatedQueue = queue.filter(item => !jobsToDelete.includes(item));
+  writeQueue(updatedQueue);
+  deleted = jobsToDelete.length;
+  
+  console.log(`[QUEUE] Deleted ${deleted} completed/failed/cancelled job(s)`);
+  
+  return { deleted, errors };
 }
 

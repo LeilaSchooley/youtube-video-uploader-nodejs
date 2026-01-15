@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { cookies } from "next/headers";
-import { pauseJob, resumeJob, cancelJob, getQueueItem } from "@/lib/queue";
+import { pauseJob, resumeJob, cancelJob, deleteJob, deleteAllCompletedJobs, getQueueItem, getQueue } from "@/lib/queue";
 import { deleteUploadDir } from "@/lib/storage";
 
 export const dynamic = "force-dynamic";
@@ -29,9 +29,42 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { jobId, action } = body;
 
+    // Handle "delete-all" action (doesn't require jobId)
+    if (action === "delete-all") {
+      const userId = session?.userId;
+      
+      // Get jobs to delete before deletion (for cleanup)
+      const allJobs = getQueue();
+      const jobsToDelete = allJobs.filter(job => {
+        const canDelete = job.status === "completed" || job.status === "failed" || job.status === "cancelled";
+        const belongsToUser = (userId && job.userId === userId) || 
+                             (!job.userId && sessionId && job.sessionId === sessionId);
+        return canDelete && belongsToUser;
+      });
+      
+      // Clean up files for jobs that will be deleted
+      for (const job of jobsToDelete) {
+        try {
+          deleteUploadDir(job.sessionId, job.id);
+        } catch (cleanupError) {
+          console.error(`Error cleaning up files for job ${job.id}:`, cleanupError);
+          // Continue with deletion even if cleanup fails
+        }
+      }
+      
+      // Now delete the jobs
+      const result = deleteAllCompletedJobs(userId, sessionId);
+      
+      return NextResponse.json({ 
+        success: true, 
+        message: `Deleted ${result.deleted} completed/failed/cancelled job(s)`,
+        deleted: result.deleted
+      });
+    }
+
     if (!jobId || !action) {
       return NextResponse.json(
-        { error: "jobId and action are required" },
+        { error: "jobId and action are required (except for 'delete-all' action)" },
         { status: 400 }
       );
     }
@@ -73,9 +106,19 @@ export async function POST(request: NextRequest) {
         }
         cancelJob(jobId);
         return NextResponse.json({ success: true, message: "Job cancelled and removed" });
+      case "delete":
+        // Clean up uploaded files before deleting
+        try {
+          deleteUploadDir(job.sessionId, jobId);
+        } catch (cleanupError) {
+          console.error("Error cleaning up files:", cleanupError);
+          // Continue with deletion even if cleanup fails
+        }
+        deleteJob(jobId);
+        return NextResponse.json({ success: true, message: "Job deleted" });
       default:
         return NextResponse.json(
-          { error: "Invalid action. Use 'pause', 'resume', or 'cancel'" },
+          { error: "Invalid action. Use 'pause', 'resume', 'cancel', or 'delete'" },
           { status: 400 }
         );
     }

@@ -171,7 +171,7 @@ export default function Dashboard() {
     localStorage.setItem('darkMode', String(newMode));
   };
 
-  const handleQueueAction = async (jobId: string, action: 'pause' | 'resume' | 'cancel') => {
+  const handleQueueAction = async (jobId: string, action: 'pause' | 'resume' | 'cancel' | 'delete') => {
     try {
       const res = await fetch('/api/queue-manage', {
         method: 'POST',
@@ -183,16 +183,20 @@ export default function Dashboard() {
         setShowToast({ message: data.message, type: 'success' });
         // Immediately refresh to show updated status
         fetchQueue();
-        if (selectedJobId === jobId) {
+        // If deleting, clear selected job if it was the deleted one
+        if (action === 'delete' && selectedJobId === jobId) {
+          setSelectedJobId(null);
+          setJobStatus(null);
+        } else if (selectedJobId === jobId) {
           fetchJobStatus(jobId);
+          // Also refresh after a short delay to catch any state changes
+          setTimeout(() => {
+            fetchQueue();
+            if (selectedJobId === jobId) {
+              fetchJobStatus(jobId);
+            }
+          }, 500);
         }
-        // Also refresh after a short delay to catch any state changes
-        setTimeout(() => {
-          fetchQueue();
-          if (selectedJobId === jobId) {
-            fetchJobStatus(jobId);
-          }
-        }, 500);
       } else {
         setShowToast({ message: data.error || 'Failed to perform action', type: 'error' });
       }
@@ -1182,15 +1186,52 @@ export default function Dashboard() {
       <div className="card">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-5">
           <h2 className="text-2xl font-bold text-gray-800 dark:text-white">Upload Queue Status</h2>
-          {queue.length > 0 && (
-            <input
-              type="text"
-              placeholder="Search jobs..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="input-field w-full sm:max-w-xs"
-            />
-          )}
+          <div className="flex gap-3 items-center w-full sm:w-auto">
+            {queue.length > 0 && (
+              <>
+                <input
+                  type="text"
+                  placeholder="Search jobs..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="input-field flex-1 sm:max-w-xs"
+                />
+                {queue.filter(job => job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled').length > 0 && (
+                  <button
+                    onClick={async () => {
+                      const completedCount = queue.filter(job => 
+                        job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled'
+                      ).length;
+                      if (confirm(`Are you sure you want to delete all ${completedCount} completed/failed/cancelled job(s)? This action cannot be undone.`)) {
+                        try {
+                          const res = await fetch('/api/queue-manage', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action: 'delete-all' }),
+                          });
+                          const data = await res.json();
+                          if (res.ok) {
+                            setShowToast({ message: data.message, type: 'success' });
+                            setSelectedJobId(null);
+                            setJobStatus(null);
+                            fetchQueue();
+                          } else {
+                            setShowToast({ message: data.error || 'Failed to delete jobs', type: 'error' });
+                          }
+                        } catch (error) {
+                          setShowToast({ message: 'An error occurred', type: 'error' });
+                        }
+                      }
+                    }}
+                    className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition-colors whitespace-nowrap"
+                    title="Delete all completed/failed/cancelled jobs"
+                  >
+                    🗑️ Delete All Completed
+                  </button>
+                )}
+              </>
+            )}
+          </div>
         </div>
         
         {queue.length === 0 ? (
@@ -1330,14 +1371,39 @@ export default function Dashboard() {
                         </>
                       )}
                       {job.status === 'processing' && (
+                        <>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleQueueAction(job.id, 'pause');
+                            }}
+                            className="px-3 py-1.5 bg-yellow-500 hover:bg-yellow-600 text-white text-xs font-semibold rounded-lg transition-colors"
+                          >
+                            ⏸ Pause
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleQueueAction(job.id, 'cancel');
+                            }}
+                            className="px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold rounded-lg transition-colors"
+                          >
+                            ✕ Cancel
+                          </button>
+                        </>
+                      )}
+                      {(job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled') && (
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleQueueAction(job.id, 'pause');
+                            if (confirm(`Are you sure you want to delete this ${job.status} job? This will remove it from the queue and clean up associated files.`)) {
+                              handleQueueAction(job.id, 'delete');
+                            }
                           }}
-                          className="px-3 py-1.5 bg-yellow-500 hover:bg-yellow-600 text-white text-xs font-semibold rounded-lg transition-colors"
+                          className="px-3 py-1.5 bg-gray-500 hover:bg-gray-600 text-white text-xs font-semibold rounded-lg transition-colors"
+                          title="Delete this job"
                         >
-                          ⏸ Pause
+                          🗑️ Delete
                         </button>
                       )}
                     </div>
