@@ -263,23 +263,6 @@ export default function Dashboard() {
           addDebugLog(logMsg, 'info');
         }
         
-        // Check for stuck pending jobs
-        const pendingJobs = data.queue.filter((j: any) => j.status === 'pending');
-        if (pendingJobs.length > 0) {
-          pendingJobs.forEach((job: any) => {
-            const ageSeconds = (Date.now() - new Date(job.createdAt).getTime()) / 1000;
-            if (ageSeconds > 15) { // If pending for more than 15 seconds
-              // Only log once per job to avoid spam
-              const lastLog = debugLogs[debugLogs.length - 1];
-              if (!lastLog || !lastLog.message.includes(job.id.substring(0, 15))) {
-                const warningMsg = `⚠️ Job ${job.id.substring(0, 20)}... stuck in pending for ${Math.round(ageSeconds)}s. Is worker running?`;
-                console.warn(`[DEBUG] ${warningMsg}`);
-                addDebugLog(warningMsg, 'error');
-              }
-            }
-          });
-        }
-        
         // Check for stuck pending jobs (only log once per job to avoid spam)
         const pendingJobs = data.queue.filter((j: any) => j.status === 'pending');
         if (pendingJobs.length > 0) {
