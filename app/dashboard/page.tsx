@@ -42,10 +42,12 @@ export default function Dashboard() {
   const [darkMode, setDarkMode] = useState<boolean>(false);
   const [selectedVideoFile, setSelectedVideoFile] = useState<File | null>(null);
   const [selectedCsvFile, setSelectedCsvFile] = useState<File | null>(null);
+  const [selectedVideoFiles, setSelectedVideoFiles] = useState<File[]>([]); // For CSV bulk upload
   const [showDebugPanel, setShowDebugPanel] = useState<boolean>(false);
   const [debugLogs, setDebugLogs] = useState<Array<{ time: string; message: string; type: 'info' | 'success' | 'error' }>>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const csvFileInputRef = useRef<HTMLInputElement>(null);
+  const videoFilesInputRef = useRef<HTMLInputElement>(null);
   
   // Add debug log helper
   const addDebugLog = useCallback((message: string, type: 'info' | 'success' | 'error' = 'info') => {
@@ -395,7 +397,12 @@ export default function Dashboard() {
     const form = e.currentTarget;
     const formData = new FormData(form);
     
-      if (enableScheduling) {
+    // Add uploaded video files to FormData
+    selectedVideoFiles.forEach((file) => {
+      formData.append('files', file);
+    });
+    
+    if (enableScheduling) {
         if (!videosPerDay) {
           setShowToast({ message: 'Please fill in videos per day when scheduling is enabled.', type: 'error' });
           setMessage({ type: 'error', text: 'Please fill in videos per day when scheduling is enabled.' });
@@ -454,9 +461,14 @@ export default function Dashboard() {
         if (form) {
           form.reset();
         }
-        setSelectedCsvFile(null); // Reset CSV file selection
-        setEnableScheduling(false);
-        setVideosPerDay('');
+            setSelectedCsvFile(null); // Reset CSV file selection
+            setSelectedVideoFiles([]); // Reset video files selection
+            setEnableScheduling(false);
+            setVideosPerDay('');
+            // Reset video files input
+            if (videoFilesInputRef.current) {
+              videoFilesInputRef.current.value = '';
+            }
         
         // Immediately fetch queue and job status
         setSelectedJobId(data.jobId);
@@ -1048,8 +1060,22 @@ export default function Dashboard() {
           </ul>
           <p className="text-gray-600 text-sm mb-2">
             <strong>Important:</strong> The <code className="bg-gray-100 px-1 rounded">path</code> and <code className="bg-gray-100 px-1 rounded">thumbnail_path</code> columns should contain 
-            absolute file paths on your server. Files will be copied to server storage when you submit the form.
+            file paths. You can use Windows paths (like <code className="bg-gray-100 px-1 rounded">C:\Users\...\file.mp4</code>) if you upload the video files below.
           </p>
+          <div className="bg-green-50 border border-green-300 rounded-lg p-3 text-sm text-green-900 mb-2">
+            <strong>✅ New Feature - File Upload:</strong> You can now upload video files directly with your CSV! 
+            The system will automatically match uploaded files to CSV rows by filename. 
+            <ul className="list-disc list-inside mt-1 ml-2 space-y-1">
+              <li>Upload your CSV file with Windows paths (e.g., <code className="bg-green-100 px-1 rounded">C:\Users\...\video.mp4</code>)</li>
+              <li>Upload all video files using the file selector below</li>
+              <li>The system will match files by filename and save them to the server automatically</li>
+              <li>No need to manually copy files or change paths!</li>
+            </ul>
+          </div>
+          <div className="bg-blue-50 border border-blue-300 rounded-lg p-3 text-sm text-blue-900 mb-2">
+            <strong>💡 How It Works:</strong> The system extracts the filename from your CSV path (e.g., <code className="bg-blue-100 px-1 rounded">video.mp4</code> from <code className="bg-blue-100 px-1 rounded">C:\Users\...\video.mp4</code>) 
+            and matches it to uploaded files. If a file is uploaded, it's used. Otherwise, the system tries to find it on the server.
+          </div>
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-900">
             <strong>📝 Description Formatting:</strong> Your <code className="bg-blue-100 px-1 rounded">youtube_description</code> can include:
             <ul className="list-disc list-inside mt-1 ml-2 space-y-1">
@@ -1120,6 +1146,89 @@ export default function Dashboard() {
                 <div className="text-4xl mb-2">📄</div>
                 <p className="text-gray-600 dark:text-gray-400 mb-1">Click to upload or drag and drop</p>
                 <p className="text-sm text-gray-500 dark:text-gray-500">CSV files only</p>
+              </>
+            )}
+          </div>
+
+          <label htmlFor="videoFiles" className="label">
+            Upload Video Files (Optional - matches CSV by filename)
+          </label>
+          <div 
+            className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-all ${
+              selectedVideoFiles.length > 0
+                ? 'border-green-500 bg-green-50 dark:bg-green-900/20' 
+                : 'border-gray-300 hover:border-blue-500 dark:border-gray-600 dark:hover:border-blue-400'
+            }`}
+            onClick={() => videoFilesInputRef.current?.click()}
+            onDrop={(e) => {
+              e.preventDefault();
+              const files = Array.from(e.dataTransfer.files).filter(file => 
+                file.type.startsWith('video/')
+              );
+              if (files.length > 0) {
+                setSelectedVideoFiles(prev => [...prev, ...files]);
+                if (videoFilesInputRef.current) {
+                  const dataTransfer = new DataTransfer();
+                  [...selectedVideoFiles, ...files].forEach(file => dataTransfer.items.add(file));
+                  videoFilesInputRef.current.files = dataTransfer.files;
+                }
+              }
+            }}
+            onDragOver={(e) => e.preventDefault()}
+          >
+            <input
+              ref={videoFilesInputRef}
+              type="file"
+              id="videoFiles"
+              name="videoFiles"
+              accept="video/*"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                const files = Array.from(e.target.files || []);
+                if (files.length > 0) {
+                  setSelectedVideoFiles(prev => [...prev, ...files]);
+                }
+              }}
+            />
+            {selectedVideoFiles.length > 0 ? (
+              <div>
+                <div className="text-4xl mb-2">✅</div>
+                <p className="text-green-700 dark:text-green-300 font-semibold mb-1">
+                  {selectedVideoFiles.length} video file{selectedVideoFiles.length !== 1 ? 's' : ''} selected
+                </p>
+                <div className="text-sm text-gray-600 dark:text-gray-400 max-h-32 overflow-y-auto mb-2 text-left px-4">
+                  {selectedVideoFiles.map((file, idx) => (
+                    <div key={idx} className="mb-1">
+                      • {file.name} ({(file.size / 1024 / 1024).toFixed(2)} MB)
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
+                  Click to add more files or{' '}
+                  <button 
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedVideoFiles([]);
+                      if (videoFilesInputRef.current) {
+                        videoFilesInputRef.current.value = '';
+                      }
+                    }}
+                    className="text-red-600 hover:underline font-semibold"
+                  >
+                    clear all
+                  </button>
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="text-4xl mb-2">📹</div>
+                <p className="text-gray-600 dark:text-gray-400 mb-1">Click to upload or drag and drop</p>
+                <p className="text-sm text-gray-500 dark:text-gray-500">Video files (multiple selection allowed)</p>
+                <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                  Files will be matched to CSV rows by filename
+                </p>
               </>
             )}
           </div>

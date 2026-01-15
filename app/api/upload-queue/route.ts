@@ -61,6 +61,22 @@ export async function POST(request: NextRequest) {
     const enableScheduling = formData.get("enableScheduling") === "true";
     const videosPerDayStr = formData.get("videosPerDay") as string | null;
     const videosPerDay = enableScheduling && videosPerDayStr ? parseInt(videosPerDayStr) : null;
+    
+    // Get uploaded video files (can be multiple)
+    const uploadedFiles: File[] = [];
+    const filesArray = formData.getAll("files") as (File | string)[];
+    for (const file of filesArray) {
+      if (file instanceof File && file.type.startsWith('video/')) {
+        uploadedFiles.push(file);
+      }
+    }
+    // Also check for "videoFiles" as alternative field name
+    const videoFilesArray = formData.getAll("videoFiles") as (File | string)[];
+    for (const file of videoFilesArray) {
+      if (file instanceof File && file.type.startsWith('video/')) {
+        uploadedFiles.push(file);
+      }
+    }
 
     if (!csvFile) {
       return NextResponse.json(
@@ -68,6 +84,8 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+    
+    console.log(`[UPLOAD-QUEUE] Received CSV + ${uploadedFiles.length} video file(s) for upload`);
 
     if (enableScheduling && !videosPerDay) {
       return NextResponse.json(
@@ -151,6 +169,24 @@ export async function POST(request: NextRequest) {
 
     console.log(`Parsed CSV with ${csvData.length} rows`);
 
+    // Create a map of uploaded files by filename for quick lookup
+    const uploadedFilesMap = new Map<string, File>();
+    uploadedFiles.forEach(file => {
+      const filename = file.name.toLowerCase();
+      uploadedFilesMap.set(filename, file);
+      console.log(`[UPLOAD-QUEUE] Indexed uploaded file: ${filename}`);
+    });
+
+    // Helper function to extract filename from path (handles Windows and Unix paths)
+    const extractFilename = (filePath: string): string => {
+      if (!filePath) return '';
+      // Normalize path separators
+      const normalized = filePath.replace(/\\/g, '/');
+      // Get basename
+      const basename = normalized.split('/').pop() || '';
+      return basename.toLowerCase();
+    };
+
     // Helper function to normalize paths (handle Windows paths on Linux)
     const normalizePath = (filePath: string): string => {
       if (!filePath) return filePath;
@@ -191,7 +227,7 @@ export async function POST(request: NextRequest) {
             return {
               exists: false,
               normalizedPath: normalizedPath,
-              error: `Windows path detected on ${process.platform} server. File must be accessible from server. Original: ${filePath}`
+              error: `Windows path detected on ${process.platform} server. The CSV contains Windows paths (C:\\...) but the server cannot access them. Solutions: 1) Upload files to server first using single video upload, 2) Copy files to server-accessible location, 3) Use network/shared paths accessible from server. Original path: ${filePath}`
             };
           }
           
@@ -237,20 +273,24 @@ export async function POST(request: NextRequest) {
       const row = csvData[i];
       const updatedRow = { ...row };
 
-      // Copy video file if it exists
+      // Copy video file - try uploaded files first, then check server path
       if (row.path) {
-        const fileCheck = checkFileExists(row.path, 'Video', i);
+        const csvFilename = extractFilename(row.path);
+        const uploadedFile = uploadedFilesMap.get(csvFilename);
         
-        if (fileCheck.exists) {
+        let videoCopied = false;
+        
+        // First, try to use uploaded file if available
+        if (uploadedFile) {
           try {
             // Sanitize filename to handle special characters
-            const videoFilename = path.basename(fileCheck.normalizedPath)
+            const videoFilename = uploadedFile.name
               .replace(/[<>:"|?*]/g, '_') // Replace invalid filename chars
               .replace(/\s+/g, '_'); // Replace spaces with underscores
             
             const videoDest = path.join(uploadDir, "videos", videoFilename);
             
-            console.log(`[UPLOAD-QUEUE] Copying video ${i + 1}: ${fileCheck.normalizedPath} -> ${videoDest}`);
+            console.log(`[UPLOAD-QUEUE] Saving uploaded file ${i + 1}: ${uploadedFile.name} -> ${videoDest}`);
             
             // Ensure destination directory exists
             const destDir = path.dirname(videoDest);
@@ -258,30 +298,79 @@ export async function POST(request: NextRequest) {
               fs.mkdirSync(destDir, { recursive: true });
             }
             
-            fs.copyFileSync(fileCheck.normalizedPath, videoDest);
+            // Save uploaded file to server
+            await saveFile(uploadedFile, videoDest);
             
-            // Verify copy succeeded
+            // Verify save succeeded
             if (!fs.existsSync(videoDest)) {
-              throw new Error('Copy verification failed - destination file not found');
+              throw new Error('Save verification failed - destination file not found');
             }
             
             updatedRow.path = videoDest;
             copyStats.videosCopied++;
-            console.log(`[UPLOAD-QUEUE] ✓ Video ${i + 1} copied successfully`);
+            videoCopied = true;
+            console.log(`[UPLOAD-QUEUE] ✓ Video ${i + 1} saved from upload: ${uploadedFile.name}`);
           } catch (error: any) {
-            const errorMsg = `Video ${i + 1}: Copy failed - ${error?.message || 'Unknown error'}. Source: ${row.path}`;
+            const errorMsg = `Video ${i + 1}: Failed to save uploaded file - ${error?.message || 'Unknown error'}`;
             console.error(`[UPLOAD-QUEUE] [ERROR] ${errorMsg}`, error);
             copyStats.errors.push(errorMsg);
             copyStats.videosSkipped++;
-            // Don't add row if video copy failed - it's required
             continue;
           }
         } else {
-          const errorMsg = `Video ${i + 1}: ${fileCheck.error || 'File not found'}. Path: ${row.path}`;
-          console.error(`[UPLOAD-QUEUE] [ERROR] ${errorMsg}`);
-          copyStats.errors.push(errorMsg);
-          copyStats.videosSkipped++;
-          // Don't add row if video file doesn't exist - it's required
+          // No uploaded file found, try to copy from server path
+          console.log(`[UPLOAD-QUEUE] No uploaded file found for "${csvFilename}", checking server path: ${row.path}`);
+          
+          const fileCheck = checkFileExists(row.path, 'Video', i);
+          
+          if (fileCheck.exists) {
+            try {
+              // Sanitize filename to handle special characters
+              const videoFilename = path.basename(fileCheck.normalizedPath)
+                .replace(/[<>:"|?*]/g, '_') // Replace invalid filename chars
+                .replace(/\s+/g, '_'); // Replace spaces with underscores
+              
+              const videoDest = path.join(uploadDir, "videos", videoFilename);
+              
+              console.log(`[UPLOAD-QUEUE] Copying video ${i + 1} from server: ${fileCheck.normalizedPath} -> ${videoDest}`);
+              
+              // Ensure destination directory exists
+              const destDir = path.dirname(videoDest);
+              if (!fs.existsSync(destDir)) {
+                fs.mkdirSync(destDir, { recursive: true });
+              }
+              
+              fs.copyFileSync(fileCheck.normalizedPath, videoDest);
+              
+              // Verify copy succeeded
+              if (!fs.existsSync(videoDest)) {
+                throw new Error('Copy verification failed - destination file not found');
+              }
+              
+              updatedRow.path = videoDest;
+              copyStats.videosCopied++;
+              videoCopied = true;
+              console.log(`[UPLOAD-QUEUE] ✓ Video ${i + 1} copied from server path`);
+            } catch (error: any) {
+              const errorMsg = `Video ${i + 1}: Copy failed - ${error?.message || 'Unknown error'}. Source: ${row.path}`;
+              console.error(`[UPLOAD-QUEUE] [ERROR] ${errorMsg}`, error);
+              copyStats.errors.push(errorMsg);
+              copyStats.videosSkipped++;
+              continue;
+            }
+          } else {
+            // File not found in uploads and not on server
+            const errorMsg = `Video ${i + 1}: File not found. Expected filename: "${csvFilename}" from path "${row.path}". ${uploadedFiles.length > 0 ? `Uploaded ${uploadedFiles.length} file(s) but none matched.` : 'No files were uploaded.'}`;
+            console.error(`[UPLOAD-QUEUE] [ERROR] ${errorMsg}`);
+            console.error(`[UPLOAD-QUEUE] Available uploaded files:`, Array.from(uploadedFilesMap.keys()));
+            copyStats.errors.push(errorMsg);
+            copyStats.videosSkipped++;
+            continue;
+          }
+        }
+        
+        if (!videoCopied) {
+          // Shouldn't reach here, but safety check
           continue;
         }
       } else {
@@ -334,13 +423,35 @@ export async function POST(request: NextRequest) {
     // Fail the entire job if no videos were copied successfully
     if (copyStats.videosCopied === 0) {
       console.error(`[UPLOAD-QUEUE] [ERROR] No videos were copied successfully. Errors:`, copyStats.errors);
+      
+      // Check if all errors are Windows path related
+      const allWindowsPathErrors = copyStats.errors.every(err => 
+        err.includes('Windows path detected') || err.includes('C:\\') || err.includes('C:/')
+      );
+      
+      let errorMessage = `Failed to copy video files. ${copyStats.errors.length} error(s) occurred.\n\n`;
+      
+      if (allWindowsPathErrors) {
+        errorMessage += `⚠️ Windows Path Issue Detected:\n`;
+        errorMessage += `Your CSV contains Windows file paths (C:\\...) but the server is running on ${process.platform}.\n\n`;
+        errorMessage += `Solutions:\n`;
+        errorMessage += `1. Upload files directly: Use the "Single Video Upload" feature to upload files to the server first.\n`;
+        errorMessage += `2. Copy files to server: Use SCP, FTP, or file manager to copy files to a server-accessible location.\n`;
+        errorMessage += `3. Use server paths: Update your CSV to use paths that are accessible from the server (e.g., /home/user/videos/ or mounted network drives).\n`;
+        errorMessage += `4. Mount Windows drive: If both systems are on the same network, mount the Windows drive on the Linux server.\n\n`;
+        errorMessage += `Example error: ${copyStats.errors[0]}`;
+      } else {
+        errorMessage += `Errors:\n${copyStats.errors.slice(0, 5).join('\n')}${copyStats.errors.length > 5 ? `\n... and ${copyStats.errors.length - 5} more` : ''}`;
+      }
+      
       return NextResponse.json(
         {
-          error: `Failed to copy video files. ${copyStats.errors.length} error(s): ${copyStats.errors.slice(0, 3).join('; ')}${copyStats.errors.length > 3 ? '...' : ''}`,
+          error: errorMessage,
           details: {
             videosCopied: copyStats.videosCopied,
             videosSkipped: copyStats.videosSkipped,
             errors: copyStats.errors,
+            allWindowsPathErrors: allWindowsPathErrors,
           },
         },
         { status: 400 }
