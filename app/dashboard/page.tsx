@@ -644,10 +644,10 @@ export default function Dashboard() {
                 <div className="text-sm font-semibold text-yellow-700 dark:text-yellow-300 uppercase tracking-wide">Processing</div>
                 <div className="text-2xl animate-pulse-slow">⚡</div>
               </div>
-              <div className="text-4xl font-bold text-yellow-700 dark:text-yellow-300 mb-1">{processingVideos}</div>
+              <div className="text-4xl font-bold text-yellow-700 dark:text-yellow-300 mb-1">{pending}</div>
               {totalVideos > 0 && (
                 <div className="text-xs text-yellow-600 dark:text-yellow-400 mt-1">
-                  {Math.round((processingVideos / totalVideos) * 100)}% of total
+                  {Math.round((pending / totalVideos) * 100)}% of total
                 </div>
               )}
             </div>
