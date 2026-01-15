@@ -10,8 +10,16 @@ export interface QueueItem {
   videosPerDay: number;
   startDate: string;
   status: "pending" | "processing" | "completed" | "failed" | "paused" | "cancelled";
-  progress: Array<{ index: number; status: string }>;
+  progress: Array<{ 
+    index: number; 
+    status: string; 
+    videoId?: string; // YouTube video ID for linking
+    fileSize?: number; // File size in bytes
+    duration?: number; // Video duration in seconds
+    uploadSpeed?: number; // Upload speed in bytes per second
+  }>;
   totalVideos?: number; // Total number of videos in this job
+  notes?: string; // User notes/comments for this job
   createdAt: string;
   updatedAt: string;
 }

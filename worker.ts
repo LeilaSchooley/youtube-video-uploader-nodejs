@@ -29,6 +29,77 @@ interface CSVRow {
   privacyStatus?: string;
 }
 
+/**
+ * Check if a video with the given title already exists on the user's YouTube channel
+ * @param youtube - YouTube API client
+ * @param title - Video title to search for
+ * @returns Promise<boolean> - true if video exists, false otherwise
+ */
+async function videoAlreadyExists(
+  youtube: ReturnType<typeof google.youtube>,
+  title: string
+): Promise<boolean> {
+  try {
+    // First, get the user's channel ID
+    const channelResponse = await youtube.channels.list({
+      part: ["id"],
+      mine: true,
+    });
+
+    if (
+      !channelResponse.data.items ||
+      channelResponse.data.items.length === 0
+    ) {
+      console.log(
+        `[WORKER] [${new Date().toISOString()}] Could not get channel ID, skipping duplicate check`
+      );
+      return false;
+    }
+
+    const channelId = channelResponse.data.items[0].id;
+    if (!channelId) {
+      return false;
+    }
+
+    // Search for videos with the exact title on the user's channel
+    const searchResponse = await youtube.search.list({
+      part: ["snippet"],
+      q: title,
+      channelId: channelId,
+      type: ["video"],
+      maxResults: 10,
+    });
+
+    if (!searchResponse.data.items || searchResponse.data.items.length === 0) {
+      return false;
+    }
+
+    // Check if any video has an exact title match (case-insensitive)
+    const exactMatch = searchResponse.data.items.some(
+      (item: any) =>
+        item.snippet?.title?.toLowerCase().trim() === title.toLowerCase().trim()
+    );
+
+    if (exactMatch) {
+      console.log(
+        `[WORKER] [${new Date().toISOString()}] Video with title "${title.substring(
+          0,
+          50
+        )}..." already exists on channel`
+      );
+    }
+
+    return exactMatch;
+  } catch (error: any) {
+    // If there's an error checking, log it but don't block the upload
+    console.error(
+      `[WORKER] [ERROR] [${new Date().toISOString()}] Error checking for existing video:`,
+      error?.message
+    );
+    return false; // Assume video doesn't exist if check fails
+  }
+}
+
 async function processQueueItem(item: QueueItem): Promise<void> {
   const startTime = Date.now();
   console.log(
@@ -159,9 +230,14 @@ async function processQueueItem(item: QueueItem): Promise<void> {
 
     // Load existing progress or initialize
     const existingProgress = item.progress || [];
-    const progress: Array<{ index: number; status: string }> = [
-      ...existingProgress,
-    ];
+    const progress: Array<{
+      index: number;
+      status: string;
+      videoId?: string;
+      fileSize?: number;
+      duration?: number;
+      uploadSpeed?: number;
+    }> = [...existingProgress];
 
     // Initialize progress for all videos if not already done
     while (progress.length < csvData.length) {
@@ -192,6 +268,7 @@ async function processQueueItem(item: QueueItem): Promise<void> {
         existingStatus.includes("Uploaded") ||
         existingStatus.includes("Scheduled") ||
         existingStatus.includes("scheduled") ||
+        existingStatus.includes("Already uploaded") ||
         existingStatus.includes("Failed") ||
         existingStatus.includes("Missing") ||
         existingStatus.includes("Invalid")
@@ -283,6 +360,29 @@ async function processQueueItem(item: QueueItem): Promise<void> {
         progress[i] = { index: i, status: "Invalid privacy status" };
         updateProgress(item.id, progress);
         continue;
+      }
+
+      // Check if video already exists on YouTube before uploading
+      progress[i] = { index: i, status: "Checking for existing video..." };
+      updateProgress(item.id, progress);
+      const alreadyExists = await videoAlreadyExists(
+        youtube,
+        youtube_title as string
+      );
+
+      if (alreadyExists) {
+        progress[i] = {
+          index: i,
+          status: "Already uploaded - Skipped",
+        };
+        updateProgress(item.id, progress);
+        console.log(
+          `[WORKER] [${new Date().toISOString()}] Video ${
+            i + 1
+          }: Already exists on YouTube, skipping upload`
+        );
+        videosProcessedToday++; // Count as processed
+        continue; // Skip to next video
       }
 
       // Determine publish date
@@ -457,6 +557,10 @@ async function processQueueItem(item: QueueItem): Promise<void> {
           }: Starting upload to YouTube...`
         );
 
+        // Get file size before upload
+        const fileStats = fs.statSync(path);
+        const fileSize = fileStats.size;
+
         const videoStream = getFileStream(path);
         const uploadStartTime = Date.now();
         const resultVideoUpload = await youtube.videos.insert({
@@ -464,14 +568,17 @@ async function processQueueItem(item: QueueItem): Promise<void> {
           requestBody,
           media: { body: videoStream },
         });
-        const videoId = resultVideoUpload.data.id;
-        const uploadDuration = ((Date.now() - uploadStartTime) / 1000).toFixed(
-          1
-        );
+        const videoId = resultVideoUpload.data.id || undefined;
+        const uploadEndTime = Date.now();
+        const uploadDurationSeconds = (uploadEndTime - uploadStartTime) / 1000;
+        const uploadSpeed = fileSize / uploadDurationSeconds; // bytes per second
+
         console.log(
           `[WORKER] [${new Date().toISOString()}] Video ${
             i + 1
-          }: Upload completed! Video ID: ${videoId}, Duration: ${uploadDuration}s`
+          }: Upload completed! Video ID: ${videoId}, Duration: ${uploadDurationSeconds.toFixed(
+            1
+          )}s, Speed: ${(uploadSpeed / 1024 / 1024).toFixed(2)} MB/s`
         );
 
         // Upload thumbnail if provided
@@ -518,6 +625,9 @@ async function processQueueItem(item: QueueItem): Promise<void> {
               status: publishDate
                 ? `Uploaded & scheduled as ${finalPrivacyStatus} for ${publishDate.toLocaleDateString()}`
                 : `Uploaded as ${finalPrivacyStatus}`,
+              videoId: videoId,
+              fileSize: fileSize,
+              uploadSpeed: uploadSpeed,
             };
           } catch (updateError: any) {
             progress[i] = {
@@ -525,6 +635,9 @@ async function processQueueItem(item: QueueItem): Promise<void> {
               status: publishDate
                 ? `Uploaded as private (scheduled). Change to ${finalPrivacyStatus} manually after publish.`
                 : `Uploaded as private. Change to ${finalPrivacyStatus} manually.`,
+              videoId: videoId,
+              fileSize: fileSize,
+              uploadSpeed: uploadSpeed,
             };
           }
         } else {
@@ -533,6 +646,9 @@ async function processQueueItem(item: QueueItem): Promise<void> {
             status: publishDate
               ? `Uploaded & scheduled for ${publishDate.toLocaleDateString()}`
               : "Uploaded",
+            videoId: videoId,
+            fileSize: fileSize,
+            uploadSpeed: uploadSpeed,
           };
         }
 
@@ -569,6 +685,7 @@ async function processQueueItem(item: QueueItem): Promise<void> {
       (p) =>
         p.status.includes("Uploaded") ||
         p.status.includes("Scheduled") ||
+        p.status.includes("Already uploaded") ||
         p.status.includes("Failed") ||
         p.status.includes("Missing") ||
         p.status.includes("Invalid")
@@ -592,6 +709,7 @@ async function processQueueItem(item: QueueItem): Promise<void> {
           p.status.includes("Uploaded") ||
           p.status.includes("Scheduled") ||
           p.status.includes("scheduled") ||
+          p.status.includes("Already uploaded") ||
           p.status.includes("Failed") ||
           p.status.includes("Missing") ||
           p.status.includes("Invalid")

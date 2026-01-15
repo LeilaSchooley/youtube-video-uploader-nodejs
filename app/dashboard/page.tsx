@@ -45,6 +45,9 @@ export default function Dashboard() {
   const [selectedVideoFiles, setSelectedVideoFiles] = useState<File[]>([]); // For CSV bulk upload
   const [showDebugPanel, setShowDebugPanel] = useState<boolean>(false);
   const [debugLogs, setDebugLogs] = useState<Array<{ time: string; message: string; type: 'info' | 'success' | 'error' }>>([]);
+  const [csvValidationErrors, setCsvValidationErrors] = useState<string[]>([]);
+  const [jobFiles, setJobFiles] = useState<any>(null);
+  const [loadingFiles, setLoadingFiles] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const csvFileInputRef = useRef<HTMLInputElement>(null);
   const videoFilesInputRef = useRef<HTMLInputElement>(null);
@@ -58,6 +61,73 @@ export default function Dashboard() {
     };
     setDebugLogs(prev => [...prev.slice(-49), logEntry]); // Keep last 50 logs
   }, []);
+
+  // CSV validation function
+  const validateCsv = async (file: File): Promise<string[]> => {
+    const errors: string[] = [];
+    try {
+      const text = await file.text();
+      const lines = text.split('\n').filter(line => line.trim());
+      if (lines.length < 2) {
+        errors.push('CSV must have at least a header row and one data row');
+        return errors;
+      }
+
+      const headers = lines[0].toLowerCase().split(',').map(h => h.trim().replace(/"/g, ''));
+      const requiredHeaders = ['youtube_title', 'youtube_description', 'path'];
+      const missingHeaders = requiredHeaders.filter(req => !headers.includes(req.toLowerCase()));
+      
+      if (missingHeaders.length > 0) {
+        errors.push(`Missing required columns: ${missingHeaders.join(', ')}`);
+      }
+
+      // Check data rows (first 5 rows for preview)
+      for (let i = 1; i < Math.min(lines.length, 6); i++) {
+        const values = lines[i].split(',').map(v => v.trim().replace(/^"|"$/g, ''));
+        const row: Record<string, string> = {};
+        headers.forEach((header, idx) => {
+          row[header] = values[idx] || '';
+        });
+
+        if (!row.youtube_title || !row.youtube_title.trim()) {
+          errors.push(`Row ${i + 1}: Missing youtube_title`);
+        }
+        if (!row.youtube_description || !row.youtube_description.trim()) {
+          errors.push(`Row ${i + 1}: Missing youtube_description`);
+        }
+        if (!row.path || !row.path.trim()) {
+          errors.push(`Row ${i + 1}: Missing path`);
+        }
+      }
+    } catch (error) {
+      errors.push(`Error reading CSV: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+    return errors;
+  };
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyPress = (e: KeyboardEvent) => {
+      // Ctrl/Cmd + K: Toggle debug panel
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        setShowDebugPanel(prev => !prev);
+      }
+      // Ctrl/Cmd + E: Export stats
+      if ((e.ctrlKey || e.metaKey) && e.key === 'e') {
+        e.preventDefault();
+        const exportBtn = document.querySelector('[title="Export statistics as JSON"]') as HTMLButtonElement;
+        if (exportBtn) exportBtn.click();
+      }
+      // Escape: Close job details
+      if (e.key === 'Escape' && selectedJobId) {
+        setSelectedJobId(null);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, [selectedJobId]);
 
   // Calculate next scheduled upload batch time (when next batch of videos will start uploading)
   const calculateNextUploadTime = useCallback(() => {
@@ -227,8 +297,66 @@ export default function Dashboard() {
     if (selectedJobId) {
       fetchJobStatus(selectedJobId);
       fetchQueue(); // Also refresh queue
+      fetchJobFiles(selectedJobId); // Fetch uploaded files
     }
   }, [selectedJobId]);
+
+  const fetchJobFiles = async (jobId: string) => {
+    try {
+      setLoadingFiles(true);
+      const res = await fetch(`/api/delete-videos?jobId=${jobId}`);
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setJobFiles(data);
+      }
+    } catch (error) {
+      console.error('[ERROR] Error fetching job files:', error);
+    } finally {
+      setLoadingFiles(false);
+    }
+  };
+
+  const handleDeleteFile = async (jobId: string, filePath: string, fileName: string) => {
+    if (!confirm(`Are you sure you want to delete "${fileName}"? This action cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/delete-videos?jobId=${jobId}&filePath=${encodeURIComponent(filePath)}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setShowToast({ message: data.message || 'File deleted successfully', type: 'success' });
+        fetchJobFiles(jobId); // Refresh file list
+      } else {
+        setShowToast({ message: data.error || 'Failed to delete file', type: 'error' });
+      }
+    } catch (error) {
+      setShowToast({ message: 'An error occurred while deleting the file', type: 'error' });
+    }
+  };
+
+  const handleDeleteAllFiles = async (jobId: string) => {
+    if (!confirm('Are you sure you want to delete ALL uploaded files for this job? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/delete-videos?jobId=${jobId}&deleteAll=true`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setShowToast({ message: data.message || 'All files deleted successfully', type: 'success' });
+        fetchJobFiles(jobId); // Refresh file list
+      } else {
+        setShowToast({ message: data.error || 'Failed to delete files', type: 'error' });
+      }
+    } catch (error) {
+      setShowToast({ message: 'An error occurred while deleting files', type: 'error' });
+    }
+  };
 
   const fetchUser = async () => {
     try {
@@ -638,6 +766,11 @@ export default function Dashboard() {
           duration={showToast.type === 'info' ? 8000 : 5000}
         />
       )}
+
+      {/* Keyboard Shortcuts Help */}
+      <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 rounded-lg text-xs text-blue-800 dark:text-blue-200">
+        <strong>⌨️ Keyboard Shortcuts:</strong> <kbd className="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-800 rounded">Ctrl/Cmd+K</kbd> Debug Panel | <kbd className="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-800 rounded">Ctrl/Cmd+E</kbd> Export Stats | <kbd className="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-800 rounded">Esc</kbd> Close Details
+      </div>
 
       {/* Debug Panel */}
       {showDebugPanel && (
@@ -1121,22 +1254,43 @@ export default function Dashboard() {
               accept=".csv"
               required
               className="hidden"
-              onChange={(e) => {
+              onChange={async (e) => {
                 const file = e.target.files?.[0];
                 if (file) {
                   setSelectedCsvFile(file);
+                  setCsvValidationErrors([]);
+                  const errors = await validateCsv(file);
+                  setCsvValidationErrors(errors);
+                  if (errors.length === 0) {
+                    setShowToast({ message: 'CSV validation passed!', type: 'success' });
+                  } else {
+                    setShowToast({ message: `CSV validation found ${errors.length} error(s)`, type: 'error' });
+                  }
                 }
               }}
             />
             {selectedCsvFile ? (
               <div>
-                <div className="text-4xl mb-2">✅</div>
-                <p className="text-green-700 dark:text-green-300 font-semibold mb-1">
+                <div className="text-4xl mb-2">{csvValidationErrors.length === 0 ? '✅' : '⚠️'}</div>
+                <p className={`font-semibold mb-1 ${csvValidationErrors.length === 0 ? 'text-green-700 dark:text-green-300' : 'text-yellow-700 dark:text-yellow-300'}`}>
                   {selectedCsvFile.name}
                 </p>
                 <p className="text-sm text-gray-600 dark:text-gray-400">
                   {(selectedCsvFile.size / 1024).toFixed(2)} KB
                 </p>
+                {csvValidationErrors.length > 0 && (
+                  <div className="mt-2 p-2 bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-700 rounded text-xs text-yellow-800 dark:text-yellow-200 max-h-32 overflow-y-auto">
+                    <strong>Validation Errors:</strong>
+                    <ul className="list-disc list-inside mt-1 space-y-0.5">
+                      {csvValidationErrors.slice(0, 5).map((error, idx) => (
+                        <li key={idx}>{error}</li>
+                      ))}
+                      {csvValidationErrors.length > 5 && (
+                        <li>... and {csvValidationErrors.length - 5} more</li>
+                      )}
+                    </ul>
+                  </div>
+                )}
                 <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
                   Click to change file
                 </p>
@@ -1295,7 +1449,57 @@ export default function Dashboard() {
       <div className="card">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-5">
           <h2 className="text-2xl font-bold text-gray-800 dark:text-white">Upload Queue Status</h2>
-          <div className="flex gap-3 items-center w-full sm:w-auto">
+          <div className="flex gap-3 items-center w-full sm:w-auto flex-wrap">
+            {queue.length > 0 && (
+              <>
+                <button
+                  onClick={async () => {
+                    try {
+                      const res = await fetch('/api/export-stats?format=json');
+                      const blob = await res.blob();
+                      const url = window.URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = `youtube-stats-${new Date().toISOString().split('T')[0]}.json`;
+                      document.body.appendChild(a);
+                      a.click();
+                      document.body.removeChild(a);
+                      window.URL.revokeObjectURL(url);
+                      setShowToast({ message: 'Statistics exported!', type: 'success' });
+                    } catch (error) {
+                      setShowToast({ message: 'Failed to export statistics', type: 'error' });
+                    }
+                  }}
+                  className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition-colors whitespace-nowrap"
+                  title="Export statistics as JSON"
+                >
+                  📊 Export JSON
+                </button>
+                <button
+                  onClick={async () => {
+                    try {
+                      const res = await fetch('/api/export-stats?format=csv');
+                      const blob = await res.blob();
+                      const url = window.URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = `youtube-stats-${new Date().toISOString().split('T')[0]}.csv`;
+                      document.body.appendChild(a);
+                      a.click();
+                      document.body.removeChild(a);
+                      window.URL.revokeObjectURL(url);
+                      setShowToast({ message: 'Statistics exported!', type: 'success' });
+                    } catch (error) {
+                      setShowToast({ message: 'Failed to export statistics', type: 'error' });
+                    }
+                  }}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-colors whitespace-nowrap"
+                  title="Export statistics as CSV"
+                >
+                  📊 Export CSV
+                </button>
+              </>
+            )}
             {queue.length > 0 && (
               <>
                 <input
@@ -1550,20 +1754,82 @@ export default function Dashboard() {
           return (
             <div className="mt-5 p-6 bg-gradient-to-br from-gray-50 dark:from-gray-800 to-blue-50 dark:to-blue-900/30 border-2 border-blue-200 dark:border-blue-700 rounded-xl shadow-lg">
               <div className="flex justify-between items-start mb-6">
-                <div>
+                <div className="flex-1">
                   <h3 className="text-xl font-bold text-gray-800 dark:text-white mb-1">
                     📋 Job Progress
                   </h3>
                   <p className="text-sm text-gray-600 dark:text-gray-400 font-mono">
                     {jobStatus.id}
                   </p>
+                  {jobStatus.notes && (
+                    <div className="mt-2 p-2 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 rounded text-sm text-blue-800 dark:text-blue-200">
+                      <strong>📝 Notes:</strong> {jobStatus.notes}
+                    </div>
+                  )}
                 </div>
-                <button
-                  onClick={() => setSelectedJobId(null)}
-                  className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 text-2xl font-bold transition-colors"
-                >
-                  ×
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={async () => {
+                      const notes = prompt("Add notes for this job:", jobStatus.notes || "");
+                      if (notes !== null) {
+                        try {
+                          const res = await fetch('/api/queue-notes', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ jobId: jobStatus.id, notes }),
+                          });
+                          const data = await res.json();
+                          if (res.ok) {
+                            setShowToast({ message: 'Notes updated', type: 'success' });
+                            fetchJobStatus(jobStatus.id);
+                          } else {
+                            setShowToast({ message: data.error || 'Failed to update notes', type: 'error' });
+                          }
+                        } catch (error) {
+                          setShowToast({ message: 'An error occurred', type: 'error' });
+                        }
+                      }
+                    }}
+                    className="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white text-xs font-semibold rounded-lg transition-colors"
+                    title="Add/edit notes"
+                  >
+                    📝 Notes
+                  </button>
+                  <button
+                    onClick={async () => {
+                      if (confirm("Copy this job? This will create a duplicate with the same settings.")) {
+                        try {
+                          const res = await fetch('/api/queue-copy', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ jobId: jobStatus.id }),
+                          });
+                          const data = await res.json();
+                          if (res.ok) {
+                            setShowToast({ message: `Job copied! New job ID: ${data.jobId}`, type: 'success' });
+                            fetchQueue();
+                            setSelectedJobId(data.jobId);
+                            fetchJobStatus(data.jobId);
+                          } else {
+                            setShowToast({ message: data.error || 'Failed to copy job', type: 'error' });
+                          }
+                        } catch (error) {
+                          setShowToast({ message: 'An error occurred', type: 'error' });
+                        }
+                      }
+                    }}
+                    className="px-3 py-1.5 bg-purple-500 hover:bg-purple-600 text-white text-xs font-semibold rounded-lg transition-colors"
+                    title="Copy this job"
+                  >
+                    📋 Copy
+                  </button>
+                  <button
+                    onClick={() => setSelectedJobId(null)}
+                    className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 text-2xl font-bold transition-colors"
+                  >
+                    ×
+                  </button>
+                </div>
               </div>
 
               {/* Progress Statistics */}
@@ -1619,10 +1885,36 @@ export default function Dashboard() {
                     Video Details ({completed}/{totalVideos} completed)
                   </h4>
                   <div className="max-h-96 overflow-y-auto space-y-2 pr-2">
-                    {progress.map((item: ProgressItem, idx: number) => {
+                    {progress.map((item: any, idx: number) => {
                       const isSuccess = item.status.includes("Uploaded") || item.status.includes("Scheduled") || item.status.includes("scheduled");
                       const isFailed = item.status.includes("Failed") || item.status.includes("Missing") || item.status.includes("Invalid");
                       const isProcessing = item.status.includes("Uploading") || item.status === "Pending" || item.status.includes("thumbnail");
+                      
+                      // Format file size
+                      const formatFileSize = (bytes?: number) => {
+                        if (!bytes) return 'N/A';
+                        if (bytes < 1024) return `${bytes} B`;
+                        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)} KB`;
+                        return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+                      };
+                      
+                      // Format upload speed
+                      const formatSpeed = (bytesPerSecond?: number) => {
+                        if (!bytesPerSecond) return '';
+                        if (bytesPerSecond < 1024) return `${bytesPerSecond.toFixed(0)} B/s`;
+                        if (bytesPerSecond < 1024 * 1024) return `${(bytesPerSecond / 1024).toFixed(2)} KB/s`;
+                        return `${(bytesPerSecond / 1024 / 1024).toFixed(2)} MB/s`;
+                      };
+                      
+                      // Format duration
+                      const formatDuration = (seconds?: number) => {
+                        if (!seconds) return '';
+                        const hours = Math.floor(seconds / 3600);
+                        const minutes = Math.floor((seconds % 3600) / 60);
+                        const secs = Math.floor(seconds % 60);
+                        if (hours > 0) return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+                        return `${minutes}:${secs.toString().padStart(2, '0')}`;
+                      };
                       
                       return (
                         <div
@@ -1639,9 +1931,41 @@ export default function Dashboard() {
                               <span className="text-lg font-bold text-gray-800 dark:text-white flex-shrink-0">
                                 {isSuccess ? '✅' : isFailed ? '❌' : isProcessing ? '⏳' : '⏸️'}
                               </span>
-                              <span className="font-medium text-gray-800 dark:text-white truncate">
-                                Video {item.index + 1}
-                              </span>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="font-medium text-gray-800 dark:text-white">
+                                    Video {item.index + 1}
+                                  </span>
+                                  {item.videoId && (
+                                    <a
+                                      href={`https://www.youtube.com/watch?v=${item.videoId}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-blue-600 dark:text-blue-400 hover:underline text-sm flex items-center gap-1"
+                                      onClick={(e) => e.stopPropagation()}
+                                    >
+                                      🔗 View on YouTube
+                                    </a>
+                                  )}
+                                </div>
+                                <div className="flex flex-wrap gap-2 mt-1 text-xs text-gray-600 dark:text-gray-400">
+                                  {item.fileSize && (
+                                    <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-700 rounded">
+                                      📦 {formatFileSize(item.fileSize)}
+                                    </span>
+                                  )}
+                                  {item.duration && (
+                                    <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-700 rounded">
+                                      ⏱️ {formatDuration(item.duration)}
+                                    </span>
+                                  )}
+                                  {item.uploadSpeed && (
+                                    <span className="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 rounded">
+                                      ⚡ {formatSpeed(item.uploadSpeed)}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
                             </div>
                             <span className={`text-xs px-3 py-1 rounded-full font-medium flex-shrink-0 ${
                               isSuccess ? 'bg-green-100 dark:bg-green-800 text-green-800 dark:text-green-200' :
@@ -1671,6 +1995,144 @@ export default function Dashboard() {
                   )}
                 </div>
               )}
+
+              {/* Uploaded Files Management */}
+              <div className="mt-8 pt-6 border-t border-gray-200 dark:border-gray-700">
+                <div className="flex justify-between items-center mb-4">
+                  <h4 className="text-lg font-bold text-gray-800 dark:text-white flex items-center gap-2">
+                    <span>📁</span>
+                    <span>Uploaded Files on Server</span>
+                  </h4>
+                  {jobFiles && (jobFiles.files.videos.length > 0 || jobFiles.files.thumbnails.length > 0) && (
+                    <button
+                      onClick={() => handleDeleteAllFiles(selectedJobId!)}
+                      className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition-colors"
+                    >
+                      🗑️ Delete All Files
+                    </button>
+                  )}
+                </div>
+                
+                {loadingFiles ? (
+                  <div className="text-center py-4">
+                    <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-gray-800 dark:border-white"></div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">Loading files...</p>
+                  </div>
+                ) : jobFiles && (jobFiles.files.videos.length > 0 || jobFiles.files.thumbnails.length > 0 || jobFiles.files.csv) ? (
+                  <div className="space-y-4">
+                    {/* Total Size Info */}
+                    <div className="p-3 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 rounded-lg">
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-blue-800 dark:text-blue-200 font-medium">
+                          Total Storage: {jobFiles.totalSizeFormatted}
+                        </span>
+                        <span className="text-blue-600 dark:text-blue-400">
+                          {jobFiles.totalFiles} file{jobFiles.totalFiles !== 1 ? 's' : ''}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Video Files */}
+                    {jobFiles.files.videos.length > 0 && (
+                      <div>
+                        <h5 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                          📹 Video Files ({jobFiles.files.videos.length})
+                        </h5>
+                        <div className="space-y-2">
+                          {jobFiles.files.videos.map((file: any, idx: number) => (
+                            <div
+                              key={idx}
+                              className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
+                            >
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium text-gray-800 dark:text-white truncate">
+                                  {file.name}
+                                </p>
+                                <p className="text-xs text-gray-500 dark:text-gray-400">
+                                  {file.sizeFormatted}
+                                </p>
+                              </div>
+                              <button
+                                onClick={() => handleDeleteFile(selectedJobId!, file.path, file.name)}
+                                className="ml-3 px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold rounded-lg transition-colors flex-shrink-0"
+                                title={`Delete ${file.name}`}
+                              >
+                                🗑️ Delete
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Thumbnail Files */}
+                    {jobFiles.files.thumbnails.length > 0 && (
+                      <div>
+                        <h5 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                          🖼️ Thumbnail Files ({jobFiles.files.thumbnails.length})
+                        </h5>
+                        <div className="space-y-2">
+                          {jobFiles.files.thumbnails.map((file: any, idx: number) => (
+                            <div
+                              key={idx}
+                              className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
+                            >
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium text-gray-800 dark:text-white truncate">
+                                  {file.name}
+                                </p>
+                                <p className="text-xs text-gray-500 dark:text-gray-400">
+                                  {file.sizeFormatted}
+                                </p>
+                              </div>
+                              <button
+                                onClick={() => handleDeleteFile(selectedJobId!, file.path, file.name)}
+                                className="ml-3 px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold rounded-lg transition-colors flex-shrink-0"
+                                title={`Delete ${file.name}`}
+                              >
+                                🗑️ Delete
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* CSV File */}
+                    {jobFiles.files.csv && (
+                      <div>
+                        <h5 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                          📄 CSV File
+                        </h5>
+                        <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-gray-800 dark:text-white truncate">
+                              {jobFiles.files.csv.name}
+                            </p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                              {jobFiles.files.csv.sizeFormatted}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => handleDeleteFile(selectedJobId!, jobFiles.files.csv.path, jobFiles.files.csv.name)}
+                            className="ml-3 px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold rounded-lg transition-colors flex-shrink-0"
+                            title={`Delete ${jobFiles.files.csv.name}`}
+                          >
+                            🗑️ Delete
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-center py-6 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                    <div className="text-4xl mb-2">📭</div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      No files found on server for this job
+                    </p>
+                  </div>
+                )}
+              </div>
             </div>
           );
         })()}

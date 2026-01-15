@@ -41,3 +41,6 @@ src/creds.json
 # uploads and queue data
 /uploads
 /data
+
+# PM2 logs
+/logs
