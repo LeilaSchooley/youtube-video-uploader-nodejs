@@ -290,7 +290,9 @@ export default function Dashboard() {
     setShowProgress(false);
     setProgress([]);
 
-    const formData = new FormData(e.currentTarget);
+    // Store form reference before async operation
+    const form = e.currentTarget;
+    const formData = new FormData(form);
     
       if (enableScheduling) {
         if (!videosPerDay) {
@@ -347,7 +349,10 @@ export default function Dashboard() {
           type: data.copyStats?.errors?.length > 0 ? 'info' : 'success',
         });
         setMessage({ type: 'success', text: `✅ Successfully uploaded ${data.totalVideos} videos! Check the queue below for progress.` });
-        e.currentTarget.reset();
+        // Reset form using stored reference
+        if (form) {
+          form.reset();
+        }
         setSelectedCsvFile(null); // Reset CSV file selection
         setEnableScheduling(false);
         setVideosPerDay('');
