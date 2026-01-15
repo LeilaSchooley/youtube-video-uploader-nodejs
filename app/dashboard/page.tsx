@@ -605,6 +605,72 @@ export default function Dashboard() {
     }
   };
 
+  const handleDeleteAllByCategory = async (fileType: "video" | "thumbnail" | "csv") => {
+    if (!allFiles) return;
+    
+    const filesToDelete = allFiles.files.filter((f: any) => f.type === fileType);
+    if (filesToDelete.length === 0) {
+      setShowToast({
+        message: `No ${fileType} files to delete`,
+        type: "info",
+      });
+      return;
+    }
+
+    const categoryName = fileType === "video" ? "videos" : fileType === "thumbnail" ? "thumbnails" : "CSV files";
+    if (
+      !confirm(
+        `Are you sure you want to delete ALL ${filesToDelete.length} ${categoryName}? This action cannot be undone.`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      let successCount = 0;
+      let failCount = 0;
+
+      // Delete files sequentially to avoid overwhelming the server
+      for (const file of filesToDelete) {
+        try {
+          const res = await fetch(
+            `/api/delete-videos?jobId=${file.jobId}&filePath=${encodeURIComponent(
+              file.relativePath
+            )}`,
+            {
+              method: "DELETE",
+            }
+          );
+          if (res.ok) {
+            successCount++;
+          } else {
+            failCount++;
+          }
+        } catch (error) {
+          failCount++;
+        }
+      }
+
+      if (successCount > 0) {
+        setShowToast({
+          message: `Deleted ${successCount} ${categoryName}${failCount > 0 ? ` (${failCount} failed)` : ""}`,
+          type: failCount > 0 ? "warning" : "success",
+        });
+        fetchAllFiles(); // Refresh all files view
+      } else {
+        setShowToast({
+          message: `Failed to delete ${categoryName}`,
+          type: "error",
+        });
+      }
+    } catch (error) {
+      setShowToast({
+        message: `An error occurred while deleting ${categoryName}`,
+        type: "error",
+      });
+    }
+  };
+
   const handleDeleteAllFiles = async (jobId: string) => {
     if (
       !confirm(
@@ -878,63 +944,58 @@ export default function Dashboard() {
     const form = e.currentTarget;
     const formData = new FormData(form);
 
-    // Add uploaded video files to FormData
-    selectedVideoFiles.forEach((file) => {
-      formData.append("files", file);
-    });
-
-    if (enableScheduling) {
-      if (!videosPerInterval) {
-        setShowToast({
-          message:
-            "Please fill in videos per interval when scheduling is enabled.",
-          type: "error",
-        });
-        setMessage({
-          type: "error",
-          text: "Please fill in videos per interval when scheduling is enabled.",
-        });
-        setCsvUploading(false);
-        return;
-      }
-      if (uploadInterval === "custom" && !customIntervalMinutes) {
-        setShowToast({
-          message: "Please fill in custom interval minutes.",
-          type: "error",
-        });
-        setMessage({
-          type: "error",
-          text: "Please fill in custom interval minutes.",
-        });
-        setCsvUploading(false);
-        return;
-      }
-      formData.append("videosPerInterval", videosPerInterval);
-      formData.append("uploadInterval", uploadInterval);
-      if (uploadInterval === "custom") {
-        formData.append("customIntervalMinutes", customIntervalMinutes);
-      }
-      formData.append("enableScheduling", "true");
-      // Keep videosPerDay for backward compatibility (calculate from interval)
-      const intervalMinutes =
-        uploadInterval === "day"
-          ? 1440
-          : uploadInterval === "12hours"
-          ? 720
-          : uploadInterval === "6hours"
-          ? 360
-          : uploadInterval === "hour"
-          ? 60
-          : uploadInterval === "30mins"
-          ? 30
-          : uploadInterval === "10mins"
-          ? 10
-          : parseInt(customIntervalMinutes) || 1440;
-      const videosPerDayCalc = Math.round(
-        (1440 / intervalMinutes) * parseInt(videosPerInterval)
-      );
-      formData.append("videosPerDay", videosPerDayCalc.toString()); // For backward compatibility
+    // Validate scheduling settings
+    if (!videosPerInterval) {
+      setShowToast({
+        message: "Please fill in videos per interval.",
+        type: "error",
+      });
+      setMessage({
+        type: "error",
+        text: "Please fill in videos per interval.",
+      });
+      setCsvUploading(false);
+      return;
     }
+    if (uploadInterval === "custom" && !customIntervalMinutes) {
+      setShowToast({
+        message: "Please fill in custom interval minutes.",
+        type: "error",
+      });
+      setMessage({
+        type: "error",
+        text: "Please fill in custom interval minutes.",
+      });
+      setCsvUploading(false);
+      return;
+    }
+    
+    // Always append scheduling settings
+    formData.append("videosPerInterval", videosPerInterval);
+    formData.append("uploadInterval", uploadInterval);
+    if (uploadInterval === "custom") {
+      formData.append("customIntervalMinutes", customIntervalMinutes);
+    }
+    formData.append("enableScheduling", "true");
+    // Keep videosPerDay for backward compatibility (calculate from interval)
+    const intervalMinutes =
+      uploadInterval === "day"
+        ? 1440
+        : uploadInterval === "12hours"
+        ? 720
+        : uploadInterval === "6hours"
+        ? 360
+        : uploadInterval === "hour"
+        ? 60
+        : uploadInterval === "30mins"
+        ? 30
+        : uploadInterval === "10mins"
+        ? 10
+        : parseInt(customIntervalMinutes) || 1440;
+    const videosPerDayCalc = Math.round(
+      (1440 / intervalMinutes) * parseInt(videosPerInterval)
+    );
+    formData.append("videosPerDay", videosPerDayCalc.toString()); // For backward compatibility
 
     try {
       // Show copying message
@@ -1051,19 +1112,9 @@ export default function Dashboard() {
         setSelectedCsvFile(null); // Reset CSV file selection
         setSelectedVideoFiles([]); // Reset video files selection
         setSelectedThumbnailFiles([]); // Reset thumbnail files selection
-        setEnableScheduling(false);
-        setVideosPerDay("");
         setUploadInterval("day");
         setVideosPerInterval("10");
         setCustomIntervalMinutes("");
-        // Reset video files input
-        if (videoFilesInputRef.current) {
-          videoFilesInputRef.current.value = "";
-        }
-        // Reset thumbnail files input
-        if (thumbnailFilesInputRef.current) {
-          thumbnailFilesInputRef.current.value = "";
-        }
 
         // Immediately fetch queue and job status
         setSelectedJobId(data.jobId);
@@ -1215,30 +1266,54 @@ export default function Dashboard() {
               Manage your YouTube video uploads
             </p>
           </div>
-          <div className="flex gap-3 flex-wrap">
-            <button
-              onClick={() => setShowDebugPanel(!showDebugPanel)}
-              className="px-4 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-xl transition-all duration-200 hover:scale-105 active:scale-95 shadow-sm hover:shadow-md"
-              title="Toggle Debug Panel"
-            >
-              🐛 Debug
-            </button>
-            <button
-              onClick={toggleDarkMode}
-              className="px-4 py-2.5 bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 text-gray-700 dark:text-gray-300 font-medium rounded-xl transition-all duration-200 hover:scale-105 active:scale-95 shadow-sm hover:shadow-md"
-              aria-label="Toggle dark mode"
-            >
-              {darkMode ? "☀️ Light" : "🌙 Dark"}
-            </button>
-            <a href="/api/auth/logout" className="btn-primary">
-              Logout
-            </a>
-            <button
-              onClick={handleDeleteAccount}
-              className="btn-secondary bg-red-600 hover:bg-red-700"
-            >
-              Delete Account
-            </button>
+          <div className="flex items-center gap-4 flex-wrap">
+            {/* Profile Section in Header */}
+            {user && (
+              <div className="flex items-center gap-3 p-3 bg-gradient-to-r from-red-50 via-pink-50 to-red-50 dark:from-red-900/20 dark:via-pink-900/20 dark:to-red-900/20 rounded-xl border-2 border-red-100 dark:border-red-800/50 shadow-sm hover:shadow-md transition-shadow">
+                <div className="relative">
+                  <div className="absolute inset-0 bg-red-500/20 rounded-full blur-xl"></div>
+                  <img
+                    src={user.picture}
+                    alt={user.name}
+                    className="w-10 h-10 rounded-full object-cover border-2 border-red-600 dark:border-red-400 shadow-lg relative z-10"
+                  />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-gray-800 dark:text-white">
+                    {user.name}
+                  </p>
+                  <p className="text-xs text-gray-600 dark:text-gray-400 flex items-center gap-1">
+                    <span className="text-green-500">✓</span>
+                    <span>Connected</span>
+                  </p>
+                </div>
+              </div>
+            )}
+            <div className="flex gap-3 flex-wrap">
+              <button
+                onClick={() => setShowDebugPanel(!showDebugPanel)}
+                className="px-4 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-xl transition-all duration-200 hover:scale-105 active:scale-95 shadow-sm hover:shadow-md"
+                title="Toggle Debug Panel"
+              >
+                🐛 Debug
+              </button>
+              <button
+                onClick={toggleDarkMode}
+                className="px-4 py-2.5 bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 text-gray-700 dark:text-gray-300 font-medium rounded-xl transition-all duration-200 hover:scale-105 active:scale-95 shadow-sm hover:shadow-md"
+                aria-label="Toggle dark mode"
+              >
+                {darkMode ? "☀️ Light" : "🌙 Dark"}
+              </button>
+              <a href="/api/auth/logout" className="btn-primary">
+                Logout
+              </a>
+              <button
+                onClick={handleDeleteAccount}
+                className="btn-secondary bg-red-600 hover:bg-red-700"
+              >
+                Delete Account
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1250,37 +1325,6 @@ export default function Dashboard() {
             onClose={() => setShowToast(null)}
             duration={showToast.type === "info" ? 8000 : 5000}
           />
-        )}
-
-        {/* Profile Section */}
-        {user && (
-          <div className="card animate-fade-in mb-6">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-bold text-gray-800 dark:text-white flex items-center gap-2">
-                <span className="text-3xl">👤</span>
-                <span>Profile</span>
-              </h2>
-            </div>
-            <div className="flex items-center gap-5 p-6 bg-gradient-to-r from-red-50 via-pink-50 to-red-50 dark:from-red-900/20 dark:via-pink-900/20 dark:to-red-900/20 rounded-xl border-2 border-red-100 dark:border-red-800/50 shadow-md hover:shadow-lg transition-shadow">
-              <div className="relative">
-                <div className="absolute inset-0 bg-red-500/20 rounded-full blur-xl"></div>
-                <img
-                  src={user.picture}
-                  alt={user.name}
-                  className="w-20 h-20 rounded-full object-cover border-4 border-red-600 dark:border-red-400 shadow-xl relative z-10"
-                />
-              </div>
-              <div>
-                <p className="text-lg font-bold text-gray-800 dark:text-white">
-                  {user.name}
-                </p>
-                <p className="text-sm text-gray-600 dark:text-gray-400 flex items-center gap-2 mt-1">
-                  <span className="text-green-500">✓</span>
-                  <span>Google Account Connected</span>
-                </p>
-              </div>
-            </div>
-          </div>
         )}
 
         {/* Keyboard Shortcuts Help */}
@@ -1688,27 +1732,41 @@ export default function Dashboard() {
                   <div className="mt-6 space-y-4">
                     {/* Videos Category */}
                     <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
-                      <button
-                        onClick={() => setExpandedCategories(prev => ({ ...prev, videos: !prev.videos }))}
-                        className="w-full flex items-center justify-between p-4 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 hover:from-green-100 hover:to-emerald-100 dark:hover:from-green-900/30 dark:hover:to-emerald-900/30 transition-colors"
-                      >
-                        <div className="flex items-center gap-3">
-                          <span className="text-2xl">📹</span>
-                          <div className="text-left">
-                            <h3 className="text-lg font-semibold text-gray-800 dark:text-white">
-                              Videos ({allFiles.videoCount})
-                            </h3>
-                            <p className="text-xs text-gray-600 dark:text-gray-400">
-                              {allFiles.files.filter((f: any) => f.type === "video").reduce((sum: number, f: any) => sum + f.size, 0) > 0 
-                                ? `${((allFiles.files.filter((f: any) => f.type === "video").reduce((sum: number, f: any) => sum + f.size, 0)) / 1024 / 1024).toFixed(2)} MB total`
-                                : "No videos"}
-                            </p>
+                      <div className="flex items-center justify-between p-4 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20">
+                        <button
+                          onClick={() => setExpandedCategories(prev => ({ ...prev, videos: !prev.videos }))}
+                          className="flex-1 flex items-center justify-between hover:from-green-100 hover:to-emerald-100 dark:hover:from-green-900/30 dark:hover:to-emerald-900/30 transition-colors"
+                        >
+                          <div className="flex items-center gap-3">
+                            <span className="text-2xl">📹</span>
+                            <div className="text-left">
+                              <h3 className="text-lg font-semibold text-gray-800 dark:text-white">
+                                Videos ({allFiles.videoCount})
+                              </h3>
+                              <p className="text-xs text-gray-600 dark:text-gray-400">
+                                {allFiles.files.filter((f: any) => f.type === "video").reduce((sum: number, f: any) => sum + f.size, 0) > 0 
+                                  ? `${((allFiles.files.filter((f: any) => f.type === "video").reduce((sum: number, f: any) => sum + f.size, 0)) / 1024 / 1024).toFixed(2)} MB total`
+                                  : "No videos"}
+                              </p>
+                            </div>
                           </div>
-                        </div>
-                        <span className="text-gray-500 dark:text-gray-400">
-                          {expandedCategories.videos ? "▼" : "▶"}
-                        </span>
-                      </button>
+                          <span className="text-gray-500 dark:text-gray-400">
+                            {expandedCategories.videos ? "▼" : "▶"}
+                          </span>
+                        </button>
+                        {allFiles.files.filter((f: any) => f.type === "video").length > 0 && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteAllByCategory("video");
+                            }}
+                            className="ml-3 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold rounded-lg transition-colors flex items-center gap-1"
+                            title="Delete all videos"
+                          >
+                            🗑️ Delete All
+                          </button>
+                        )}
+                      </div>
                       {expandedCategories.videos && (
                         <div className="p-4 bg-white dark:bg-gray-800 max-h-96 overflow-y-auto space-y-2">
                           {allFiles.files.filter((f: any) => f.type === "video").length > 0 ? (
@@ -1780,27 +1838,41 @@ export default function Dashboard() {
 
                     {/* Thumbnails Category */}
                     <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
-                      <button
-                        onClick={() => setExpandedCategories(prev => ({ ...prev, thumbnails: !prev.thumbnails }))}
-                        className="w-full flex items-center justify-between p-4 bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20 hover:from-purple-100 hover:to-pink-100 dark:hover:from-purple-900/30 dark:hover:to-pink-900/30 transition-colors"
-                      >
-                        <div className="flex items-center gap-3">
-                          <span className="text-2xl">🖼️</span>
-                          <div className="text-left">
-                            <h3 className="text-lg font-semibold text-gray-800 dark:text-white">
-                              Thumbnails ({allFiles.thumbnailCount})
-                            </h3>
-                            <p className="text-xs text-gray-600 dark:text-gray-400">
-                              {allFiles.files.filter((f: any) => f.type === "thumbnail").reduce((sum: number, f: any) => sum + f.size, 0) > 0 
-                                ? `${((allFiles.files.filter((f: any) => f.type === "thumbnail").reduce((sum: number, f: any) => sum + f.size, 0)) / 1024).toFixed(2)} KB total`
-                                : "No thumbnails"}
-                            </p>
+                      <div className="flex items-center justify-between p-4 bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20">
+                        <button
+                          onClick={() => setExpandedCategories(prev => ({ ...prev, thumbnails: !prev.thumbnails }))}
+                          className="flex-1 flex items-center justify-between hover:from-purple-100 hover:to-pink-100 dark:hover:from-purple-900/30 dark:hover:to-pink-900/30 transition-colors"
+                        >
+                          <div className="flex items-center gap-3">
+                            <span className="text-2xl">🖼️</span>
+                            <div className="text-left">
+                              <h3 className="text-lg font-semibold text-gray-800 dark:text-white">
+                                Thumbnails ({allFiles.thumbnailCount})
+                              </h3>
+                              <p className="text-xs text-gray-600 dark:text-gray-400">
+                                {allFiles.files.filter((f: any) => f.type === "thumbnail").reduce((sum: number, f: any) => sum + f.size, 0) > 0 
+                                  ? `${((allFiles.files.filter((f: any) => f.type === "thumbnail").reduce((sum: number, f: any) => sum + f.size, 0)) / 1024).toFixed(2)} KB total`
+                                  : "No thumbnails"}
+                              </p>
+                            </div>
                           </div>
-                        </div>
-                        <span className="text-gray-500 dark:text-gray-400">
-                          {expandedCategories.thumbnails ? "▼" : "▶"}
-                        </span>
-                      </button>
+                          <span className="text-gray-500 dark:text-gray-400">
+                            {expandedCategories.thumbnails ? "▼" : "▶"}
+                          </span>
+                        </button>
+                        {allFiles.files.filter((f: any) => f.type === "thumbnail").length > 0 && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteAllByCategory("thumbnail");
+                            }}
+                            className="ml-3 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold rounded-lg transition-colors flex items-center gap-1"
+                            title="Delete all thumbnails"
+                          >
+                            🗑️ Delete All
+                          </button>
+                        )}
+                      </div>
                       {expandedCategories.thumbnails && (
                         <div className="p-4 bg-white dark:bg-gray-800 max-h-96 overflow-y-auto space-y-2">
                           {allFiles.files.filter((f: any) => f.type === "thumbnail").length > 0 ? (
@@ -1872,27 +1944,41 @@ export default function Dashboard() {
 
                     {/* CSV Files Category */}
                     <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
-                      <button
-                        onClick={() => setExpandedCategories(prev => ({ ...prev, csvs: !prev.csvs }))}
-                        className="w-full flex items-center justify-between p-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 hover:from-blue-100 hover:to-indigo-100 dark:hover:from-blue-900/30 dark:hover:to-indigo-900/30 transition-colors"
-                      >
-                        <div className="flex items-center gap-3">
-                          <span className="text-2xl">📄</span>
-                          <div className="text-left">
-                            <h3 className="text-lg font-semibold text-gray-800 dark:text-white">
-                              CSV Files ({allFiles.csvCount})
-                            </h3>
-                            <p className="text-xs text-gray-600 dark:text-gray-400">
-                              {allFiles.files.filter((f: any) => f.type === "csv").reduce((sum: number, f: any) => sum + f.size, 0) > 0 
-                                ? `${((allFiles.files.filter((f: any) => f.type === "csv").reduce((sum: number, f: any) => sum + f.size, 0)) / 1024).toFixed(2)} KB total`
-                                : "No CSV files"}
-                            </p>
+                      <div className="flex items-center justify-between p-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20">
+                        <button
+                          onClick={() => setExpandedCategories(prev => ({ ...prev, csvs: !prev.csvs }))}
+                          className="flex-1 flex items-center justify-between hover:from-blue-100 hover:to-indigo-100 dark:hover:from-blue-900/30 dark:hover:to-indigo-900/30 transition-colors"
+                        >
+                          <div className="flex items-center gap-3">
+                            <span className="text-2xl">📄</span>
+                            <div className="text-left">
+                              <h3 className="text-lg font-semibold text-gray-800 dark:text-white">
+                                CSV Files ({allFiles.csvCount})
+                              </h3>
+                              <p className="text-xs text-gray-600 dark:text-gray-400">
+                                {allFiles.files.filter((f: any) => f.type === "csv").reduce((sum: number, f: any) => sum + f.size, 0) > 0 
+                                  ? `${((allFiles.files.filter((f: any) => f.type === "csv").reduce((sum: number, f: any) => sum + f.size, 0)) / 1024).toFixed(2)} KB total`
+                                  : "No CSV files"}
+                              </p>
+                            </div>
                           </div>
-                        </div>
-                        <span className="text-gray-500 dark:text-gray-400">
-                          {expandedCategories.csvs ? "▼" : "▶"}
-                        </span>
-                      </button>
+                          <span className="text-gray-500 dark:text-gray-400">
+                            {expandedCategories.csvs ? "▼" : "▶"}
+                          </span>
+                        </button>
+                        {allFiles.files.filter((f: any) => f.type === "csv").length > 0 && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteAllByCategory("csv");
+                            }}
+                            className="ml-3 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold rounded-lg transition-colors flex items-center gap-1"
+                            title="Delete all CSV files"
+                          >
+                            🗑️ Delete All
+                          </button>
+                        )}
+                      </div>
                       {expandedCategories.csvs && (
                         <div className="p-4 bg-white dark:bg-gray-800 max-h-96 overflow-y-auto space-y-2">
                           {allFiles.files.filter((f: any) => f.type === "csv").length > 0 ? (
@@ -2454,7 +2540,7 @@ export default function Dashboard() {
                           File Upload Feature:
                         </strong>
                         <p className="text-sm text-green-800 dark:text-green-200 mt-1">
-                          Upload video files directly with your CSV! The system
+                          Upload videos and thumbnails in the Staging Area above first, then upload your CSV here. The system
                           automatically matches files by filename. Use Windows
                           paths (e.g.,{" "}
                           <code className="bg-green-100 dark:bg-green-800 px-1 rounded">
@@ -2475,9 +2561,8 @@ export default function Dashboard() {
                         </strong>
                         <p className="text-sm text-blue-800 dark:text-blue-200 mt-1">
                           The system extracts filenames from CSV paths and
-                          matches them to uploaded files. If uploaded, those
-                          files are used. Otherwise, it looks for files on the
-                          server.
+                          matches them to files in the Staging Area. Files uploaded to staging
+                          are automatically matched by filename when you upload your CSV.
                         </p>
                       </div>
                     </div>
@@ -2611,248 +2696,83 @@ export default function Dashboard() {
                   )}
                 </div>
 
-                <label htmlFor="videoFiles" className="label">
-                  Upload Video Files (Optional - matches CSV by filename)
-                </label>
-                <div
-                  className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-all ${
-                    selectedVideoFiles.length > 0
-                      ? "border-green-500 bg-green-50 dark:bg-green-900/20"
-                      : "border-gray-300 hover:border-blue-500 dark:border-gray-600 dark:hover:border-blue-400"
-                  }`}
-                  onClick={() => videoFilesInputRef.current?.click()}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    const files = Array.from(e.dataTransfer.files).filter(
-                      (file) => file.type.startsWith("video/")
-                    );
-                    if (files.length > 0) {
-                      setSelectedVideoFiles((prev) => [...prev, ...files]);
-                      if (videoFilesInputRef.current) {
-                        const dataTransfer = new DataTransfer();
-                        [...selectedVideoFiles, ...files].forEach((file) =>
-                          dataTransfer.items.add(file)
-                        );
-                        videoFilesInputRef.current.files = dataTransfer.files;
-                      }
-                    }
-                  }}
-                  onDragOver={(e) => e.preventDefault()}
-                >
-                  <input
-                    ref={videoFilesInputRef}
-                    type="file"
-                    id="videoFiles"
-                    name="videoFiles"
-                    accept="video/*"
-                    multiple
-                    className="hidden"
-                    onChange={(e) => {
-                      const files = Array.from(e.target.files || []);
-                      if (files.length > 0) {
-                        setSelectedVideoFiles((prev) => [...prev, ...files]);
-                      }
-                    }}
-                  />
-                  {selectedVideoFiles.length > 0 ? (
-                    <div>
-                      <div className="text-4xl mb-2">✅</div>
-                      <p className="text-green-700 dark:text-green-300 font-semibold mb-1">
-                        {selectedVideoFiles.length} video file
-                        {selectedVideoFiles.length !== 1 ? "s" : ""} selected
-                      </p>
-                      <div className="text-sm text-gray-600 dark:text-gray-400 max-h-32 overflow-y-auto mb-2 text-left px-4">
-                        {selectedVideoFiles.map((file, idx) => (
-                          <div key={idx} className="mb-1">
-                            • {file.name} (
-                            {(file.size / 1024 / 1024).toFixed(2)} MB)
-                          </div>
-                        ))}
-                      </div>
-                      <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
-                        Click to add more files or{" "}
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedVideoFiles([]);
-                            if (videoFilesInputRef.current) {
-                              videoFilesInputRef.current.value = "";
-                            }
-                          }}
-                          className="text-red-600 hover:underline font-semibold"
-                        >
-                          clear all
-                        </button>
-                      </p>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="text-4xl mb-2">📹</div>
-                      <p className="text-gray-600 dark:text-gray-400 mb-1">
-                        Click to upload or drag and drop
-                      </p>
-                      <p className="text-sm text-gray-500 dark:text-gray-500">
-                        Video files (multiple selection allowed)
-                      </p>
-                      <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-                        Files will be matched to CSV rows by filename
-                      </p>
-                    </>
-                  )}
-                </div>
-
-                {/* Thumbnail Files Upload */}
-                <div>
-                  <label htmlFor="thumbnailFiles" className="label">
-                    Upload Thumbnail Files (Optional - matches CSV by filename)
-                  </label>
-                  <div
-                    className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all duration-200 ${
-                      selectedThumbnailFiles.length > 0
-                        ? "border-green-500 bg-green-50 dark:bg-green-900/20"
-                        : "border-gray-300 hover:border-blue-500 dark:border-gray-600 dark:hover:border-blue-400"
-                    }`}
-                    onClick={() => thumbnailFilesInputRef.current?.click()}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      const files = Array.from(e.dataTransfer.files).filter(
-                        (file) =>
-                          file.type.startsWith("image/") ||
-                          file.name.match(/\.(jpg|jpeg|png|gif|webp)$/i)
-                      );
-                      if (files.length > 0) {
-                        setSelectedThumbnailFiles((prev) => [
-                          ...prev,
-                          ...files,
-                        ]);
-                        if (thumbnailFilesInputRef.current) {
-                          const dataTransfer = new DataTransfer();
-                          [...selectedThumbnailFiles, ...files].forEach(
-                            (file) => dataTransfer.items.add(file)
-                          );
-                          thumbnailFilesInputRef.current.files =
-                            dataTransfer.files;
-                        }
-                      }
-                    }}
-                    onDragOver={(e) => e.preventDefault()}
-                  >
-                    <input
-                      ref={thumbnailFilesInputRef}
-                      type="file"
-                      id="thumbnailFiles"
-                      name="thumbnailFiles"
-                      accept="image/*"
-                      multiple
-                      className="hidden"
-                      onChange={(e) => {
-                        const files = Array.from(e.target.files || []);
-                        if (files.length > 0) {
-                          setSelectedThumbnailFiles((prev) => [
-                            ...prev,
-                            ...files,
-                          ]);
-                        }
-                      }}
-                    />
-                    {selectedThumbnailFiles.length > 0 ? (
-                      <div>
-                        <div className="text-4xl mb-2">✅</div>
-                        <p className="text-green-700 dark:text-green-300 font-semibold mb-1">
-                          {selectedThumbnailFiles.length} thumbnail file
-                          {selectedThumbnailFiles.length !== 1 ? "s" : ""}{" "}
-                          selected
-                        </p>
-                        <div className="text-sm text-gray-600 dark:text-gray-400 max-h-32 overflow-y-auto mb-2 text-left px-4">
-                          {selectedThumbnailFiles.map((file, idx) => (
-                            <div key={idx} className="mb-1">
-                              • {file.name} (
-                              {(file.size / 1024 / 1024).toFixed(2)} MB)
-                            </div>
-                          ))}
-                        </div>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedThumbnailFiles([]);
-                            if (thumbnailFilesInputRef.current) {
-                              thumbnailFilesInputRef.current.value = "";
-                            }
-                          }}
-                          className="text-red-600 hover:underline font-semibold"
-                        >
-                          Clear all
-                        </button>
-                      </div>
-                    ) : (
-                      <>
-                        <div className="text-4xl mb-2">🖼️</div>
-                        <p className="text-gray-600 dark:text-gray-400 mb-1">
-                          Click to upload or drag and drop
-                        </p>
-                        <p className="text-sm text-gray-500 dark:text-gray-500">
-                          Thumbnail images (multiple selection allowed)
-                        </p>
-                        <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-                          Files will be matched to CSV rows by filename
-                        </p>
-                      </>
-                    )}
-                  </div>
-                </div>
-
                 <div className="p-4 bg-gray-50 border border-gray-300 rounded-lg">
-                  <label className="flex items-center gap-2 mb-4 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={enableScheduling}
-                      onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                        setEnableScheduling(e.target.checked)
-                      }
-                      className="w-5 h-5 cursor-pointer"
-                    />
-                    <span className="font-medium text-gray-800">
-                      Enable Upload Scheduling (Spread uploads across multiple
-                      days)
-                    </span>
-                  </label>
+                  <h3 className="font-semibold text-gray-800 mb-4">
+                    Upload Scheduling Settings
+                  </h3>
+                  
+                  <div className="flex flex-col gap-4">
+                    <div>
+                      <label htmlFor="uploadInterval" className="label">
+                        Upload Interval
+                      </label>
+                      <select
+                        id="uploadInterval"
+                        value={uploadInterval}
+                        onChange={(e: ChangeEvent<HTMLSelectElement>) =>
+                          setUploadInterval(e.target.value)
+                        }
+                        className="input-field"
+                      >
+                        <option value="day">Per Day</option>
+                        <option value="12hours">Every 12 Hours</option>
+                        <option value="6hours">Every 6 Hours</option>
+                        <option value="hour">Per Hour</option>
+                        <option value="30mins">Every 30 Minutes</option>
+                        <option value="10mins">Every 10 Minutes</option>
+                        <option value="custom">Custom Interval</option>
+                      </select>
+                    </div>
 
-                  {enableScheduling && (
-                    <div className="flex flex-col gap-4 mt-4">
+                    {uploadInterval === "custom" && (
                       <div>
-                        <label htmlFor="videosPerDay" className="label">
-                          Videos Per Day
+                        <label htmlFor="customIntervalMinutes" className="label">
+                          Custom Interval (Minutes)
                         </label>
                         <input
                           type="number"
-                          id="videosPerDay"
+                          id="customIntervalMinutes"
                           min="1"
-                          value={videosPerDay}
+                          value={customIntervalMinutes}
                           onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                            setVideosPerDay(e.target.value)
+                            setCustomIntervalMinutes(e.target.value)
                           }
-                          placeholder="e.g., 5"
-                          required={enableScheduling}
+                          placeholder="e.g., 15"
                           className="input-field"
                         />
-                        <p className="text-xs text-gray-600 mt-1">
-                          Number of videos to upload per day. Uploads will start
-                          automatically from today and continue daily.
-                        </p>
                       </div>
+                    )}
 
-                      <div className="p-3 bg-yellow-50 border border-yellow-300 rounded-lg text-sm text-yellow-800">
-                        <strong>Note:</strong> When scheduling is enabled,
-                        uploads will start automatically from today. Videos are
-                        uploaded immediately but scheduled to publish on their
-                        assigned dates. All videos will be uploaded as private
-                        initially (required for scheduling), then updated to
-                        your CSV&apos;s privacyStatus if possible.
-                      </div>
+                    <div>
+                      <label htmlFor="videosPerInterval" className="label">
+                        Videos Per Interval
+                      </label>
+                      <input
+                        type="number"
+                        id="videosPerInterval"
+                        min="1"
+                        value={videosPerInterval}
+                        onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                          setVideosPerInterval(e.target.value)
+                        }
+                        placeholder="e.g., 10"
+                        required
+                        className="input-field"
+                      />
+                      <p className="text-xs text-gray-600 mt-1">
+                        Number of videos to upload per selected interval. Uploads will start
+                        automatically from today and continue at the specified interval.
+                      </p>
                     </div>
-                  )}
+
+                    <div className="p-3 bg-yellow-50 border border-yellow-300 rounded-lg text-sm text-yellow-800">
+                      <strong>Note:</strong> Uploads will start automatically from today. Videos are
+                      uploaded immediately but scheduled to publish on their
+                      assigned dates. All videos will be uploaded as private
+                      initially (required for scheduling), then updated to
+                      your CSV&apos;s privacyStatus if possible.
+                    </div>
+                  </div>
                 </div>
 
                 {/* Real-time upload progress display */}
@@ -3022,10 +2942,13 @@ export default function Dashboard() {
 
         {/* Queue Status */}
         <div className="card">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-5">
-            <h2 className="text-2xl font-bold text-gray-800 dark:text-white">
-              Upload Queue Status
-            </h2>
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+            <div className="flex items-center gap-3">
+              <span className="text-3xl">📋</span>
+              <h2 className="text-2xl font-bold text-gray-800 dark:text-white">
+                Upload Queue Status
+              </h2>
+            </div>
             <div className="flex gap-3 items-center w-full sm:w-auto flex-wrap">
               {queue.length > 0 && (
                 <>
@@ -3166,13 +3089,59 @@ export default function Dashboard() {
           {queue.length === 0 ? (
             <div className="text-center py-12">
               <div className="text-6xl mb-4">📭</div>
-              <p className="text-gray-600 text-lg">No upload jobs in queue.</p>
-              <p className="text-gray-500 text-sm mt-2">
+              <p className="text-gray-600 text-lg dark:text-gray-300">No upload jobs in queue.</p>
+              <p className="text-gray-500 dark:text-gray-400 text-sm mt-2">
                 Upload a CSV file to get started!
               </p>
             </div>
           ) : (
-            <div className="flex flex-col gap-4">
+            <div className="space-y-6">
+              {/* Quick Stats Summary */}
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 p-4 bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-xl border border-blue-200 dark:border-blue-700">
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-blue-700 dark:text-blue-300">
+                    {queue.length}
+                  </div>
+                  <div className="text-xs text-blue-600 dark:text-blue-400 mt-1">
+                    Total Jobs
+                  </div>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-yellow-700 dark:text-yellow-300">
+                    {pendingJobs}
+                  </div>
+                  <div className="text-xs text-yellow-600 dark:text-yellow-400 mt-1">
+                    Pending
+                  </div>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-orange-700 dark:text-orange-300">
+                    {processing}
+                  </div>
+                  <div className="text-xs text-orange-600 dark:text-orange-400 mt-1">
+                    Processing
+                  </div>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-green-700 dark:text-green-300">
+                    {completedJobs}
+                  </div>
+                  <div className="text-xs text-green-600 dark:text-green-400 mt-1">
+                    Completed
+                  </div>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-red-700 dark:text-red-300">
+                    {failedJobs}
+                  </div>
+                  <div className="text-xs text-red-600 dark:text-red-400 mt-1">
+                    Failed
+                  </div>
+                </div>
+              </div>
+
+              {/* Jobs List */}
+              <div className="flex flex-col gap-4">
               {queue
                 .filter(
                   (job) =>
@@ -3180,13 +3149,27 @@ export default function Dashboard() {
                     job.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
                     job.status.toLowerCase().includes(searchQuery.toLowerCase())
                 )
-                .map((job) => (
+                .map((job) => {
+                  // Calculate job progress
+                  const jobProgress = job.progress || [];
+                  const completedCount = jobProgress.filter((p: any) =>
+                    p.status.includes("Uploaded") || p.status.includes("Scheduled") || p.status.includes("Already uploaded")
+                  ).length;
+                  const failedCount = jobProgress.filter((p: any) =>
+                    p.status.includes("Failed")
+                  ).length;
+                  const totalVideos = job.totalVideos || jobProgress.length || 0;
+                  const progressPercent = totalVideos > 0 
+                    ? Math.round((completedCount / totalVideos) * 100) 
+                    : 0;
+                  
+                  return (
                   <div
                     key={job.id}
                     className={`p-5 border-2 rounded-xl cursor-pointer transition-all duration-200 ${
                       selectedJobId === job.id
-                        ? "bg-blue-50 dark:bg-blue-900/30 border-blue-400 dark:border-blue-500 shadow-md"
-                        : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:border-red-300 dark:hover:border-red-500 hover:shadow-md"
+                        ? "bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/30 dark:to-indigo-900/30 border-blue-400 dark:border-blue-500 shadow-lg"
+                        : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-500 hover:shadow-md"
                     }`}
                     onClick={() => {
                       setSelectedJobId(job.id);
@@ -3195,33 +3178,33 @@ export default function Dashboard() {
                       fetchQueue();
                     }}
                   >
-                    <div className="flex justify-between items-start">
-                      <div className="flex-1">
+                    <div className="flex justify-between items-start gap-4">
+                      <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-3 mb-3">
                           <div
-                            className={`w-3 h-3 rounded-full ${
+                            className={`w-4 h-4 rounded-full flex-shrink-0 ${
                               job.status === "completed"
-                                ? "bg-green-500"
+                                ? "bg-green-500 shadow-lg shadow-green-500/50"
                                 : job.status === "failed"
-                                ? "bg-red-500"
+                                ? "bg-red-500 shadow-lg shadow-red-500/50"
                                 : job.status === "processing"
-                                ? "bg-yellow-500 animate-pulse-slow"
+                                ? "bg-yellow-500 animate-pulse shadow-lg shadow-yellow-500/50"
+                                : job.status === "paused"
+                                ? "bg-blue-500 shadow-lg shadow-blue-500/50"
                                 : "bg-gray-400"
                             }`}
                           ></div>
-                          <span className="font-mono text-sm text-gray-600 dark:text-gray-400">
+                          <span className="font-mono text-xs text-gray-600 dark:text-gray-400 truncate">
                             {job.id}
                           </span>
-                        </div>
-                        <div className="flex items-center gap-2 mb-2">
                           <span
-                            className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                            className={`px-3 py-1 rounded-full text-xs font-semibold flex-shrink-0 ${
                               job.status === "completed"
                                 ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
                                 : job.status === "failed"
                                 ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
                                 : job.status === "processing"
-                                ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200"
+                                ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200 animate-pulse"
                                 : job.status === "paused"
                                 ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
                                 : "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200"
@@ -3233,17 +3216,69 @@ export default function Dashboard() {
                             {job.status === "paused" && "⏸ "}
                             {job.status.toUpperCase()}
                           </span>
+                        </div>
+                        
+                        {/* Progress Bar */}
+                        {totalVideos > 0 && (
+                          <div className="mb-3">
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                                Progress: {completedCount} / {totalVideos}
+                              </span>
+                              <span className="text-sm font-semibold text-gray-600 dark:text-gray-400">
+                                {progressPercent}%
+                              </span>
+                            </div>
+                            <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5 overflow-hidden">
+                              <div
+                                className={`h-2.5 rounded-full transition-all duration-300 ${
+                                  job.status === "completed"
+                                    ? "bg-gradient-to-r from-green-500 to-emerald-500"
+                                    : job.status === "failed"
+                                    ? "bg-gradient-to-r from-red-500 to-pink-500"
+                                    : job.status === "processing"
+                                    ? "bg-gradient-to-r from-yellow-500 to-orange-500 animate-pulse"
+                                    : "bg-gradient-to-r from-blue-500 to-indigo-500"
+                                }`}
+                                style={{ width: `${progressPercent}%` }}
+                              ></div>
+                            </div>
+                            {(completedCount > 0 || failedCount > 0) && (
+                              <div className="flex items-center gap-4 mt-1 text-xs text-gray-600 dark:text-gray-400">
+                                {completedCount > 0 && (
+                                  <span className="flex items-center gap-1">
+                                    <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                                    {completedCount} completed
+                                  </span>
+                                )}
+                                {failedCount > 0 && (
+                                  <span className="flex items-center gap-1">
+                                    <span className="w-2 h-2 rounded-full bg-red-500"></span>
+                                    {failedCount} failed
+                                  </span>
+                                )}
+                                {totalVideos - completedCount - failedCount > 0 && (
+                                  <span className="flex items-center gap-1">
+                                    <span className="w-2 h-2 rounded-full bg-gray-400"></span>
+                                    {totalVideos - completedCount - failedCount} pending
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        
+                        <div className="flex items-center gap-2 mb-2">
                           {job.totalVideos && (
-                            <span className="text-sm text-gray-600 dark:text-gray-400">
-                              {job.totalVideos} video
-                              {job.totalVideos !== 1 ? "s" : ""}
+                            <span className="text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded">
+                              📹 {job.totalVideos} video{job.totalVideos !== 1 ? "s" : ""}
                             </span>
                           )}
                         </div>
-                        <div className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
-                          <div>
-                            📅 Created:{" "}
-                            {new Date(job.createdAt).toLocaleString()}
+                        <div className="text-sm text-gray-600 dark:text-gray-400 space-y-1.5">
+                          <div className="flex items-center gap-2">
+                            <span>📅</span>
+                            <span>Created: {new Date(job.createdAt).toLocaleString()}</span>
                           </div>
                           {(job.videosPerDay > 0 || job.uploadInterval) &&
                             (() => {
@@ -3269,10 +3304,11 @@ export default function Dashboard() {
                                   ? `${job.customIntervalMinutes || 0} minutes`
                                   : "day";
                               return (
-                                <div>
-                                  📊 Schedule: {videosPerInterval} videos per{" "}
-                                  {intervalDescription} starting{" "}
-                                  {new Date(job.startDate).toLocaleString()}
+                                <div className="flex items-center gap-2">
+                                  <span>📊</span>
+                                  <span>
+                                    Schedule: {videosPerInterval} videos per {intervalDescription} starting {new Date(job.startDate).toLocaleString()}
+                                  </span>
                                 </div>
                               );
                             })()}
@@ -3316,7 +3352,7 @@ export default function Dashboard() {
                             ) : null)}
                         </div>
                         {/* Queue Management Actions */}
-                        <div className="flex gap-2 mt-3 flex-wrap">
+                        <div className="flex gap-2 mt-4 flex-wrap pt-3 border-t border-gray-200 dark:border-gray-700">
                           {job.status === "pending" && (
                             <>
                               <button
@@ -3405,12 +3441,13 @@ export default function Dashboard() {
                           )}
                         </div>
                       </div>
-                      <div className="text-2xl">
+                      <div className="text-2xl text-gray-400 dark:text-gray-500 flex-shrink-0">
                         {selectedJobId === job.id ? "▼" : "▶"}
                       </div>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
             </div>
           )}
 
