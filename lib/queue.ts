@@ -9,7 +9,7 @@ export interface QueueItem {
   uploadDir: string;
   videosPerDay: number;
   startDate: string;
-  status: "pending" | "processing" | "completed" | "failed" | "paused";
+  status: "pending" | "processing" | "completed" | "failed" | "paused" | "cancelled";
   progress: Array<{ index: number; status: string }>;
   totalVideos?: number; // Total number of videos in this job
   createdAt: string;
