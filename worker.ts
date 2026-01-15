@@ -2,7 +2,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 import { getOAuthClient } from "./lib/auth";
-import { getSession, getAllSessions } from "./lib/session";
+import { getSession, getAllSessions, setSession } from "./lib/session";
 import {
   getNextPendingItem,
   getQueue,
@@ -61,6 +61,28 @@ async function processQueueItem(item: QueueItem): Promise<void> {
 
     const oAuthClient = getOAuthClient();
     oAuthClient.setCredentials(session.tokens);
+
+    // Check if refresh token is available before proceeding
+    if (!session.tokens.refresh_token) {
+      throw new Error(
+        "No refresh token is set. Please re-authenticate by logging out and logging back in. This will ensure a refresh token is provided for background uploads."
+      );
+    }
+
+    // Set up automatic token refresh
+    oAuthClient.on("tokens", (tokens) => {
+      if (!session.tokens) return; // Safety check
+
+      if (tokens.refresh_token) {
+        // Refresh token might be rotated, update session
+        session.tokens.refresh_token = tokens.refresh_token;
+      }
+      // Update access token
+      session.tokens.access_token = tokens.access_token;
+      session.tokens.expiry_date = tokens.expiry_date;
+      // Save updated tokens to session
+      setSession(item.sessionId, session);
+    });
 
     const youtube = google.youtube({
       version: "v3",

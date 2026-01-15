@@ -54,6 +54,7 @@ export function generateAuthUrl(): string {
   const oAuthClient = getOAuthClient();
   return oAuthClient.generateAuthUrl({
     access_type: "offline",
+    prompt: "consent", // Force consent screen to ensure refresh token is provided
     scope: scopes,
   });
 }
