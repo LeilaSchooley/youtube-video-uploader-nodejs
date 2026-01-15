@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession, setSession } from "@/lib/session";
 import { cookies } from "next/headers";
 import { addToQueue, getQueue } from "@/lib/queue";
 import { getUploadDir, saveFile } from "@/lib/storage";
@@ -52,8 +52,9 @@ export async function POST(request: NextRequest) {
       });
       const userInfo = await oauth2.userinfo.get();
       userId = (userInfo.data.email || userInfo.data.id || undefined) as string | undefined;
-      // Update session with userId
+      // Update session with userId and persist it
       session.userId = userId;
+      setSession(sessionId, session);
     }
 
     const formData = await request.formData();
@@ -579,14 +580,37 @@ export async function GET(request: NextRequest) {
       });
       const userInfo = await oauth2.userinfo.get();
       userId = (userInfo.data.email || userInfo.data.id || undefined) as string | undefined;
-      // Update session with userId
+      // Update session with userId and persist it
       session.userId = userId;
+      setSession(sessionId, session);
     }
 
     const queue = getQueue();
+    
+    // Migrate old jobs: if a job has sessionId matching current session but no userId, add userId
+    // This helps recover jobs after refresh when sessionId might change
+    let queueUpdated = false;
+    const migratedQueue = queue.map(item => {
+      if (!item.userId && item.sessionId === sessionId && userId) {
+        queueUpdated = true;
+        return { ...item, userId };
+      }
+      return item;
+    });
+    
+    if (queueUpdated) {
+      // Write migrated queue back to disk using the queue module's write function
+      const { writeQueue } = require("@/lib/queue");
+      // We need to import writeQueue properly - for now, write directly
+      const QUEUE_FILE = path.join(process.cwd(), "data", "queue.json");
+      fs.writeFileSync(QUEUE_FILE, JSON.stringify(migratedQueue, null, 2));
+      console.log(`[UPLOAD-QUEUE] Migrated jobs with userId for session ${sessionId.substring(0, 10)}...`);
+    }
+    
     // Filter by userId (persistent) or fallback to sessionId (backward compatibility)
     // Also filter out cancelled jobs (they should be removed, but filter just in case)
-    const userQueue = queue.filter(item => {
+    const queueToFilter = queueUpdated ? migratedQueue : queue;
+    const userQueue = queueToFilter.filter(item => {
       const matchesUser = (item.userId && item.userId === userId) || 
                          (!item.userId && item.sessionId === sessionId);
       const notCancelled = item.status !== "failed" || item.progress?.some(p => p.status.includes("Uploaded"));
