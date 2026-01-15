@@ -105,6 +105,15 @@ export default function Dashboard() {
   } | null>(null);
   const [loadingStaging, setLoadingStaging] = useState<boolean>(false);
   const [uploadingToStaging, setUploadingToStaging] = useState<boolean>(false);
+  const [expandedCategories, setExpandedCategories] = useState<{
+    videos: boolean;
+    thumbnails: boolean;
+    csvs: boolean;
+  }>({
+    videos: true,
+    thumbnails: true,
+    csvs: true,
+  });
   const fileInputRef = useRef<HTMLInputElement>(null);
   const csvFileInputRef = useRef<HTMLInputElement>(null);
   const videoFilesInputRef = useRef<HTMLInputElement>(null);
@@ -1632,7 +1641,7 @@ export default function Dashboard() {
               ) : allFiles && allFiles.totalFiles > 0 ? (
                 <div className="space-y-6">
                   {/* Summary Stats */}
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-xl border border-blue-200 dark:border-blue-700">
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4 p-4 bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-xl border border-blue-200 dark:border-blue-700">
                     <div className="text-center">
                       <div className="text-2xl font-bold text-blue-700 dark:text-blue-300">
                         {allFiles.totalFiles}
@@ -1643,7 +1652,7 @@ export default function Dashboard() {
                     </div>
                     <div className="text-center">
                       <div className="text-2xl font-bold text-green-700 dark:text-green-300">
-                        {allFiles.videoCount}
+                        {allFiles.videoCount || 0}
                       </div>
                       <div className="text-xs text-green-600 dark:text-green-400 mt-1">
                         Videos
@@ -1651,10 +1660,18 @@ export default function Dashboard() {
                     </div>
                     <div className="text-center">
                       <div className="text-2xl font-bold text-purple-700 dark:text-purple-300">
-                        {allFiles.thumbnailCount}
+                        {allFiles.thumbnailCount || 0}
                       </div>
                       <div className="text-xs text-purple-600 dark:text-purple-400 mt-1">
                         Thumbnails
+                      </div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-2xl font-bold text-indigo-700 dark:text-indigo-300">
+                        {allFiles.csvCount || 0}
+                      </div>
+                      <div className="text-xs text-indigo-600 dark:text-indigo-400 mt-1">
+                        CSV Files
                       </div>
                     </div>
                     <div className="text-center">
@@ -1763,80 +1780,282 @@ export default function Dashboard() {
                     ))}
                   </div>
 
-                  {/* All Files List (Flat) */}
-                  <div className="mt-6">
-                    <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-3">
-                      All Files ({allFiles.files.length})
-                    </h3>
-                    <div className="max-h-96 overflow-y-auto space-y-2">
-                      {allFiles.files.map((file: any, idx: number) => (
-                        <div
-                          key={idx}
-                          className="flex items-center justify-between p-3 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                        >
-                          <div className="flex items-center gap-3 flex-1 min-w-0">
-                            <span className="text-xl">
-                              {file.type === "video"
-                                ? "📹"
-                                : file.type === "thumbnail"
-                                ? "🖼️"
-                                : "📄"}
-                            </span>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium text-gray-800 dark:text-white truncate">
-                                {file.fileName}
-                              </p>
-                              <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-                                <span>{file.sizeFormatted}</span>
-                                <span>•</span>
-                                <span className="font-mono">
-                                  {file.jobId.substring(0, 15)}...
-                                </span>
-                                <span>•</span>
-                                <span
-                                  className={`px-2 py-0.5 rounded text-xs ${
-                                    file.jobStatus === "completed"
-                                      ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300"
-                                      : file.jobStatus === "processing"
-                                      ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300"
-                                      : file.jobStatus === "failed"
-                                      ? "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300"
-                                      : "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300"
-                                  }`}
-                                >
-                                  {file.jobStatus}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                          <div className="flex gap-2 ml-3">
-                            <button
-                              onClick={() => {
-                                setSelectedJobId(file.jobId);
-                                setShowAllFiles(false);
-                                fetchJobFiles(file.jobId);
-                              }}
-                              className="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white text-xs font-semibold rounded-lg transition-colors flex-shrink-0"
-                              title="View job details"
-                            >
-                              View
-                            </button>
-                            <button
-                              onClick={() =>
-                                handleDeleteFile(
-                                  file.jobId,
-                                  file.relativePath,
-                                  file.fileName
-                                )
-                              }
-                              className="px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold rounded-lg transition-colors flex-shrink-0"
-                              title={`Delete ${file.fileName}`}
-                            >
-                              🗑️
-                            </button>
+                  {/* Files Categorized by Type */}
+                  <div className="mt-6 space-y-4">
+                    {/* Videos Category */}
+                    <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                      <button
+                        onClick={() => setExpandedCategories(prev => ({ ...prev, videos: !prev.videos }))}
+                        className="w-full flex items-center justify-between p-4 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 hover:from-green-100 hover:to-emerald-100 dark:hover:from-green-900/30 dark:hover:to-emerald-900/30 transition-colors"
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="text-2xl">📹</span>
+                          <div className="text-left">
+                            <h3 className="text-lg font-semibold text-gray-800 dark:text-white">
+                              Videos ({allFiles.videoCount})
+                            </h3>
+                            <p className="text-xs text-gray-600 dark:text-gray-400">
+                              {allFiles.files.filter((f: any) => f.type === "video").reduce((sum: number, f: any) => sum + f.size, 0) > 0 
+                                ? `${((allFiles.files.filter((f: any) => f.type === "video").reduce((sum: number, f: any) => sum + f.size, 0)) / 1024 / 1024).toFixed(2)} MB total`
+                                : "No videos"}
+                            </p>
                           </div>
                         </div>
-                      ))}
+                        <span className="text-gray-500 dark:text-gray-400">
+                          {expandedCategories.videos ? "▼" : "▶"}
+                        </span>
+                      </button>
+                      {expandedCategories.videos && (
+                        <div className="p-4 bg-white dark:bg-gray-800 max-h-96 overflow-y-auto space-y-2">
+                          {allFiles.files.filter((f: any) => f.type === "video").length > 0 ? (
+                            allFiles.files.filter((f: any) => f.type === "video").map((file: any, idx: number) => (
+                              <div
+                                key={idx}
+                                className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                              >
+                                <div className="flex items-center gap-3 flex-1 min-w-0">
+                                  <span className="text-xl">📹</span>
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-medium text-gray-800 dark:text-white truncate">
+                                      {file.fileName}
+                                    </p>
+                                    <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                      <span>{file.sizeFormatted}</span>
+                                      <span>•</span>
+                                      <span className="font-mono">{file.jobId.substring(0, 15)}...</span>
+                                      <span>•</span>
+                                      <span className={`px-2 py-0.5 rounded text-xs ${
+                                        file.jobStatus === "completed" ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300" :
+                                        file.jobStatus === "processing" ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300" :
+                                        file.jobStatus === "failed" ? "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300" :
+                                        "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300"
+                                      }`}>
+                                        {file.jobStatus}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="flex gap-2 ml-3">
+                                  <a
+                                    href={`/api/download-file?jobId=${encodeURIComponent(file.jobId)}&filePath=${encodeURIComponent(file.relativePath)}`}
+                                    download={file.fileName}
+                                    className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-semibold rounded-lg transition-colors flex-shrink-0 flex items-center gap-1"
+                                    title={`Download ${file.fileName}`}
+                                  >
+                                    ⬇️ Download
+                                  </a>
+                                  <button
+                                    onClick={() => {
+                                      setSelectedJobId(file.jobId);
+                                      setShowAllFiles(false);
+                                      fetchJobFiles(file.jobId);
+                                    }}
+                                    className="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white text-xs font-semibold rounded-lg transition-colors flex-shrink-0"
+                                    title="View job details"
+                                  >
+                                    View
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteFile(file.jobId, file.relativePath, file.fileName)}
+                                    className="px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold rounded-lg transition-colors flex-shrink-0"
+                                    title={`Delete ${file.fileName}`}
+                                  >
+                                    🗑️
+                                  </button>
+                                </div>
+                              </div>
+                            ))
+                          ) : (
+                            <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                              No videos found
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Thumbnails Category */}
+                    <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                      <button
+                        onClick={() => setExpandedCategories(prev => ({ ...prev, thumbnails: !prev.thumbnails }))}
+                        className="w-full flex items-center justify-between p-4 bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20 hover:from-purple-100 hover:to-pink-100 dark:hover:from-purple-900/30 dark:hover:to-pink-900/30 transition-colors"
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="text-2xl">🖼️</span>
+                          <div className="text-left">
+                            <h3 className="text-lg font-semibold text-gray-800 dark:text-white">
+                              Thumbnails ({allFiles.thumbnailCount})
+                            </h3>
+                            <p className="text-xs text-gray-600 dark:text-gray-400">
+                              {allFiles.files.filter((f: any) => f.type === "thumbnail").reduce((sum: number, f: any) => sum + f.size, 0) > 0 
+                                ? `${((allFiles.files.filter((f: any) => f.type === "thumbnail").reduce((sum: number, f: any) => sum + f.size, 0)) / 1024).toFixed(2)} KB total`
+                                : "No thumbnails"}
+                            </p>
+                          </div>
+                        </div>
+                        <span className="text-gray-500 dark:text-gray-400">
+                          {expandedCategories.thumbnails ? "▼" : "▶"}
+                        </span>
+                      </button>
+                      {expandedCategories.thumbnails && (
+                        <div className="p-4 bg-white dark:bg-gray-800 max-h-96 overflow-y-auto space-y-2">
+                          {allFiles.files.filter((f: any) => f.type === "thumbnail").length > 0 ? (
+                            allFiles.files.filter((f: any) => f.type === "thumbnail").map((file: any, idx: number) => (
+                              <div
+                                key={idx}
+                                className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                              >
+                                <div className="flex items-center gap-3 flex-1 min-w-0">
+                                  <span className="text-xl">🖼️</span>
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-medium text-gray-800 dark:text-white truncate">
+                                      {file.fileName}
+                                    </p>
+                                    <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                      <span>{file.sizeFormatted}</span>
+                                      <span>•</span>
+                                      <span className="font-mono">{file.jobId.substring(0, 15)}...</span>
+                                      <span>•</span>
+                                      <span className={`px-2 py-0.5 rounded text-xs ${
+                                        file.jobStatus === "completed" ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300" :
+                                        file.jobStatus === "processing" ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300" :
+                                        file.jobStatus === "failed" ? "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300" :
+                                        "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300"
+                                      }`}>
+                                        {file.jobStatus}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="flex gap-2 ml-3">
+                                  <a
+                                    href={`/api/download-file?jobId=${encodeURIComponent(file.jobId)}&filePath=${encodeURIComponent(file.relativePath)}`}
+                                    download={file.fileName}
+                                    className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold rounded-lg transition-colors flex-shrink-0 flex items-center gap-1"
+                                    title={`Download ${file.fileName}`}
+                                  >
+                                    ⬇️ Download
+                                  </a>
+                                  <button
+                                    onClick={() => {
+                                      setSelectedJobId(file.jobId);
+                                      setShowAllFiles(false);
+                                      fetchJobFiles(file.jobId);
+                                    }}
+                                    className="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white text-xs font-semibold rounded-lg transition-colors flex-shrink-0"
+                                    title="View job details"
+                                  >
+                                    View
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteFile(file.jobId, file.relativePath, file.fileName)}
+                                    className="px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold rounded-lg transition-colors flex-shrink-0"
+                                    title={`Delete ${file.fileName}`}
+                                  >
+                                    🗑️
+                                  </button>
+                                </div>
+                              </div>
+                            ))
+                          ) : (
+                            <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                              No thumbnails found
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* CSV Files Category */}
+                    <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                      <button
+                        onClick={() => setExpandedCategories(prev => ({ ...prev, csvs: !prev.csvs }))}
+                        className="w-full flex items-center justify-between p-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 hover:from-blue-100 hover:to-indigo-100 dark:hover:from-blue-900/30 dark:hover:to-indigo-900/30 transition-colors"
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="text-2xl">📄</span>
+                          <div className="text-left">
+                            <h3 className="text-lg font-semibold text-gray-800 dark:text-white">
+                              CSV Files ({allFiles.csvCount})
+                            </h3>
+                            <p className="text-xs text-gray-600 dark:text-gray-400">
+                              {allFiles.files.filter((f: any) => f.type === "csv").reduce((sum: number, f: any) => sum + f.size, 0) > 0 
+                                ? `${((allFiles.files.filter((f: any) => f.type === "csv").reduce((sum: number, f: any) => sum + f.size, 0)) / 1024).toFixed(2)} KB total`
+                                : "No CSV files"}
+                            </p>
+                          </div>
+                        </div>
+                        <span className="text-gray-500 dark:text-gray-400">
+                          {expandedCategories.csvs ? "▼" : "▶"}
+                        </span>
+                      </button>
+                      {expandedCategories.csvs && (
+                        <div className="p-4 bg-white dark:bg-gray-800 max-h-96 overflow-y-auto space-y-2">
+                          {allFiles.files.filter((f: any) => f.type === "csv").length > 0 ? (
+                            allFiles.files.filter((f: any) => f.type === "csv").map((file: any, idx: number) => (
+                              <div
+                                key={idx}
+                                className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                              >
+                                <div className="flex items-center gap-3 flex-1 min-w-0">
+                                  <span className="text-xl">📄</span>
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-medium text-gray-800 dark:text-white truncate">
+                                      {file.fileName}
+                                    </p>
+                                    <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                      <span>{file.sizeFormatted}</span>
+                                      <span>•</span>
+                                      <span className="font-mono">{file.jobId.substring(0, 15)}...</span>
+                                      <span>•</span>
+                                      <span className={`px-2 py-0.5 rounded text-xs ${
+                                        file.jobStatus === "completed" ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300" :
+                                        file.jobStatus === "processing" ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300" :
+                                        file.jobStatus === "failed" ? "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300" :
+                                        "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300"
+                                      }`}>
+                                        {file.jobStatus}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="flex gap-2 ml-3">
+                                  <a
+                                    href={`/api/download-file?jobId=${encodeURIComponent(file.jobId)}&filePath=${encodeURIComponent(file.relativePath)}`}
+                                    download={file.fileName}
+                                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-colors flex-shrink-0 flex items-center gap-1"
+                                    title={`Download ${file.fileName}`}
+                                  >
+                                    ⬇️ Download
+                                  </a>
+                                  <button
+                                    onClick={() => {
+                                      setSelectedJobId(file.jobId);
+                                      setShowAllFiles(false);
+                                      fetchJobFiles(file.jobId);
+                                    }}
+                                    className="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white text-xs font-semibold rounded-lg transition-colors flex-shrink-0"
+                                    title="View job details"
+                                  >
+                                    View
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteFile(file.jobId, file.relativePath, file.fileName)}
+                                    className="px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold rounded-lg transition-colors flex-shrink-0"
+                                    title={`Delete ${file.fileName}`}
+                                  >
+                                    🗑️
+                                  </button>
+                                </div>
+                              </div>
+                            ))
+                          ) : (
+                            <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                              No CSV files found
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -2136,13 +2355,23 @@ export default function Dashboard() {
                                   {video.sizeFormatted} • Uploaded {new Date(video.uploadedAt).toLocaleString()}
                                 </p>
                               </div>
-                              <button
-                                type="button"
-                                onClick={() => deleteStagingFile(video.name, "video")}
-                                className="ml-4 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition-colors"
-                              >
-                                Delete
-                              </button>
+                              <div className="flex gap-2 ml-4">
+                                <a
+                                  href={`/api/download-file?staging=true&fileName=${encodeURIComponent(video.name)}&type=video`}
+                                  download={video.name}
+                                  className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition-colors flex items-center gap-1"
+                                  title={`Download ${video.name}`}
+                                >
+                                  ⬇️ Download
+                                </a>
+                                <button
+                                  type="button"
+                                  onClick={() => deleteStagingFile(video.name, "video")}
+                                  className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition-colors"
+                                >
+                                  Delete
+                                </button>
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -2165,13 +2394,23 @@ export default function Dashboard() {
                                   {thumb.sizeFormatted} • Uploaded {new Date(thumb.uploadedAt).toLocaleString()}
                                 </p>
                               </div>
-                              <button
-                                type="button"
-                                onClick={() => deleteStagingFile(thumb.name, "thumbnail")}
-                                className="ml-4 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition-colors"
-                              >
-                                Delete
-                              </button>
+                              <div className="flex gap-2 ml-4">
+                                <a
+                                  href={`/api/download-file?staging=true&fileName=${encodeURIComponent(thumb.name)}&type=thumbnail`}
+                                  download={thumb.name}
+                                  className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold rounded-lg transition-colors flex items-center gap-1"
+                                  title={`Download ${thumb.name}`}
+                                >
+                                  ⬇️ Download
+                                </a>
+                                <button
+                                  type="button"
+                                  onClick={() => deleteStagingFile(thumb.name, "thumbnail")}
+                                  className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition-colors"
+                                >
+                                  Delete
+                                </button>
+                              </div>
                             </div>
                           ))}
                         </div>
