@@ -41,6 +41,7 @@ export default function Dashboard() {
   const [timeUntilNext, setTimeUntilNext] = useState<string>('');
   const [darkMode, setDarkMode] = useState<boolean>(false);
   const [selectedVideoFile, setSelectedVideoFile] = useState<File | null>(null);
+  const [selectedCsvFile, setSelectedCsvFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const csvFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -347,6 +348,7 @@ export default function Dashboard() {
         });
         setMessage({ type: 'success', text: `✅ Successfully uploaded ${data.totalVideos} videos! Check the queue below for progress.` });
         e.currentTarget.reset();
+        setSelectedCsvFile(null); // Reset CSV file selection
         setEnableScheduling(false);
         setVideosPerDay('');
         fetchQueue();
@@ -361,6 +363,11 @@ export default function Dashboard() {
       setMessage({ type: 'error', text: 'An error occurred while uploading files.' });
     } finally {
       setCsvUploading(false);
+      // Reset CSV file input after upload completes
+      if (csvFileInputRef.current) {
+        csvFileInputRef.current.value = '';
+        setSelectedCsvFile(null);
+      }
     }
   };
 
@@ -860,8 +867,25 @@ export default function Dashboard() {
         <form onSubmit={handleCsvUpload} className="flex flex-col gap-5">
           <label htmlFor="csvFile" className="label">Upload CSV</label>
           <div 
-            className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center cursor-pointer hover:border-red-500 transition-colors"
+            className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-all ${
+              selectedCsvFile 
+                ? 'border-green-500 bg-green-50 dark:bg-green-900/20' 
+                : 'border-gray-300 hover:border-red-500'
+            }`}
             onClick={() => csvFileInputRef.current?.click()}
+            onDrop={(e) => {
+              e.preventDefault();
+              const file = e.dataTransfer.files[0];
+              if (file && (file.name.endsWith('.csv') || file.type === 'text/csv')) {
+                setSelectedCsvFile(file);
+                if (csvFileInputRef.current) {
+                  const dataTransfer = new DataTransfer();
+                  dataTransfer.items.add(file);
+                  csvFileInputRef.current.files = dataTransfer.files;
+                }
+              }
+            }}
+            onDragOver={(e) => e.preventDefault()}
           >
             <input
               ref={csvFileInputRef}
@@ -871,10 +895,33 @@ export default function Dashboard() {
               accept=".csv"
               required
               className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  setSelectedCsvFile(file);
+                }
+              }}
             />
-            <div className="text-4xl mb-2">📄</div>
-            <p className="text-gray-600 mb-1">Click to upload or drag and drop</p>
-            <p className="text-sm text-gray-500">CSV files only</p>
+            {selectedCsvFile ? (
+              <div>
+                <div className="text-4xl mb-2">✅</div>
+                <p className="text-green-700 dark:text-green-300 font-semibold mb-1">
+                  {selectedCsvFile.name}
+                </p>
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                  {(selectedCsvFile.size / 1024).toFixed(2)} KB
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
+                  Click to change file
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="text-4xl mb-2">📄</div>
+                <p className="text-gray-600 dark:text-gray-400 mb-1">Click to upload or drag and drop</p>
+                <p className="text-sm text-gray-500 dark:text-gray-500">CSV files only</p>
+              </>
+            )}
           </div>
 
           <div className="p-4 bg-gray-50 border border-gray-300 rounded-lg">
@@ -918,10 +965,19 @@ export default function Dashboard() {
 
           <button
             type="submit"
-            disabled={csvUploading}
-            className={`btn-primary ${csvUploading ? 'opacity-50 cursor-not-allowed' : ''}`}
+            disabled={csvUploading || !selectedCsvFile}
+            className={`btn-primary ${(csvUploading || !selectedCsvFile) ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
-            {csvUploading ? 'Uploading Files...' : 'Queue Upload Job'}
+            {csvUploading ? (
+              <span className="flex items-center gap-2">
+                <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                Uploading Files...
+              </span>
+            ) : !selectedCsvFile ? (
+              'Please select a CSV file first'
+            ) : (
+              'Queue Upload Job'
+            )}
           </button>
         </form>
       </div>
