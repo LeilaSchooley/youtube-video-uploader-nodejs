@@ -8,6 +8,28 @@ import path from "path";
 export const dynamic = "force-dynamic";
 
 /**
+ * Convert Node.js ReadStream to Web ReadableStream
+ */
+function nodeStreamToWebStream(nodeStream: fs.ReadStream): ReadableStream {
+  return new ReadableStream({
+    start(controller) {
+      nodeStream.on('data', (chunk) => {
+        controller.enqueue(chunk);
+      });
+      nodeStream.on('end', () => {
+        controller.close();
+      });
+      nodeStream.on('error', (err) => {
+        controller.error(err);
+      });
+    },
+    cancel() {
+      nodeStream.destroy();
+    },
+  });
+}
+
+/**
  * Download a file from a job directory
  */
 export async function GET(request: NextRequest) {
@@ -73,8 +95,9 @@ export async function GET(request: NextRequest) {
       
       const fileStream = fs.createReadStream(normalizedPath);
       const stats = fs.statSync(normalizedPath);
+      const webStream = nodeStreamToWebStream(fileStream);
       
-      return new NextResponse(fileStream, {
+      return new NextResponse(webStream, {
         headers: {
           'Content-Type': fileType === "video" ? 'video/mp4' : 'image/jpeg',
           'Content-Disposition': `attachment; filename="${fileName}"`,
@@ -152,6 +175,7 @@ export async function GET(request: NextRequest) {
     const fileStream = fs.createReadStream(normalizedPath);
     const stats = fs.statSync(normalizedPath);
     const ext = path.extname(normalizedPath).toLowerCase();
+    const webStream = nodeStreamToWebStream(fileStream);
     
     // Determine content type
     let contentType = 'application/octet-stream';
@@ -165,7 +189,7 @@ export async function GET(request: NextRequest) {
       contentType = 'text/csv';
     }
     
-    return new NextResponse(fileStream, {
+    return new NextResponse(webStream, {
       headers: {
         'Content-Type': contentType,
         'Content-Disposition': `attachment; filename="${path.basename(normalizedPath)}"`,
