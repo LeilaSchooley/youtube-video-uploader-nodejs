@@ -29,7 +29,8 @@ interface CSVRow {
 }
 
 async function processQueueItem(item: QueueItem): Promise<void> {
-  console.log(`Processing queue item: ${item.id}`);
+  const startTime = Date.now();
+  console.log(`[WORKER] [${new Date().toISOString()}] Starting to process queue item: ${item.id}`);
   
   markAsProcessing(item.id);
 
@@ -165,14 +166,17 @@ async function processQueueItem(item: QueueItem): Promise<void> {
         // Process if scheduled for today or any day in the past
         shouldProcessNow = scheduledDay.getTime() <= today.getTime();
         
-        console.log(`Video ${i + 1}: Scheduled for ${publishDate.toLocaleDateString()}, Today: ${today.toLocaleDateString()}, Should process: ${shouldProcessNow}`);
+        console.log(`[WORKER] Video ${i + 1}: Scheduled for ${publishDate.toLocaleDateString()}, Today: ${today.toLocaleDateString()}, Should process: ${shouldProcessNow}`);
         
         // If videosPerDay is set, only process videos scheduled for today or earlier
         if (!shouldProcessNow) {
           // Keep as pending - will be processed on its scheduled day
           progress[i] = { index: i, status: `Pending - Scheduled for ${publishDate.toLocaleDateString()}` };
           updateProgress(item.id, progress);
+          console.log(`[WORKER] [${new Date().toISOString()}] Video ${i + 1}: Scheduled for future date, skipping until ${publishDate.toLocaleDateString()}`);
           continue;
+        } else {
+          console.log(`[WORKER] [${new Date().toISOString()}] Video ${i + 1}: Scheduled for today, processing immediately!`);
         }
       } else if (finalPrivacyStatus === "private" && scheduleTime) {
         publishDate = parseDate(scheduleTime);
@@ -224,25 +228,31 @@ async function processQueueItem(item: QueueItem): Promise<void> {
 
         progress[i] = { index: i, status: "Uploading..." };
         updateProgress(item.id, progress);
+        console.log(`[WORKER] [${new Date().toISOString()}] Video ${i + 1}: Starting upload to YouTube...`);
 
         const videoStream = getFileStream(path);
+        const uploadStartTime = Date.now();
         const resultVideoUpload = await youtube.videos.insert({
           part: ["snippet", "status"],
           requestBody,
           media: { body: videoStream },
         });
         const videoId = resultVideoUpload.data.id;
+        const uploadDuration = ((Date.now() - uploadStartTime) / 1000).toFixed(1);
+        console.log(`[WORKER] [${new Date().toISOString()}] Video ${i + 1}: Upload completed! Video ID: ${videoId}, Duration: ${uploadDuration}s`);
 
         // Upload thumbnail if provided
         if (thumbnail_path && videoId && fileExists(thumbnail_path)) {
           progress[i] = { index: i, status: "Uploading thumbnail..." };
           updateProgress(item.id, progress);
+          console.log(`[WORKER] [${new Date().toISOString()}] Video ${i + 1}: Uploading thumbnail...`);
           
           const thumbnailStream = getFileStream(thumbnail_path);
           await youtube.thumbnails.set({
             videoId: videoId,
             media: { body: thumbnailStream },
           });
+          console.log(`[WORKER] [${new Date().toISOString()}] Video ${i + 1}: Thumbnail uploaded successfully`);
         }
 
         // Try to update privacy status if needed
@@ -283,8 +293,14 @@ async function processQueueItem(item: QueueItem): Promise<void> {
 
         updateProgress(item.id, progress);
         videosProcessedToday++; // Increment counter after successful upload
+        console.log(`[WORKER] [${new Date().toISOString()}] Video ${i + 1}: Progress updated. Status: ${progress[i].status}`);
       } catch (error: any) {
-        console.error(`Error uploading video ${i + 1}:`, error?.message);
+        console.error(`[WORKER] [ERROR] [${new Date().toISOString()}] Error uploading video ${i + 1}:`, {
+          message: error?.message,
+          code: error?.code,
+          status: error?.status,
+          response: error?.response?.data
+        });
         progress[i] = { index: i, status: `Failed: ${error?.message || "Unknown error"}` };
         updateProgress(item.id, progress);
         // Don't increment counter for failed uploads - they can be retried
@@ -300,9 +316,11 @@ async function processQueueItem(item: QueueItem): Promise<void> {
       p.status.includes("Invalid")
     );
 
+    const totalDuration = ((Date.now() - startTime) / 1000).toFixed(1);
+    
     if (allProcessed) {
       markAsCompleted(item.id);
-      console.log(`Queue item ${item.id} completed - all ${csvData.length} videos processed`);
+      console.log(`[WORKER] [${new Date().toISOString()}] ✅ Job ${item.id} COMPLETED - All ${csvData.length} videos processed in ${totalDuration}s`);
     } else {
       // Still has pending items
       const processedCount = progress.filter(p => 
@@ -321,11 +339,11 @@ async function processQueueItem(item: QueueItem): Promise<void> {
       // If there are videos scheduled for future days, mark as pending so worker can process them later
       if (pendingCount > 0 && item.videosPerDay > 0) {
         updateQueueItem(item.id, { status: "pending" });
-        console.log(`Queue item ${item.id}: Processed ${processedCount}/${csvData.length} videos today. ${pendingCount} videos scheduled for future days.`);
+        console.log(`[WORKER] [${new Date().toISOString()}] ⏸️ Job ${item.id}: Processed ${processedCount}/${csvData.length} videos today in ${totalDuration}s. ${pendingCount} videos scheduled for future days. Job set to PENDING.`);
       } else {
         // No more videos to process, mark as completed
         markAsCompleted(item.id);
-        console.log(`Queue item ${item.id} completed: ${processedCount}/${csvData.length} videos processed`);
+        console.log(`[WORKER] [${new Date().toISOString()}] ✅ Job ${item.id} COMPLETED: ${processedCount}/${csvData.length} videos processed in ${totalDuration}s`);
       }
     }
   } catch (error: any) {
@@ -335,21 +353,31 @@ async function processQueueItem(item: QueueItem): Promise<void> {
 }
 
 async function runWorker(): Promise<void> {
-  console.log("Worker started. Checking for pending items...");
+  console.log(`[WORKER] [${new Date().toISOString()}] 🚀 Worker started. Checking for pending items every 5 seconds...`);
   
+  let checkCount = 0;
   while (true) {
     try {
+      checkCount++;
       const item = getNextPendingItem();
       
       if (item) {
+        console.log(`[WORKER] [${new Date().toISOString()}] 📦 Found pending job: ${item.id}`);
         await processQueueItem(item);
+        // After processing, check again immediately for more items
+        continue;
       } else {
         // No pending items, wait before checking again
-        await new Promise(resolve => setTimeout(resolve, 60000)); // Check every minute
+        // Log every 12th check (once per minute) to show worker is alive
+        if (checkCount % 12 === 0) {
+          console.log(`[WORKER] [${new Date().toISOString()}] ⏳ No pending items. Worker is waiting... (check #${checkCount})`);
+        }
+        await new Promise(resolve => setTimeout(resolve, 5000)); // Check every 5 seconds
       }
     } catch (error) {
-      console.error("Worker error:", error);
-      await new Promise(resolve => setTimeout(resolve, 60000));
+      console.error(`[WORKER] [ERROR] [${new Date().toISOString()}] Worker error:`, error);
+      // On error, wait a bit before retrying
+      await new Promise(resolve => setTimeout(resolve, 10000)); // Wait 10 seconds on error
     }
   }
 }

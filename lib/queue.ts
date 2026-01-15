@@ -134,5 +134,16 @@ export function markAsFailed(id: string, error: string): void {
 
 export function updateProgress(id: string, progress: Array<{ index: number; status: string }>): void {
   updateQueueItem(id, { progress });
+  // Debug logging for progress updates
+  const completed = progress.filter(p => 
+    p.status.includes("Uploaded") || 
+    p.status.includes("Scheduled") || 
+    p.status.includes("scheduled")
+  ).length;
+  const processing = progress.filter(p => 
+    p.status.includes("Uploading") || 
+    p.status === "Pending"
+  ).length;
+  console.log(`[QUEUE] [${new Date().toISOString()}] Progress updated for ${id}: ${completed} completed, ${processing} processing, ${progress.length} total`);
 }
 

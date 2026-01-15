@@ -42,8 +42,20 @@ export default function Dashboard() {
   const [darkMode, setDarkMode] = useState<boolean>(false);
   const [selectedVideoFile, setSelectedVideoFile] = useState<File | null>(null);
   const [selectedCsvFile, setSelectedCsvFile] = useState<File | null>(null);
+  const [showDebugPanel, setShowDebugPanel] = useState<boolean>(false);
+  const [debugLogs, setDebugLogs] = useState<Array<{ time: string; message: string; type: 'info' | 'success' | 'error' }>>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const csvFileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Add debug log helper
+  const addDebugLog = useCallback((message: string, type: 'info' | 'success' | 'error' = 'info') => {
+    const logEntry = {
+      time: new Date().toLocaleTimeString(),
+      message,
+      type
+    };
+    setDebugLogs(prev => [...prev.slice(-49), logEntry]); // Keep last 50 logs
+  }, []);
 
   // Calculate next scheduled upload batch time (when next batch of videos will start uploading)
   const calculateNextUploadTime = useCallback(() => {
@@ -169,10 +181,18 @@ export default function Dashboard() {
       const data = await res.json();
       if (res.ok) {
         setShowToast({ message: data.message, type: 'success' });
+        // Immediately refresh to show updated status
         fetchQueue();
         if (selectedJobId === jobId) {
           fetchJobStatus(jobId);
         }
+        // Also refresh after a short delay to catch any state changes
+        setTimeout(() => {
+          fetchQueue();
+          if (selectedJobId === jobId) {
+            fetchJobStatus(jobId);
+          }
+        }, 500);
       } else {
         setShowToast({ message: data.error || 'Failed to perform action', type: 'error' });
       }
@@ -184,13 +204,24 @@ export default function Dashboard() {
   useEffect(() => {
     fetchUser();
     fetchQueue();
-    const interval = setInterval(() => {
+    
+    // Real-time polling - check every 1 second for near-instant updates
+    const pollInterval = setInterval(() => {
       fetchQueue();
       if (selectedJobId) {
         fetchJobStatus(selectedJobId);
       }
-    }, 5000);
-    return () => clearInterval(interval);
+    }, 1000); // Check every 1 second for real-time feel
+    
+    return () => clearInterval(pollInterval);
+  }, [selectedJobId]);
+  
+  // Immediate fetch when selectedJobId changes
+  useEffect(() => {
+    if (selectedJobId) {
+      fetchJobStatus(selectedJobId);
+      fetchQueue(); // Also refresh queue
+    }
   }, [selectedJobId]);
 
   const fetchUser = async () => {
@@ -212,25 +243,61 @@ export default function Dashboard() {
 
   const fetchQueue = async () => {
     try {
-      const res = await fetch('/api/upload-queue');
+      const timestamp = Date.now();
+      // Add cache-busting to ensure fresh data
+      const res = await fetch(`/api/upload-queue?t=${timestamp}`);
       const data = await res.json();
       if (res.ok && data.queue) {
+        const prevQueueLength = queue.length;
+        const prevProcessingCount = queue.filter(j => j.status === 'processing').length;
         setQueue(data.queue);
+        
+        // Debug logging
+        const newQueueLength = data.queue.length;
+        const newProcessingCount = data.queue.filter((j: any) => j.status === 'processing').length;
+        
+        if (newQueueLength !== prevQueueLength || newProcessingCount !== prevProcessingCount) {
+          const logMsg = `Queue updated: ${prevQueueLength}→${newQueueLength} jobs, ${prevProcessingCount}→${newProcessingCount} processing`;
+          console.log(`[DEBUG] ${logMsg}`);
+          addDebugLog(logMsg, 'info');
+        }
       }
     } catch (error) {
-      console.error('Error fetching queue:', error);
+      console.error('[ERROR] Error fetching queue:', error);
     }
   };
 
   const fetchJobStatus = async (jobId: string) => {
     try {
-      const res = await fetch(`/api/queue-status?jobId=${jobId}`);
+      const timestamp = Date.now();
+      // Add cache-busting to ensure fresh data
+      const res = await fetch(`/api/queue-status?jobId=${jobId}&t=${timestamp}`);
       const data = await res.json();
       if (res.ok && data.job) {
+        const prevStatus = jobStatus?.status;
+        const prevProgressCount = jobStatus?.progress?.length || 0;
+        const prevCompletedCount = jobStatus?.progress?.filter((p: ProgressItem) => 
+          p.status.includes("Uploaded") || p.status.includes("Scheduled")
+        ).length || 0;
+        
         setJobStatus(data.job);
+        
+        // Debug logging for progress changes
+        const newProgressCount = data.job.progress?.length || 0;
+        const newCompletedCount = data.job.progress?.filter((p: ProgressItem) => 
+          p.status.includes("Uploaded") || p.status.includes("Scheduled") || p.status.includes("scheduled")
+        ).length || 0;
+        
+        if (data.job.status !== prevStatus || newProgressCount !== prevProgressCount || newCompletedCount !== prevCompletedCount) {
+          const statusChange = prevStatus !== data.job.status ? `Status: ${prevStatus}→${data.job.status}` : '';
+          const progressChange = newCompletedCount !== prevCompletedCount ? `Completed: ${prevCompletedCount}→${newCompletedCount}` : '';
+          const logMsg = `Job ${jobId.substring(0, 20)}... ${statusChange} ${progressChange}`.trim();
+          console.log(`[DEBUG] ${logMsg}`);
+          addDebugLog(logMsg, newCompletedCount > prevCompletedCount ? 'success' : 'info');
+        }
       }
     } catch (error) {
-      console.error('Error fetching job status:', error);
+      console.error('[ERROR] Error fetching job status:', error);
     }
   };
 
@@ -350,13 +417,13 @@ export default function Dashboard() {
           }
         }
         
-        message += `\n\n⚡ The worker will start processing your videos shortly.`;
+        message += `\n\n⚡ The first video will start uploading immediately! Remaining videos will be processed according to your schedule.`;
         
         setShowToast({ 
           message: message.trim(), 
           type: data.copyStats?.errors?.length > 0 ? 'info' : 'success',
         });
-        setMessage({ type: 'success', text: `✅ Successfully uploaded ${data.totalVideos} videos! Check the queue below for progress.` });
+        setMessage({ type: 'success', text: `✅ Successfully uploaded ${data.totalVideos} videos! The first video will start uploading immediately. Check the queue below for progress.` });
         // Reset form using stored reference
         if (form) {
           form.reset();
@@ -364,9 +431,22 @@ export default function Dashboard() {
         setSelectedCsvFile(null); // Reset CSV file selection
         setEnableScheduling(false);
         setVideosPerDay('');
-        fetchQueue();
+        
+        // Immediately fetch queue and job status
         setSelectedJobId(data.jobId);
+        fetchQueue();
         fetchJobStatus(data.jobId);
+        
+        // Aggressive polling for the first minute to catch immediate progress
+        let pollCount = 0;
+        const rapidPoll = setInterval(() => {
+          fetchQueue();
+          fetchJobStatus(data.jobId);
+          pollCount++;
+          if (pollCount >= 60) { // 60 * 1 second = 60 seconds
+            clearInterval(rapidPoll);
+          }
+        }, 1000); // Poll every 1 second for real-time updates
       } else {
         console.error("=== BULK UPLOAD ERROR (Client) ===");
         console.error("Error:", data.error);
@@ -483,6 +563,13 @@ export default function Dashboard() {
           </div>
           <div className="flex gap-3 flex-wrap">
             <button
+              onClick={() => setShowDebugPanel(!showDebugPanel)}
+              className="px-4 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-xl transition-all duration-200 hover:scale-105 active:scale-95 shadow-sm hover:shadow-md"
+              title="Toggle Debug Panel"
+            >
+              🐛 Debug
+            </button>
+            <button
               onClick={toggleDarkMode}
               className="px-4 py-2.5 bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 text-gray-700 dark:text-gray-300 font-medium rounded-xl transition-all duration-200 hover:scale-105 active:scale-95 shadow-sm hover:shadow-md"
               aria-label="Toggle dark mode"
@@ -512,6 +599,54 @@ export default function Dashboard() {
           onClose={() => setShowToast(null)}
           duration={showToast.type === 'info' ? 8000 : 5000}
         />
+      )}
+
+      {/* Debug Panel */}
+      {showDebugPanel && (
+        <div className="mb-6 card bg-gray-900 dark:bg-gray-950 border-2 border-purple-500">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-lg font-bold text-purple-400 flex items-center gap-2">
+              <span>🐛</span>
+              <span>Debug Logs</span>
+            </h3>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setDebugLogs([])}
+                className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-sm rounded-lg"
+              >
+                Clear
+              </button>
+              <button
+                onClick={() => setShowDebugPanel(false)}
+                className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-sm rounded-lg"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+          <div className="bg-black rounded-lg p-4 max-h-96 overflow-y-auto font-mono text-xs">
+            {debugLogs.length === 0 ? (
+              <div className="text-gray-500">No debug logs yet. Logs will appear as the system updates.</div>
+            ) : (
+              debugLogs.map((log, idx) => (
+                <div
+                  key={idx}
+                  className={`mb-1 ${
+                    log.type === 'success' ? 'text-green-400' :
+                    log.type === 'error' ? 'text-red-400' :
+                    'text-gray-300'
+                  }`}
+                >
+                  <span className="text-gray-500">[{log.time}]</span>{' '}
+                  <span>{log.message}</span>
+                </div>
+              ))
+            )}
+          </div>
+          <div className="mt-3 text-xs text-gray-400">
+            Polling: Every 1s | Queue updates logged | Job progress tracked
+          </div>
+        </div>
       )}
 
       {/* Info Message (for copying progress) */}
@@ -1060,7 +1195,9 @@ export default function Dashboard() {
                 }`}
                 onClick={() => {
                   setSelectedJobId(job.id);
+                  // Immediately fetch job status and queue when clicked
                   fetchJobStatus(job.id);
+                  fetchQueue();
                 }}
               >
                 <div className="flex justify-between items-start">
@@ -1098,6 +1235,16 @@ export default function Dashboard() {
                       <div>📅 Created: {new Date(job.createdAt).toLocaleString()}</div>
                       {job.videosPerDay > 0 && (
                         <div>📊 Schedule: {job.videosPerDay} videos/day starting {new Date(job.startDate).toLocaleDateString()}</div>
+                      )}
+                      {job.status === 'processing' && job.progress && job.progress.length > 0 && job.progress[0] && (
+                        job.progress[0].status.includes("Uploading") || job.progress[0].status === "Pending" ? (
+                          <div className="mt-2 p-2 bg-green-100 dark:bg-green-900/30 border border-green-300 dark:border-green-700 rounded-lg">
+                            <div className="flex items-center gap-2 text-green-800 dark:text-green-200 font-semibold text-sm">
+                              <span className="animate-pulse-slow">⚡</span>
+                              <span>Uploading first video now...</span>
+                            </div>
+                          </div>
+                        ) : null
                       )}
                     </div>
                     {/* Queue Management Actions */}
@@ -1241,6 +1388,19 @@ export default function Dashboard() {
                 </div>
               </div>
 
+              {/* First Video Upload Message */}
+              {progress.length > 0 && progress[0] && (progress[0].status.includes("Uploading") || progress[0].status === "Pending") && completed === 0 && (
+                <div className="mb-6 p-4 bg-gradient-to-r from-green-500 to-emerald-600 rounded-xl shadow-lg text-white animate-fade-in">
+                  <div className="flex items-center gap-3">
+                    <div className="text-3xl animate-pulse-slow">⚡</div>
+                    <div>
+                      <div className="font-bold text-lg mb-1">Uploading First Video Now!</div>
+                      <div className="text-sm opacity-90">The first video is being uploaded immediately. Progress will update in real-time.</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Video List */}
               {progress.length > 0 ? (
                 <div>
@@ -1288,9 +1448,16 @@ export default function Dashboard() {
                 </div>
               ) : (
                 <div className="text-center py-8">
-                  <div className="text-5xl mb-3">⏳</div>
+                  <div className="text-5xl mb-3 animate-pulse-slow">⏳</div>
                   <p className="text-gray-600 dark:text-gray-400 font-medium">Waiting for worker to start processing...</p>
-                  <p className="text-sm text-gray-500 dark:text-gray-500 mt-2">Progress will appear here once uploads begin</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-500 mt-2">The first video will upload immediately once processing begins</p>
+                  {jobStatus.status === 'processing' && (
+                    <div className="mt-4 p-3 bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-700 rounded-lg">
+                      <p className="text-sm text-yellow-800 dark:text-yellow-200 font-semibold">
+                        ⚡ Worker is processing - first video should start uploading shortly...
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
