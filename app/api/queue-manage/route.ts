@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { cookies } from "next/headers";
 import { pauseJob, resumeJob, cancelJob, getQueueItem } from "@/lib/queue";
-import { cleanupUploadDir } from "@/lib/storage";
+import { deleteUploadDir } from "@/lib/storage";
 
 export const dynamic = "force-dynamic";
 
