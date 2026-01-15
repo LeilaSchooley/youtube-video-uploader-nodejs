@@ -314,20 +314,22 @@ export default function Dashboard() {
       const data = await res.json();
       if (res.ok && data.success) {
         // Build detailed message with copy stats
-        let message = `Files queued! Job ID: ${data.jobId}\n`;
-        message += `📊 ${data.totalVideos} videos in queue\n`;
+        let message = `✅ Files Successfully Uploaded!\n\n`;
+        message += `📊 ${data.totalVideos} videos queued for processing\n`;
+        message += `🆔 Job ID: ${data.jobId}\n\n`;
         
         if (data.copyStats) {
-          message += `✅ ${data.copyStats.videosCopied} videos copied`;
+          message += `📁 Files Copied:\n`;
+          message += `  ✅ ${data.copyStats.videosCopied} videos`;
           if (data.copyStats.videosSkipped > 0) {
-            message += `, ⚠️ ${data.copyStats.videosSkipped} skipped`;
+            message += ` (⚠️ ${data.copyStats.videosSkipped} skipped)`;
           }
           message += `\n`;
           
           if (data.copyStats.thumbnailsCopied > 0) {
-            message += `🖼️ ${data.copyStats.thumbnailsCopied} thumbnails copied`;
+            message += `  🖼️ ${data.copyStats.thumbnailsCopied} thumbnails`;
             if (data.copyStats.thumbnailsSkipped > 0) {
-              message += `, ${data.copyStats.thumbnailsSkipped} skipped`;
+              message += ` (${data.copyStats.thumbnailsSkipped} skipped)`;
             }
             message += `\n`;
           }
@@ -337,11 +339,13 @@ export default function Dashboard() {
           }
         }
         
+        message += `\n\n⚡ The worker will start processing your videos shortly.`;
+        
         setShowToast({ 
           message: message.trim(), 
-          type: data.copyStats?.errors?.length > 0 ? 'info' : 'success' 
+          type: data.copyStats?.errors?.length > 0 ? 'info' : 'success',
         });
-        setMessage({ type: null, text: null });
+        setMessage({ type: 'success', text: `✅ Successfully uploaded ${data.totalVideos} videos! Check the queue below for progress.` });
         e.currentTarget.reset();
         setEnableScheduling(false);
         setVideosPerDay('');
@@ -471,8 +475,16 @@ export default function Dashboard() {
 
       {/* Info Message (for copying progress) */}
       {message.type === 'info' && (
-        <div className="mb-5 p-4 rounded-lg font-medium bg-blue-100 text-blue-800 border border-blue-200 flex items-center gap-3">
-          <div className="inline-block animate-spin rounded-full h-5 w-5 border-b-2 border-blue-800"></div>
+        <div className="mb-5 p-4 rounded-lg font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 border border-blue-200 dark:border-blue-700 flex items-center gap-3">
+          <div className="inline-block animate-spin rounded-full h-5 w-5 border-b-2 border-blue-800 dark:border-blue-200"></div>
+          <span>{message.text}</span>
+        </div>
+      )}
+
+      {/* Success Message (for CSV upload success) */}
+      {message.type === 'success' && (
+        <div className="mb-5 p-4 rounded-lg font-medium bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200 border border-green-200 dark:border-green-700 flex items-center gap-3">
+          <div className="text-xl">✅</div>
           <span>{message.text}</span>
         </div>
       )}
