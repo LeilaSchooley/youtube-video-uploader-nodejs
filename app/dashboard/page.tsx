@@ -45,16 +45,16 @@ export default function Dashboard() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const csvFileInputRef = useRef<HTMLInputElement>(null);
 
-  // Calculate next scheduled upload time
+  // Calculate next scheduled upload batch time (when next batch of videos will start uploading)
   const calculateNextUploadTime = useCallback(() => {
     const now = new Date();
     let earliestDate: Date | null = null;
 
     // Check all scheduled jobs
     for (const job of queue) {
-      if (job.videosPerDay > 0 && job.status !== 'failed') {
-        const startDate = new Date(job.startDate);
-        startDate.setHours(12, 0, 0, 0); // Scheduled videos publish at noon
+      if (job.videosPerDay > 0 && job.status !== 'failed' && job.status !== 'completed' && job.status !== 'cancelled') {
+        // Use job creation time as the start time for upload batches
+        const jobStartTime = new Date(job.createdAt);
         
         // Count how many videos have been completed
         const completedCount = job.progress?.filter((p: ProgressItem) => 
@@ -67,16 +67,24 @@ export default function Dashboard() {
         
         // If there are still videos to upload
         if (completedCount < totalVideos) {
-          // Calculate which day the next video should be scheduled for
-          const nextVideoIndex = completedCount;
-          const dayIndex = Math.floor(nextVideoIndex / job.videosPerDay);
-          const scheduledDate = new Date(startDate);
-          scheduledDate.setDate(startDate.getDate() + dayIndex);
+          // Calculate which batch we're on (0-indexed)
+          const currentBatch = Math.floor(completedCount / job.videosPerDay);
           
-          // Only consider future dates
-          if (scheduledDate > now) {
-            if (!earliestDate || scheduledDate < earliestDate) {
-              earliestDate = scheduledDate;
+          // Calculate when the next batch should start uploading
+          // Next batch starts 24 hours after the job was created, then every 24 hours after that
+          const nextBatchStartTime = new Date(jobStartTime);
+          nextBatchStartTime.setTime(jobStartTime.getTime() + (currentBatch + 1) * 24 * 60 * 60 * 1000);
+          
+          // Only consider future times
+          if (nextBatchStartTime > now) {
+            if (!earliestDate || nextBatchStartTime < earliestDate) {
+              earliestDate = nextBatchStartTime;
+            }
+          } else {
+            // If the next batch time is in the past, it means we should upload now
+            // Set to now + a small buffer to show "uploading now"
+            if (!earliestDate || now < earliestDate) {
+              earliestDate = new Date(now.getTime() + 1000); // 1 second from now
             }
           }
         }
@@ -464,32 +472,37 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
-      <div className="max-w-7xl mx-auto px-4 sm:px-5 py-6 sm:py-10">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-10">
         {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-10">
-        <h1 className="text-3xl sm:text-4xl font-bold text-gray-800 dark:text-white">ZonDiscounts Uploader Dashboard</h1>
-        <div className="flex gap-2 flex-wrap">
-          <button
-            onClick={toggleDarkMode}
-            className="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white font-medium rounded-full transition-colors"
-            aria-label="Toggle dark mode"
-          >
-            {darkMode ? '☀️' : '🌙'}
-          </button>
-          <a
-            href="/api/auth/logout"
-            className="btn-primary"
-          >
-            Logout
-          </a>
-          <button
-            onClick={handleDeleteAccount}
-            className="btn-secondary"
-          >
-            Delete Account
-          </button>
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-10 pb-6 border-b border-gray-200 dark:border-gray-700">
+          <div>
+            <h1 className="text-3xl sm:text-4xl font-bold bg-gradient-to-r from-red-600 to-pink-600 bg-clip-text text-transparent mb-2">
+              ZonDiscounts Uploader
+            </h1>
+            <p className="text-sm text-gray-500 dark:text-gray-400">Manage your YouTube video uploads</p>
+          </div>
+          <div className="flex gap-3 flex-wrap">
+            <button
+              onClick={toggleDarkMode}
+              className="px-4 py-2.5 bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 text-gray-700 dark:text-gray-300 font-medium rounded-xl transition-all duration-200 hover:scale-105 active:scale-95 shadow-sm hover:shadow-md"
+              aria-label="Toggle dark mode"
+            >
+              {darkMode ? '☀️ Light' : '🌙 Dark'}
+            </button>
+            <a
+              href="/api/auth/logout"
+              className="btn-primary"
+            >
+              Logout
+            </a>
+            <button
+              onClick={handleDeleteAccount}
+              className="btn-secondary bg-red-600 hover:bg-red-700"
+            >
+              Delete Account
+            </button>
+          </div>
         </div>
-      </div>
 
       {/* Toast Notification */}
       {showToast && (
@@ -519,14 +532,15 @@ export default function Dashboard() {
 
       {/* Next Upload Timer - Single Display */}
       {nextUploadTime && timeUntilNext && (
-        <div className="mb-6 p-6 bg-gradient-to-r from-blue-500 to-indigo-600 rounded-xl shadow-lg text-white">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="text-4xl">⏰</div>
+        <div className="mb-8 p-6 bg-gradient-to-r from-blue-500 via-indigo-600 to-purple-600 rounded-2xl shadow-xl text-white relative overflow-hidden animate-fade-in">
+          <div className="absolute inset-0 bg-white/10 backdrop-blur-sm"></div>
+          <div className="relative z-10 flex items-center justify-between">
+            <div className="flex items-center gap-5">
+              <div className="text-5xl animate-pulse-slow">⏰</div>
               <div>
-                <div className="text-sm opacity-90 mb-1">Next Scheduled Upload</div>
-                <div className="text-2xl font-bold">{timeUntilNext}</div>
-                <div className="text-sm opacity-80 mt-1">
+                <div className="text-sm opacity-90 mb-1 font-medium uppercase tracking-wide">Next Upload Batch</div>
+                <div className="text-3xl font-bold mb-2">{timeUntilNext}</div>
+                <div className="text-sm opacity-90 mt-1">
                   {nextUploadTime.toLocaleDateString('en-US', { 
                     weekday: 'long', 
                     year: 'numeric', 
@@ -536,10 +550,14 @@ export default function Dashboard() {
                     minute: '2-digit'
                   })}
                 </div>
+                <div className="text-xs opacity-75 mt-2 flex items-center gap-2">
+                  <span>🔄</span>
+                  <span>Uploads run every 24 hours</span>
+                </div>
               </div>
             </div>
-            <div className="text-right">
-              <div className="text-3xl animate-pulse">⏳</div>
+            <div className="text-right hidden sm:block">
+              <div className="text-5xl animate-pulse-slow opacity-80">⏳</div>
             </div>
           </div>
         </div>
@@ -581,18 +599,20 @@ export default function Dashboard() {
           
           {/* Progress Bar */}
           <div className="mb-8">
-            <div className="flex justify-between mb-2">
-              <span className="font-medium text-gray-700">Overall Progress</span>
-              <span className="font-semibold text-gray-800">{progressPercentage}%</span>
+            <div className="flex justify-between items-center mb-3">
+              <span className="font-semibold text-gray-700 dark:text-gray-300 text-sm uppercase tracking-wide">Overall Progress</span>
+              <span className="font-bold text-gray-800 dark:text-white text-lg">{progressPercentage}%</span>
             </div>
-            <div className="w-full h-8 bg-gray-200 rounded-full overflow-hidden relative">
+            <div className="w-full h-4 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden relative shadow-inner">
               <div 
-                className={`h-full rounded-full transition-all duration-300 flex items-center justify-center text-white font-semibold text-sm ${
-                  progressPercentage === 100 ? 'bg-green-500' : 'bg-gradient-to-r from-blue-600 to-blue-800'
+                className={`h-full rounded-full transition-all duration-500 ease-out flex items-center justify-center text-white font-bold text-xs shadow-lg ${
+                  progressPercentage === 100 
+                    ? 'bg-gradient-to-r from-green-500 to-emerald-600' 
+                    : 'bg-gradient-to-r from-red-600 via-red-500 to-pink-600'
                 }`}
                 style={{ width: `${progressPercentage}%` }}
               >
-                {progressPercentage > 0 && progressPercentage < 100 && `${progressPercentage}%`}
+                {progressPercentage > 15 && progressPercentage < 100 && `${progressPercentage}%`}
                 {progressPercentage === 100 && '✓ Complete'}
               </div>
             </div>
@@ -600,33 +620,45 @@ export default function Dashboard() {
 
           {/* Stats Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
-            <div className="p-5 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl text-white shadow-lg">
-              <div className="text-sm opacity-90 mb-2">Total Videos</div>
-              <div className="text-4xl font-bold">{totalVideos}</div>
+            <div className="stat-card group hover:scale-105 transition-transform duration-300">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-sm font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide">Total Videos</div>
+                <div className="text-2xl">📹</div>
+              </div>
+              <div className="text-4xl font-bold text-gray-800 dark:text-white mb-1">{totalVideos}</div>
             </div>
-            <div className="p-5 bg-gradient-to-br from-teal-500 to-green-400 rounded-xl text-white shadow-lg">
-              <div className="text-sm opacity-90 mb-2">Completed</div>
-              <div className="text-4xl font-bold">{completed}</div>
+            <div className="stat-card bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 border-green-200 dark:border-green-800 group hover:scale-105 transition-transform duration-300">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-sm font-semibold text-green-700 dark:text-green-300 uppercase tracking-wide">Completed</div>
+                <div className="text-2xl">✅</div>
+              </div>
+              <div className="text-4xl font-bold text-green-700 dark:text-green-300 mb-1">{completed}</div>
               {totalVideos > 0 && (
-                <div className="text-xs opacity-90 mt-1">
+                <div className="text-xs text-green-600 dark:text-green-400 mt-1">
                   {Math.round((completed / totalVideos) * 100)}% of total
                 </div>
               )}
             </div>
-            <div className="p-5 bg-gradient-to-br from-pink-400 to-red-500 rounded-xl text-white shadow-lg">
-              <div className="text-sm opacity-90 mb-2">Pending</div>
-              <div className="text-4xl font-bold">{pending}</div>
+            <div className="stat-card bg-gradient-to-br from-yellow-50 to-orange-50 dark:from-yellow-900/20 dark:to-orange-900/20 border-yellow-200 dark:border-yellow-800 group hover:scale-105 transition-transform duration-300">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-sm font-semibold text-yellow-700 dark:text-yellow-300 uppercase tracking-wide">Processing</div>
+                <div className="text-2xl animate-pulse-slow">⚡</div>
+              </div>
+              <div className="text-4xl font-bold text-yellow-700 dark:text-yellow-300 mb-1">{processingVideos}</div>
               {totalVideos > 0 && (
-                <div className="text-xs opacity-90 mt-1">
-                  {Math.round((pending / totalVideos) * 100)}% of total
+                <div className="text-xs text-yellow-600 dark:text-yellow-400 mt-1">
+                  {Math.round((processingVideos / totalVideos) * 100)}% of total
                 </div>
               )}
             </div>
-            <div className="p-5 bg-gradient-to-br from-pink-500 to-yellow-400 rounded-xl text-white shadow-lg">
-              <div className="text-sm opacity-90 mb-2">Failed</div>
-              <div className="text-4xl font-bold">{failed}</div>
+            <div className="stat-card bg-gradient-to-br from-red-50 to-pink-50 dark:from-red-900/20 dark:to-pink-900/20 border-red-200 dark:border-red-800 group hover:scale-105 transition-transform duration-300">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-sm font-semibold text-red-700 dark:text-red-300 uppercase tracking-wide">Failed</div>
+                <div className="text-2xl">❌</div>
+              </div>
+              <div className="text-4xl font-bold text-red-700 dark:text-red-300 mb-1">{failed}</div>
               {totalVideos > 0 && (
-                <div className="text-xs opacity-90 mt-1">
+                <div className="text-xs text-red-600 dark:text-red-400 mt-1">
                   {Math.round((failed / totalVideos) * 100)}% of total
                 </div>
               )}
@@ -686,24 +718,38 @@ export default function Dashboard() {
       )}
 
       {/* Profile Section */}
-      <div className="card">
-        <h2 className="text-2xl font-bold mb-5 text-gray-800">👤 Profile</h2>
-        <div className="flex items-center gap-5 p-4 bg-gradient-to-r from-red-50 to-pink-50 rounded-lg border border-red-100">
-          <img
-            src={user.picture}
-            alt={user.name}
-            className="w-20 h-20 rounded-full object-cover border-4 border-red-600 shadow-lg"
-          />
+      <div className="card animate-fade-in">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-2xl font-bold text-gray-800 dark:text-white flex items-center gap-2">
+            <span className="text-3xl">👤</span>
+            <span>Profile</span>
+          </h2>
+        </div>
+        <div className="flex items-center gap-5 p-6 bg-gradient-to-r from-red-50 via-pink-50 to-red-50 dark:from-red-900/20 dark:via-pink-900/20 dark:to-red-900/20 rounded-xl border-2 border-red-100 dark:border-red-800/50 shadow-md hover:shadow-lg transition-shadow">
+          <div className="relative">
+            <div className="absolute inset-0 bg-red-500/20 rounded-full blur-xl"></div>
+            <img
+              src={user.picture}
+              alt={user.name}
+              className="w-20 h-20 rounded-full object-cover border-4 border-red-600 dark:border-red-400 shadow-xl relative z-10"
+            />
+          </div>
           <div>
-            <p className="text-lg font-semibold text-gray-800">{user.name}</p>
-            <p className="text-sm text-gray-600">Google Account Connected</p>
+            <p className="text-lg font-bold text-gray-800 dark:text-white">{user.name}</p>
+            <p className="text-sm text-gray-600 dark:text-gray-400 flex items-center gap-2 mt-1">
+              <span className="text-green-500">✓</span>
+              <span>Google Account Connected</span>
+            </p>
           </div>
         </div>
       </div>
 
       {/* Single Video Upload */}
-      <div className="card">
-        <h2 className="text-2xl font-bold mb-5 text-gray-800">🎬 Single Video Upload</h2>
+      <div className="card animate-fade-in">
+        <h2 className="text-2xl font-bold mb-6 text-gray-800 dark:text-white flex items-center gap-2">
+          <span className="text-3xl">🎬</span>
+          <span>Single Video Upload</span>
+        </h2>
         <form onSubmit={handleSingleUpload} className="flex flex-col gap-5">
           <label htmlFor="title" className="label">Title</label>
           <input

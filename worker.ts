@@ -78,7 +78,7 @@ async function processQueueItem(item: QueueItem): Promise<void> {
     const scheduledDates: Date[] = [];
     if (item.videosPerDay > 0) {
       const startDate = new Date(item.startDate);
-      startDate.setHours(12, 0, 0, 0);
+      startDate.setHours(12, 0, 0, 0); // Set publish time to noon
       
       for (let i = 0; i < csvData.length; i++) {
         const dayIndex = Math.floor(i / item.videosPerDay);
@@ -86,6 +86,9 @@ async function processQueueItem(item: QueueItem): Promise<void> {
         scheduledDate.setDate(startDate.getDate() + dayIndex);
         scheduledDates.push(scheduledDate);
       }
+      
+      console.log(`Job ${item.id}: Scheduling ${csvData.length} videos with ${item.videosPerDay} videos/day starting ${startDate.toLocaleDateString()}`);
+      console.log(`First video scheduled for: ${scheduledDates[0]?.toLocaleDateString()}`);
     }
 
     // Load existing progress or initialize
@@ -98,14 +101,24 @@ async function processQueueItem(item: QueueItem): Promise<void> {
     }
 
     const now = new Date();
-    now.setHours(0, 0, 0, 0); // Start of today
+    const today = new Date(now);
+    today.setHours(0, 0, 0, 0); // Start of today (midnight)
+    
+    // Track how many videos we've processed today (for videosPerDay limit)
+    let videosProcessedToday = 0;
+    const todayProcessedLimit = item.videosPerDay > 0 ? item.videosPerDay : csvData.length;
 
-    // Process videos based on schedule - only upload videos scheduled for TODAY
+    // Process videos based on schedule - upload videos scheduled for TODAY or earlier
     for (let i = 0; i < csvData.length; i++) {
+      // If we've reached the daily limit, stop processing
+      if (item.videosPerDay > 0 && videosProcessedToday >= todayProcessedLimit) {
+        break;
+      }
       // Skip if already processed (uploaded, failed, or invalid)
       const existingStatus = progress[i]?.status || "Pending";
       if (existingStatus.includes("Uploaded") || 
           existingStatus.includes("Scheduled") ||
+          existingStatus.includes("scheduled") ||
           existingStatus.includes("Failed") ||
           existingStatus.includes("Missing") ||
           existingStatus.includes("Invalid")) {
@@ -142,17 +155,20 @@ async function processQueueItem(item: QueueItem): Promise<void> {
 
       // Determine publish date
       let publishDate: Date | null = null;
-      let scheduledForToday = false;
+      let shouldProcessNow = false;
       
       if (item.videosPerDay > 0 && scheduledDates[i]) {
         publishDate = scheduledDates[i];
-        // Check if this video is scheduled for today
+        // Check if this video is scheduled for today or earlier
         const scheduledDay = new Date(publishDate);
         scheduledDay.setHours(0, 0, 0, 0);
-        scheduledForToday = scheduledDay.getTime() === now.getTime();
+        // Process if scheduled for today or any day in the past
+        shouldProcessNow = scheduledDay.getTime() <= today.getTime();
         
-        // If videosPerDay is set, only process videos scheduled for today
-        if (!scheduledForToday) {
+        console.log(`Video ${i + 1}: Scheduled for ${publishDate.toLocaleDateString()}, Today: ${today.toLocaleDateString()}, Should process: ${shouldProcessNow}`);
+        
+        // If videosPerDay is set, only process videos scheduled for today or earlier
+        if (!shouldProcessNow) {
           // Keep as pending - will be processed on its scheduled day
           progress[i] = { index: i, status: `Pending - Scheduled for ${publishDate.toLocaleDateString()}` };
           updateProgress(item.id, progress);
@@ -160,20 +176,23 @@ async function processQueueItem(item: QueueItem): Promise<void> {
         }
       } else if (finalPrivacyStatus === "private" && scheduleTime) {
         publishDate = parseDate(scheduleTime);
-        if (!publishDate || publishDate < new Date()) {
+        if (!publishDate) {
           progress[i] = { index: i, status: "Invalid schedule time" };
           updateProgress(item.id, progress);
           continue;
         }
         const scheduledDay = new Date(publishDate);
         scheduledDay.setHours(0, 0, 0, 0);
-        scheduledForToday = scheduledDay.getTime() === now.getTime();
+        shouldProcessNow = scheduledDay.getTime() <= today.getTime();
         
-        if (!scheduledForToday) {
+        if (!shouldProcessNow) {
           progress[i] = { index: i, status: `Pending - Scheduled for ${publishDate.toLocaleDateString()}` };
           updateProgress(item.id, progress);
           continue;
         }
+      } else {
+        // No scheduling - process immediately
+        shouldProcessNow = true;
       }
 
       // Only upload videos scheduled for today (or videos without scheduling)
@@ -263,10 +282,12 @@ async function processQueueItem(item: QueueItem): Promise<void> {
         }
 
         updateProgress(item.id, progress);
+        videosProcessedToday++; // Increment counter after successful upload
       } catch (error: any) {
         console.error(`Error uploading video ${i + 1}:`, error?.message);
         progress[i] = { index: i, status: `Failed: ${error?.message || "Unknown error"}` };
         updateProgress(item.id, progress);
+        // Don't increment counter for failed uploads - they can be retried
       }
     }
 
