@@ -207,6 +207,14 @@ export async function POST(request: NextRequest) {
       console.log(`[UPLOAD-QUEUE] Indexed uploaded file: ${filename}`);
     });
 
+    // Create a map of uploaded thumbnails by filename for quick lookup
+    const uploadedThumbnailsMap = new Map<string, File>();
+    uploadedThumbnails.forEach(file => {
+      const filename = file.name.toLowerCase();
+      uploadedThumbnailsMap.set(filename, file);
+      console.log(`[UPLOAD-QUEUE] Indexed uploaded thumbnail: ${filename}`);
+    });
+
     // Helper function to extract filename from path (handles Windows and Unix paths)
     const extractFilename = (filePath: string): string => {
       if (!filePath) return '';

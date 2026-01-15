@@ -97,3 +97,4 @@ npm start
 - [ ] Add video upload progress indicator
 - [ ] Add unit tests
 - [ ] Optimize images and assets
+
