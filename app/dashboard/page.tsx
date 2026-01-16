@@ -880,169 +880,195 @@ export default function Dashboard() {
     const form = e.currentTarget;
     const formData = new FormData(form);
     
-    // Validate scheduling settings
-    // Scheduling is now handled via publishAt dates in CSV
-    formData.append("enableScheduling", "true");
+    // Add batch size (default: 5)
+    const batchSize = 5; // Can be made configurable later
+    formData.append("batchSize", batchSize.toString());
 
     try {
-      // Show copying message
-      setMessage({ type: "info", text: "Copying files to server storage..." });
+      setMessage({ type: "info", text: "Starting batch upload to YouTube..." });
       setUploadProgress({
         currentFile: 0,
         totalFiles: 0,
         currentFileName: "",
-        message: "Starting upload...",
+        message: "Connecting...",
         status: "copying",
       });
-
-      // Get session ID from cookies for progress tracking
-      const getSessionIdFromCookies = (): string | null => {
-        const cookies = document.cookie.split(";");
-        for (const cookie of cookies) {
-          const [name, value] = cookie.trim().split("=");
-          if (name === "sessionId") {
-            return decodeURIComponent(value);
-          }
-        }
-        return null;
-      };
-
-      const currentSessionId = getSessionIdFromCookies();
-
-      // Start polling for progress updates
-      const progressPollInterval = setInterval(async () => {
-        try {
-          if (!currentSessionId) return;
-          const progressRes = await fetch(
-            `/api/upload-progress?sessionId=${encodeURIComponent(
-              currentSessionId
-            )}`
-          );
-          if (progressRes.ok) {
-            const progressData = await progressRes.json();
-            setUploadProgress({
-              currentFile: progressData.currentFile || 0,
-              totalFiles: progressData.totalFiles || 0,
-              currentFileName: progressData.currentFileName || "",
-              message: progressData.message || "Processing...",
-              status: progressData.status || "copying",
-              copyStats: progressData.copyStats,
-            });
-
-            // Stop polling if completed or error
-            if (
-              progressData.status === "completed" ||
-              progressData.status === "error"
-            ) {
-              clearInterval(progressPollInterval);
-              setUploadProgressInterval(null);
-            }
-          }
-        } catch (error) {
-          console.error("Error polling upload progress:", error);
-        }
-      }, 500); // Poll every 500ms for real-time updates
-
-      setUploadProgressInterval(progressPollInterval);
 
       const res = await fetch("/api/upload-queue", {
         method: "POST",
         body: formData,
       });
 
-      // Stop polling once request completes
-      clearInterval(progressPollInterval);
-      setUploadProgressInterval(null);
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ error: "Upload failed" }));
+        throw new Error(errorData.error || "Upload failed");
+      }
 
-      const data = await res.json();
-      if (res.ok && data.success) {
-        // Build detailed message with copy stats
-        let message = `✅ Files Successfully Uploaded!\n\n`;
-        message += `📊 ${data.totalVideos} videos queued for processing\n`;
-        message += `🆔 Job ID: ${data.jobId}\n\n`;
-        
-        if (data.copyStats) {
-          message += `📁 Files Copied:\n`;
-          message += `  ✅ ${data.copyStats.videosCopied} videos`;
-          if (data.copyStats.videosSkipped > 0) {
-            message += ` (⚠️ ${data.copyStats.videosSkipped} skipped)`;
-          }
-          message += `\n`;
-          
-          if (data.copyStats.thumbnailsCopied > 0) {
-            message += `  🖼️ ${data.copyStats.thumbnailsCopied} thumbnails`;
-            if (data.copyStats.thumbnailsSkipped > 0) {
-              message += ` (${data.copyStats.thumbnailsSkipped} skipped)`;
+      if (!res.body) {
+        throw new Error("No response body");
+      }
+
+      // Read streaming response (Server-Sent Events)
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      let totalVideos = 0;
+      let totalBatches = 0;
+      let currentBatch = 0;
+      let completed = 0;
+      let failed = 0;
+      let currentVideoIndex = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(line.slice(6));
+
+              switch (data.type) {
+                case "start":
+                  totalVideos = data.total || 0;
+                  totalBatches = data.totalBatches || 0;
+                  setUploadProgress({
+                    currentFile: 0,
+                    totalFiles: totalVideos,
+                    currentFileName: "",
+                    message: `Starting upload: ${totalVideos} videos in ${totalBatches} batches`,
+                    status: "copying",
+                  });
+                  break;
+
+                case "batch_start":
+                  currentBatch = data.batchNumber || 0;
+                  setUploadProgress({
+                    currentFile: currentVideoIndex,
+                    totalFiles: totalVideos,
+                    currentFileName: `Batch ${currentBatch}/${totalBatches}`,
+                    message: `Processing batch ${currentBatch}/${totalBatches} (${data.batchSize} videos)...`,
+                    status: "copying",
+                  });
+                  break;
+
+                case "video_upload_start":
+                  currentVideoIndex = data.index + 1;
+                  setUploadProgress({
+                    currentFile: currentVideoIndex,
+                    totalFiles: totalVideos,
+                    currentFileName: data.title || `Video ${currentVideoIndex}`,
+                    message: `Uploading video ${currentVideoIndex}/${totalVideos}...`,
+                    status: "copying",
+                  });
+                  break;
+
+                case "video_upload_success":
+                  completed++;
+                  setUploadProgress({
+                    currentFile: currentVideoIndex,
+                    totalFiles: totalVideos,
+                    currentFileName: data.title || `Video ${currentVideoIndex}`,
+                    message: `✓ Video ${currentVideoIndex}/${totalVideos} uploaded (ID: ${data.videoId?.substring(0, 8)}...)`,
+                    status: "copying",
+                  });
+                  break;
+
+                case "video_upload_failed":
+                  failed++;
+                  setUploadProgress({
+                    currentFile: currentVideoIndex,
+                    totalFiles: totalVideos,
+                    currentFileName: data.title || `Video ${currentVideoIndex}`,
+                    message: `✗ Video ${currentVideoIndex}/${totalVideos} failed: ${data.error}`,
+                    status: "copying",
+                  });
+                  break;
+
+                case "batch_complete":
+                  setUploadProgress({
+                    currentFile: completed + failed,
+                    totalFiles: totalVideos,
+                    currentFileName: `Batch ${currentBatch}/${totalBatches} complete`,
+                    message: `Batch ${currentBatch}/${totalBatches}: ${data.completed} succeeded, ${data.failed} failed`,
+                    status: "copying",
+                  });
+                  break;
+
+                case "overall_progress":
+                  setUploadProgress({
+                    currentFile: data.totalCompleted + data.totalFailed,
+                    totalFiles: totalVideos,
+                    currentFileName: "",
+                    message: `Progress: ${data.totalCompleted} succeeded, ${data.totalFailed} failed (${data.progress}%)`,
+                    status: "copying",
+                  });
+                  break;
+
+                case "final":
+                  completed = data.totalCompleted || 0;
+                  failed = data.totalFailed || 0;
+                  
+                  let finalMessage = `✅ Upload Complete!\n\n`;
+                  finalMessage += `📊 ${completed} videos uploaded successfully`;
+                  if (failed > 0) {
+                    finalMessage += `\n⚠️ ${failed} videos failed`;
+                  }
+                  if (data.invalidCount > 0) {
+                    finalMessage += `\n⚠️ ${data.invalidCount} videos skipped (no matching files)`;
+                  }
+
+                  setShowToast({
+                    message: finalMessage.trim(),
+                    type: failed > 0 ? "info" : "success",
+                  });
+                  setMessage({
+                    type: failed > 0 ? "info" : "success",
+                    text: `✅ Upload complete: ${completed} succeeded${failed > 0 ? `, ${failed} failed` : ""}`,
+                  });
+                  
+                  // Reset form
+                  if (form) {
+                    form.reset();
+                  }
+                  setSelectedCsvFile(null);
+                  setSelectedVideoFiles([]);
+                  setSelectedThumbnailFiles([]);
+                  
+                  // Refresh queue
+                  fetchQueue();
+                  break;
+
+                case "error":
+                  throw new Error(data.error || "Unknown error");
+
+                case "complete":
+                  // Stream completed
+                  break;
+              }
+            } catch (parseError) {
+              console.error("Error parsing SSE data:", parseError, line);
             }
-            message += `\n`;
-          }
-          
-          if (data.copyStats.errors && data.copyStats.errors.length > 0) {
-            message += `\n⚠️ ${data.copyStats.errors.length} error(s) during copy`;
           }
         }
-        
-        message += `\n\n⚡ The first video will start uploading immediately! Remaining videos will be processed according to your schedule.`;
-        
-        setShowToast({ 
-          message: message.trim(), 
-          type: data.copyStats?.errors?.length > 0 ? "info" : "success",
-        });
-        setMessage({
-          type: "success",
-          text: `✅ Successfully uploaded ${data.totalVideos} videos! The first video will start uploading immediately. Check the queue below for progress.`,
-        });
-        // Reset form using stored reference
-        if (form) {
-          form.reset();
-        }
-            setSelectedCsvFile(null); // Reset CSV file selection
-            setSelectedVideoFiles([]); // Reset video files selection
-        setSelectedThumbnailFiles([]); // Reset thumbnail files selection
-        
-        // Immediately fetch queue and job status
-        setSelectedJobId(data.jobId);
-        fetchQueue();
-        fetchJobStatus(data.jobId);
-        
-        // Aggressive polling for the first minute to catch immediate progress
-        let pollCount = 0;
-        const rapidPoll = setInterval(() => {
-          fetchQueue();
-          fetchJobStatus(data.jobId);
-          pollCount++;
-          if (pollCount >= 60) {
-            // 60 * 1 second = 60 seconds
-            clearInterval(rapidPoll);
-          }
-        }, 1000); // Poll every 1 second for real-time updates
-      } else {
-        console.error("=== BULK UPLOAD ERROR (Client) ===");
-        console.error("Error:", data.error);
-        console.error("Details:", data.details);
-        console.error("Code:", data.code);
-        console.error("Status:", data.status);
-        console.error("Full response:", data);
-        console.error("==================================");
-        
-        const errorMsg = data.error || "Error uploading files";
-        setShowToast({ message: errorMsg, type: "error" });
-        setMessage({ type: "error", text: errorMsg });
       }
     } catch (error: any) {
-      console.error("=== BULK UPLOAD EXCEPTION (Client) ===");
+      console.error("=== BULK UPLOAD ERROR ===");
       console.error("Error:", error);
       console.error("Message:", error?.message);
       console.error("Stack:", error?.stack);
-      console.error("======================================");
+      console.error("==========================");
       
-      const errorMsg =
-        error?.message || "An error occurred while uploading files.";
+      const errorMsg = error?.message || "An error occurred while uploading files.";
       setShowToast({ message: errorMsg, type: "error" });
       setMessage({ type: "error", text: errorMsg });
     } finally {
       setCsvUploading(false);
-      // Reset CSV file input after upload completes
       if (csvFileInputRef.current) {
         csvFileInputRef.current.value = "";
         setSelectedCsvFile(null);
