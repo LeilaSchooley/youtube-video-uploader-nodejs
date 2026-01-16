@@ -39,10 +39,6 @@ export default function Dashboard() {
   const [showProgress, setShowProgress] = useState<boolean>(false);
   const [videosPerDay, setVideosPerDay] = useState<string>("");
   const [enableScheduling, setEnableScheduling] = useState<boolean>(false);
-  const [uploadInterval, setUploadInterval] = useState<string>("day"); // Default: per day
-  const [videosPerInterval, setVideosPerInterval] = useState<string>("10"); // Default: 10 videos per interval
-  const [customIntervalMinutes, setCustomIntervalMinutes] =
-    useState<string>(""); // For custom interval
   const [queue, setQueue] = useState<any[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [jobStatus, setJobStatus] = useState<any>(null);
@@ -956,57 +952,8 @@ export default function Dashboard() {
     const formData = new FormData(form);
 
     // Validate scheduling settings
-    if (!videosPerInterval) {
-      setShowToast({
-        message: "Please fill in videos per interval.",
-        type: "error",
-      });
-      setMessage({
-        type: "error",
-        text: "Please fill in videos per interval.",
-      });
-      setCsvUploading(false);
-      return;
-    }
-    if (uploadInterval === "custom" && !customIntervalMinutes) {
-      setShowToast({
-        message: "Please fill in custom interval minutes.",
-        type: "error",
-      });
-      setMessage({
-        type: "error",
-        text: "Please fill in custom interval minutes.",
-      });
-      setCsvUploading(false);
-      return;
-    }
-    
-    // Always append scheduling settings
-    formData.append("videosPerInterval", videosPerInterval);
-    formData.append("uploadInterval", uploadInterval);
-    if (uploadInterval === "custom") {
-      formData.append("customIntervalMinutes", customIntervalMinutes);
-    }
+    // Scheduling is now handled via publishAt dates in CSV
     formData.append("enableScheduling", "true");
-    // Keep videosPerDay for backward compatibility (calculate from interval)
-    const intervalMinutes =
-      uploadInterval === "day"
-        ? 1440
-        : uploadInterval === "12hours"
-        ? 720
-        : uploadInterval === "6hours"
-        ? 360
-        : uploadInterval === "hour"
-        ? 60
-        : uploadInterval === "30mins"
-        ? 30
-        : uploadInterval === "10mins"
-        ? 10
-        : parseInt(customIntervalMinutes) || 1440;
-    const videosPerDayCalc = Math.round(
-      (1440 / intervalMinutes) * parseInt(videosPerInterval)
-    );
-    formData.append("videosPerDay", videosPerDayCalc.toString()); // For backward compatibility
 
     try {
       // Show copying message
@@ -1123,9 +1070,6 @@ export default function Dashboard() {
         setSelectedCsvFile(null); // Reset CSV file selection
         setSelectedVideoFiles([]); // Reset video files selection
         setSelectedThumbnailFiles([]); // Reset thumbnail files selection
-        setUploadInterval("day");
-        setVideosPerInterval("10");
-        setCustomIntervalMinutes("");
 
         // Immediately fetch queue and job status
         setSelectedJobId(data.jobId);
@@ -2719,72 +2663,14 @@ export default function Dashboard() {
                   </h3>
                   
                   <div className="flex flex-col gap-4">
-                    <div>
-                      <label htmlFor="uploadInterval" className="label">
-                        Upload Interval
-                      </label>
-                      <select
-                        id="uploadInterval"
-                        value={uploadInterval}
-                        onChange={(e: ChangeEvent<HTMLSelectElement>) =>
-                          setUploadInterval(e.target.value)
-                        }
-                        className="input-field"
-                      >
-                        <option value="day">Per Day</option>
-                        <option value="12hours">Every 12 Hours</option>
-                        <option value="6hours">Every 6 Hours</option>
-                        <option value="hour">Per Hour</option>
-                        <option value="30mins">Every 30 Minutes</option>
-                        <option value="10mins">Every 10 Minutes</option>
-                        <option value="custom">Custom Interval</option>
-                      </select>
-                    </div>
-
-                    {uploadInterval === "custom" && (
-                      <div>
-                        <label htmlFor="customIntervalMinutes" className="label">
-                          Custom Interval (Minutes)
-                        </label>
-                        <input
-                          type="number"
-                          id="customIntervalMinutes"
-                          min="1"
-                          value={customIntervalMinutes}
-                          onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                            setCustomIntervalMinutes(e.target.value)
-                          }
-                          placeholder="e.g., 15"
-                          className="input-field"
-                        />
-                      </div>
-                    )}
-
-                    <div>
-                      <label htmlFor="videosPerInterval" className="label">
-                        Videos Per Interval
-                      </label>
-                      <input
-                        type="number"
-                        id="videosPerInterval"
-                        min="1"
-                        value={videosPerInterval}
-                        onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                          setVideosPerInterval(e.target.value)
-                        }
-                        placeholder="e.g., 10"
-                        required
-                        className="input-field"
-                      />
-                      <p className="text-xs text-gray-600 mt-1">
-                        Number of videos to upload per selected interval. Uploads will start
-                        automatically from today and continue at the specified interval.
+                    <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-lg">
+                      <p className="text-sm text-blue-900 dark:text-blue-100">
+                        <strong>📅 Scheduling:</strong> Use the <code className="bg-blue-100 dark:bg-blue-800 px-1 rounded">scheduleTime</code> column in your CSV to set publish dates. Videos will be uploaded immediately and YouTube will publish them automatically at the scheduled times.
                       </p>
                     </div>
 
                     <div className="p-3 bg-yellow-50 border border-yellow-300 rounded-lg text-sm text-yellow-800">
-                      <strong>Note:</strong> Uploads will start automatically from today. Videos are
-                      uploaded immediately but scheduled to publish on their
+                      <strong>Note:</strong> Videos are uploaded immediately but scheduled to publish on their
                       assigned dates. All videos will be uploaded as private
                       initially (required for scheduling), then updated to
                       your CSV&apos;s privacyStatus if possible.
