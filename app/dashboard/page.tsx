@@ -373,6 +373,17 @@ export default function Dashboard() {
     }
   }, []);
 
+  // Load video batch size preference from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem("videoBatchSize");
+    if (saved !== null) {
+      const batchSize = parseInt(saved, 10);
+      if (!isNaN(batchSize) && batchSize > 0 && batchSize <= 100) {
+        setVideoBatchSize(batchSize);
+      }
+    }
+  }, []);
+
   // Fetch staging files on component load if expanded by default
   useEffect(() => {
     if (user?.authenticated && showStaging) {
@@ -380,6 +391,30 @@ export default function Dashboard() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.authenticated, showStaging]);
+
+  // Real-time polling: Refresh staging files and all uploaded files automatically while uploads are active
+  useEffect(() => {
+    if (!user?.authenticated) return;
+    
+    // Only poll if uploads are active
+    if (!uploadingVideosToStaging && !uploadingThumbnailsToStaging) return;
+
+    // Poll every 2 seconds while uploads are active
+    const intervalId = setInterval(() => {
+      // Refresh staging files if staging section is visible
+      if (showStaging) {
+        fetchStagingFiles();
+      }
+      // Refresh all uploaded files if that section is visible
+      if (showAllFiles) {
+        fetchAllFiles();
+      }
+    }, 2000);
+
+    // Cleanup interval when uploads stop or component unmounts
+    return () => clearInterval(intervalId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.authenticated, showStaging, showAllFiles, uploadingVideosToStaging, uploadingThumbnailsToStaging]);
 
   // Load batch instructions preference from localStorage
   useEffect(() => {
@@ -458,7 +493,7 @@ export default function Dashboard() {
     let processedCount = 0;
 
     try {
-      // Upload files in batches of 50
+      // Upload files in batches (size depends on type: videos=configurable, thumbnails=100)
       for (let batchStart = 0; batchStart < files.length; batchStart += BATCH_SIZE) {
         const batch = files.slice(batchStart, batchStart + BATCH_SIZE);
         const batchEnd = Math.min(batchStart + BATCH_SIZE, files.length);
@@ -511,6 +546,13 @@ export default function Dashboard() {
                 currentFileName: batch[batch.length - 1]?.name || "",
               });
             }
+            
+            // Refresh staging files list in real-time after each batch
+            await fetchStagingFiles();
+            // Also refresh all uploaded files if that section is visible
+            if (showAllFiles) {
+              await fetchAllFiles();
+            }
           }
           
           // Add any errors from this batch
@@ -550,6 +592,10 @@ export default function Dashboard() {
       }
       setShowToast({ message, type: successCount > 0 ? "success" : "error" });
       await fetchStagingFiles();
+      // Also refresh all uploaded files if that section is visible
+      if (showAllFiles) {
+        await fetchAllFiles();
+      }
       
       // Clear input
       if (type === "video" && stagingVideoInputRef.current) {
