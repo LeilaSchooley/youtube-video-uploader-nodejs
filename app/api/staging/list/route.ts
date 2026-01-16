@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession, setSession } from "@/lib/session";
 import { cookies } from "next/headers";
 import { getOAuthClient } from "@/lib/auth";
 import { google } from "googleapis";
-import { listStagingFiles } from "@/lib/storage";
+import { listStagingFiles, listAllStagingFilesForEmail } from "@/lib/storage";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Get userId from session (or fetch if not stored)
+    // Get userId (email) from session (or fetch if not stored)
     let userId = session.userId;
     if (!userId) {
       const oAuthClient = getOAuthClient();
@@ -41,9 +41,18 @@ export async function GET(request: NextRequest) {
       });
       const userInfo = await oauth2.userinfo.get();
       userId = (userInfo.data.email || userInfo.data.id || undefined) as string | undefined;
+      // Update session with userId for future use
+      if (userId) {
+        session.userId = userId;
+        setSession(sessionId, session);
+      }
     }
 
-    const stagingFiles = listStagingFiles(userId, sessionId);
+    // Use the new function that scans all directories for this email
+    // This allows access to files uploaded from different channel sessions
+    const stagingFiles = userId 
+      ? listAllStagingFilesForEmail(userId)
+      : listStagingFiles(userId, sessionId);
 
     // Calculate totals
     const totalVideos = stagingFiles.videos.length;

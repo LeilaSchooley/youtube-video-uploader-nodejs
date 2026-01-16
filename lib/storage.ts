@@ -447,6 +447,65 @@ export function listStagingFiles(
 }
 
 /**
+ * List all staging files across all directories for a given email
+ * This allows access to files uploaded from different channel sessions
+ * @param email - User's email address
+ * @returns Object with videos and thumbnails from all matching directories
+ */
+export function listAllStagingFilesForEmail(
+  email: string | undefined
+): {
+  videos: Array<{
+    name: string;
+    path: string;
+    size: number;
+    uploadedAt: string;
+  }>;
+  thumbnails: Array<{
+    name: string;
+    path: string;
+    size: number;
+    uploadedAt: string;
+  }>;
+} {
+  const result: {
+    videos: Array<{
+      name: string;
+      path: string;
+      size: number;
+      uploadedAt: string;
+    }>;
+    thumbnails: Array<{
+      name: string;
+      path: string;
+      size: number;
+      uploadedAt: string;
+    }>;
+  } = {
+    videos: [],
+    thumbnails: [],
+  };
+
+  if (!email) {
+    return result;
+  }
+
+  // Sanitize email to match directory naming pattern
+  const safeEmail = email.replace(/[^a-zA-Z0-9._-]/g, "_");
+  
+  // Check the email-based directory
+  // Files should be stored here consistently across all channel sessions for the same account
+  const mainStagingDir = path.join(UPLOADS_DIR, safeEmail, "staging");
+  if (fs.existsSync(mainStagingDir)) {
+    const mainFiles = listStagingFiles(email, undefined);
+    result.videos.push(...mainFiles.videos);
+    result.thumbnails.push(...mainFiles.thumbnails);
+  }
+
+  return result;
+}
+
+/**
  * Delete a file from staging area
  * @param fileName - Name of the file to delete
  * @param userId - Google user email/ID
