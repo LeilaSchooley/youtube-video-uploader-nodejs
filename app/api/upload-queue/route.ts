@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession, setSession } from "@/lib/session";
 import { cookies } from "next/headers";
 import { addToQueue, getQueue } from "@/lib/queue";
-import { getUploadDir, saveFile, listStagingFiles, moveStagingToJob } from "@/lib/storage";
+import { getUploadDir, saveFile } from "@/lib/storage";
 import { getOAuthClient } from "@/lib/auth";
 import { google } from "googleapis";
 import { Readable } from "stream";
@@ -197,37 +197,15 @@ export async function POST(request: NextRequest) {
 
     console.log(`Parsed CSV with ${csvData.length} rows`);
 
-    // Get staged files (files uploaded individually before CSV)
-    const stagedFiles = listStagingFiles(userId, sessionId);
-    const stagedVideosMap = new Map<string, { name: string; path: string; size: number }>();
-    stagedFiles.videos.forEach(v => {
-      const filename = v.name.toLowerCase();
-      stagedVideosMap.set(filename, v);
-      console.log(`[UPLOAD-QUEUE] Indexed staged video: ${filename}`);
-    });
-    
-    const stagedThumbnailsMap = new Map<string, { name: string; path: string; size: number }>();
-    stagedFiles.thumbnails.forEach(t => {
-      const filename = t.name.toLowerCase();
-      stagedThumbnailsMap.set(filename, t);
-      console.log(`[UPLOAD-QUEUE] Indexed staged thumbnail: ${filename}`);
-    });
-
-    // Create a map of uploaded files by filename for quick lookup
-    const uploadedFilesMap = new Map<string, File>();
-    uploadedFiles.forEach(file => {
-      const filename = file.name.toLowerCase();
-      uploadedFilesMap.set(filename, file);
-      console.log(`[UPLOAD-QUEUE] Indexed uploaded file: ${filename}`);
-    });
-
-    // Create a map of uploaded thumbnails by filename for quick lookup
-    const uploadedThumbnailsMap = new Map<string, File>();
-    uploadedThumbnails.forEach(file => {
-      const filename = file.name.toLowerCase();
-      uploadedThumbnailsMap.set(filename, file);
-      console.log(`[UPLOAD-QUEUE] Indexed uploaded thumbnail: ${filename}`);
-    });
+    // Helper function to normalize filename for matching (removes special chars, spaces, etc.)
+    const normalizeFilename = (filename: string): string => {
+      if (!filename) return '';
+      return filename
+        .toLowerCase()
+        .replace(/[^a-z0-9._-]/g, '_') // Replace special chars with underscore
+        .replace(/_+/g, '_') // Collapse multiple underscores
+        .replace(/^_+|_+$/g, ''); // Remove leading/trailing underscores
+    };
 
     // Helper function to extract filename from path (handles Windows and Unix paths)
     const extractFilename = (filePath: string): string => {
@@ -238,6 +216,107 @@ export async function POST(request: NextRequest) {
       const basename = normalized.split('/').pop() || '';
       return basename.toLowerCase();
     };
+
+    // Improved matching function - tries exact match, then partial match, then normalized match
+    const findMatchingFile = (
+      csvFilename: string,
+      fileMap: Map<string, File>
+    ): File | null => {
+      const lowerCsvFilename = csvFilename.toLowerCase();
+      const normalizedCsvFilename = normalizeFilename(csvFilename);
+      
+      // Try exact match first
+      if (fileMap.has(lowerCsvFilename)) {
+        return fileMap.get(lowerCsvFilename) || null;
+      }
+      
+      // Try normalized match
+      if (fileMap.has(normalizedCsvFilename)) {
+        return fileMap.get(normalizedCsvFilename) || null;
+      }
+      
+      // Try partial match - check if CSV filename is contained in any uploaded filename
+      // or vice versa (handles cases where one has extra suffix/prefix)
+      for (const [uploadedFilename, file] of Array.from(fileMap.entries())) {
+        const normalizedUploaded = normalizeFilename(uploadedFilename);
+        
+        // Check if core parts match (remove extensions and compare)
+        const csvCore = normalizedCsvFilename.replace(/\.(mp4|mov|avi|mkv)$/i, '');
+        const uploadedCore = normalizedUploaded.replace(/\.(mp4|mov|avi|mkv)$/i, '');
+        
+        // If cores match or one contains the other (with at least 80% similarity)
+        if (csvCore === uploadedCore || 
+            (csvCore.length > 10 && uploadedCore.includes(csvCore)) ||
+            (uploadedCore.length > 10 && csvCore.includes(uploadedCore))) {
+          console.log(`[UPLOAD-QUEUE] Matched "${csvFilename}" with "${uploadedFilename}" (partial match)`);
+          return file || null;
+        }
+      }
+      
+      return null;
+    };
+
+    // Create a map of uploaded files by filename for quick lookup
+    const uploadedFilesMap = new Map<string, File>();
+    uploadedFiles.forEach(file => {
+      const filename = file.name.toLowerCase();
+      const normalized = normalizeFilename(file.name);
+      uploadedFilesMap.set(filename, file);
+      if (normalized !== filename) {
+        uploadedFilesMap.set(normalized, file);
+      }
+      console.log(`[UPLOAD-QUEUE] Indexed uploaded file: ${filename}`);
+    });
+
+    // Create a map of uploaded thumbnails by filename for quick lookup
+    const uploadedThumbnailsMap = new Map<string, File>();
+    uploadedThumbnails.forEach(file => {
+      const filename = file.name.toLowerCase();
+      const normalized = normalizeFilename(file.name);
+      uploadedThumbnailsMap.set(filename, file);
+      if (normalized !== filename) {
+        uploadedThumbnailsMap.set(normalized, file);
+      }
+      console.log(`[UPLOAD-QUEUE] Indexed uploaded thumbnail: ${filename}`);
+    });
+
+    // Check for duplicate titles in completed jobs
+    const queue = getQueue();
+    const completedJobs = queue.filter(
+      job => job.status === "completed" && 
+      (job.userId === userId || (!job.userId && job.sessionId === sessionId))
+    );
+    const existingTitles = new Set<string>();
+    completedJobs.forEach(job => {
+      // Try to read CSV from completed job to get titles
+      if (job.csvPath && fs.existsSync(job.csvPath)) {
+        try {
+          const csvContent = fs.readFileSync(job.csvPath, 'utf-8');
+          const lines = csvContent.split('\n');
+          const headerIndex = lines.findIndex(line => 
+            line.toLowerCase().includes('youtube_title') || 
+            line.toLowerCase().includes('title')
+          );
+          if (headerIndex >= 0) {
+            const titleIndex = lines[headerIndex].toLowerCase().split(',').findIndex(col => 
+              col.includes('youtube_title') || col.includes('title')
+            );
+            if (titleIndex >= 0) {
+              for (let i = headerIndex + 1; i < lines.length; i++) {
+                const cols = lines[i].split(',');
+                if (cols[titleIndex]) {
+                  const title = cols[titleIndex].trim().toLowerCase();
+                  if (title) existingTitles.add(title);
+                }
+              }
+            }
+          }
+        } catch (e) {
+          // Ignore errors reading old CSVs
+        }
+      }
+    });
+    console.log(`[UPLOAD-QUEUE] Found ${existingTitles.size} existing titles from ${completedJobs.length} completed jobs`);
 
     // Helper function to normalize paths (handle Windows paths on Linux)
     const normalizePath = (filePath: string): string => {
@@ -325,11 +404,22 @@ export async function POST(request: NextRequest) {
       const row = csvData[i];
       const updatedRow = { ...row };
 
-      // Copy video file - try staged files first, then uploaded files, then server path
+      // Check if this video title already exists in completed jobs
+      const videoTitle = (row.youtube_title || '').trim().toLowerCase();
+      if (videoTitle && existingTitles.has(videoTitle)) {
+        console.log(`[UPLOAD-QUEUE] Video ${i + 1}: Title already exists in completed job, skipping: "${row.youtube_title}"`);
+        copyStats.videosSkipped++;
+        copyStats.errors.push(`Video ${i + 1}: Already scheduled - "${row.youtube_title}"`);
+        continue;
+      }
+
+      // Copy video file - try uploaded files first, then server path
       if (row.path) {
         const csvFilename = extractFilename(row.path);
-        const stagedVideo = stagedVideosMap.get(csvFilename);
-        const uploadedFile = uploadedFilesMap.get(csvFilename);
+        const uploadedFile = findMatchingFile(csvFilename, uploadedFilesMap) ||
+                           uploadedFilesMap.get(csvFilename) || 
+                           (normalizeFilename(csvFilename) !== csvFilename ? 
+                            uploadedFilesMap.get(normalizeFilename(csvFilename)) : null);
         
         // Update progress: Starting video copy
         setUploadProgress(sessionId, {
@@ -344,35 +434,8 @@ export async function POST(request: NextRequest) {
         
         let videoCopied = false;
         
-        // First, try to use staged file if available
-        if (stagedVideo) {
-          try {
-            const moved = moveStagingToJob(userId, sessionId, jobId, stagedVideo.name);
-            if (moved.videoPath) {
-              updatedRow.path = path.join(uploadDir, moved.videoPath);
-              copyStats.videosCopied++;
-              videoCopied = true;
-              console.log(`[UPLOAD-QUEUE] ✓ Video ${i + 1} moved from staging: ${stagedVideo.name}`);
-              
-              setUploadProgress(sessionId, {
-                sessionId,
-                totalFiles: csvData.length,
-                currentFile: i + 1,
-                currentFileName: stagedVideo.name,
-                status: 'copying',
-                message: `✓ Video ${i + 1} / ${csvData.length} copied from staging`,
-                copyStats: { ...copyStats },
-              });
-            }
-          } catch (error: any) {
-            const errorMsg = `Video ${i + 1}: Failed to move staged file - ${error?.message || 'Unknown error'}`;
-            console.error(`[UPLOAD-QUEUE] [ERROR] ${errorMsg}`, error);
-            copyStats.errors.push(errorMsg);
-          }
-        }
-        
-        // Second, try to use uploaded file if available (and not already copied from staging)
-        if (!videoCopied && uploadedFile) {
+        // Try to use uploaded file if available
+        if (uploadedFile) {
           try {
             // Sanitize filename to handle special characters
             const videoFilename = uploadedFile.name
@@ -495,8 +558,10 @@ export async function POST(request: NextRequest) {
             }
           } else {
             // File not found in uploads and not on server
-            const errorMsg = `Video ${i + 1}: File not found. Expected filename: "${csvFilename}" from path "${row.path}". ${uploadedFiles.length > 0 ? `Uploaded ${uploadedFiles.length} file(s) but none matched.` : 'No files were uploaded.'}`;
+            const availableUploaded = Array.from(uploadedFilesMap.keys()).slice(0, 5); // Show first 5 for debugging
+            const errorMsg = `Video ${i + 1}: File not found. Expected filename: "${csvFilename}" from path "${row.path}". ${uploadedFiles.length > 0 ? `Uploaded ${uploadedFiles.length} file(s) but none matched. ${availableUploaded.length > 0 ? `Available uploaded files (sample): ${availableUploaded.join(', ')}` : ''}` : 'No files were uploaded.'}`;
             console.error(`[UPLOAD-QUEUE] [ERROR] ${errorMsg}`);
+            console.error(`[UPLOAD-QUEUE] Looking for: "${csvFilename}"`);
             console.error(`[UPLOAD-QUEUE] Available uploaded files:`, Array.from(uploadedFilesMap.keys()));
             copyStats.errors.push(errorMsg);
             copyStats.videosSkipped++;
@@ -530,8 +595,10 @@ export async function POST(request: NextRequest) {
       // Copy thumbnail file if it exists (optional)
       if (row.thumbnail_path) {
         const csvThumbFilename = extractFilename(row.thumbnail_path);
-        const stagedThumbnail = stagedThumbnailsMap.get(csvThumbFilename);
-        const uploadedThumbnail = uploadedThumbnailsMap.get(csvThumbFilename);
+        const uploadedThumbnail = findMatchingFile(csvThumbFilename, uploadedThumbnailsMap) ||
+                                 uploadedThumbnailsMap.get(csvThumbFilename) ||
+                                 (normalizeFilename(csvThumbFilename) !== csvThumbFilename ?
+                                  uploadedThumbnailsMap.get(normalizeFilename(csvThumbFilename)) : null);
         
         // Update progress: Starting thumbnail copy
         setUploadProgress(sessionId, {
@@ -546,34 +613,7 @@ export async function POST(request: NextRequest) {
         
         let thumbnailCopied = false;
         
-        // First, try to use staged thumbnail if available
-        if (stagedThumbnail) {
-          try {
-            const moved = moveStagingToJob(userId, sessionId, jobId, undefined, stagedThumbnail.name);
-            if (moved.thumbnailPath) {
-              updatedRow.thumbnail_path = path.join(uploadDir, moved.thumbnailPath);
-              copyStats.thumbnailsCopied++;
-              thumbnailCopied = true;
-              console.log(`[UPLOAD-QUEUE] ✓ Thumbnail ${i + 1} moved from staging: ${stagedThumbnail.name}`);
-              
-              setUploadProgress(sessionId, {
-                sessionId,
-                totalFiles: csvData.length,
-                currentFile: i + 1,
-                currentFileName: stagedThumbnail.name,
-                status: 'copying',
-                message: `✓ Thumbnail ${i + 1} / ${csvData.length} copied from staging`,
-                copyStats: { ...copyStats },
-              });
-            }
-          } catch (error: any) {
-            const errorMsg = `Thumbnail ${i + 1}: Failed to move staged thumbnail - ${error?.message || 'Unknown error'}`;
-            console.error(`[UPLOAD-QUEUE] [ERROR] ${errorMsg}`, error);
-            // Thumbnail is optional, so continue
-          }
-        }
-        
-        // Second, try to use uploaded thumbnail file if available (and not already copied from staging)
+        // Try to use uploaded thumbnail file if available
         if (!thumbnailCopied && uploadedThumbnail) {
           try {
             const thumbFilename = uploadedThumbnail.name
