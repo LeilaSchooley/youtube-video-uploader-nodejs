@@ -44,7 +44,7 @@ if (!CLIENT_ID || !CLIENT_SECRET || !REDIRECT_URL) {
 }
 
 const scopes =
-  "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/userinfo.profile";
+  "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email";
 
 export function getOAuthClient(): OAuth2Client {
   return new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, REDIRECT_URL);
