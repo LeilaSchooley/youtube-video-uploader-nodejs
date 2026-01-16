@@ -1006,8 +1006,8 @@ export default function Dashboard() {
                   if (data.invalidCount > 0) {
                     finalMessage += `\n⚠️ ${data.invalidCount} videos skipped (no matching files)`;
                   }
-
-                  setShowToast({
+        
+        setShowToast({ 
                     message: finalMessage.trim(),
                     type: failed > 0 ? "info" : "success",
                   });
@@ -1017,15 +1017,15 @@ export default function Dashboard() {
                   });
                   
                   // Reset form
-                  if (form) {
-                    form.reset();
-                  }
+        if (form) {
+          form.reset();
+        }
                   setSelectedCsvFile(null);
                   setSelectedVideoFiles([]);
                   setSelectedThumbnailFiles([]);
                   
                   // Refresh queue
-                  fetchQueue();
+        fetchQueue();
                   break;
 
                 case "error":
@@ -2143,7 +2143,7 @@ export default function Dashboard() {
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-2xl font-bold text-gray-800 dark:text-white flex items-center gap-2">
               <span className="text-3xl">📦</span>
-              <span>Batch Upload from CSV (Background Processing)</span>
+              <span>Batch Upload from CSV (Direct Streaming)</span>
             </h2>
             <button
               type="button"
@@ -2160,10 +2160,10 @@ export default function Dashboard() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex-1">
                     <p className="text-sm text-blue-900 dark:text-blue-100 font-medium">
-                      <strong>🚀 Background Processing:</strong> Upload CSV and
-                      video files. The system processes them automatically in
-                      the background. You can close your browser and check
-                      status later.
+                      <strong>🚀 Direct Streaming:</strong> Upload CSV and
+                      video files. Videos are streamed directly to YouTube in batches
+                      with real-time progress updates. Keep your browser open to see
+                      live progress.
           </p>
         </div>
                   <button
@@ -2554,7 +2554,7 @@ export default function Dashboard() {
                       </div>
                       <div className="flex-1">
                         <div className="font-bold text-blue-900 dark:text-blue-100 text-lg">
-                          Copying Files to Server
+                          Streaming to YouTube
                         </div>
                         <div className="text-sm text-blue-700 dark:text-blue-300">
                           {uploadProgress.message || "Preparing files..."}
@@ -2609,69 +2609,6 @@ export default function Dashboard() {
                       </div>
                     )}
 
-                    {/* Copy statistics */}
-                    {uploadProgress.copyStats && (
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                        <div className="bg-green-100 dark:bg-green-900/40 rounded-lg p-3 text-center">
-                          <div className="text-2xl font-bold text-green-700 dark:text-green-300">
-                            {uploadProgress.copyStats.videosCopied}
-                          </div>
-                          <div className="text-xs text-green-600 dark:text-green-400">
-                            Videos Copied
-                          </div>
-                        </div>
-                        <div className="bg-purple-100 dark:bg-purple-900/40 rounded-lg p-3 text-center">
-                          <div className="text-2xl font-bold text-purple-700 dark:text-purple-300">
-                            {uploadProgress.copyStats.thumbnailsCopied}
-                          </div>
-                          <div className="text-xs text-purple-600 dark:text-purple-400">
-                            Thumbnails
-                          </div>
-                        </div>
-                        <div className="bg-yellow-100 dark:bg-yellow-900/40 rounded-lg p-3 text-center">
-                          <div className="text-2xl font-bold text-yellow-700 dark:text-yellow-300">
-                            {uploadProgress.copyStats.videosSkipped}
-                          </div>
-                          <div className="text-xs text-yellow-600 dark:text-yellow-400">
-                            Skipped
-                          </div>
-                        </div>
-                        <div className="bg-red-100 dark:bg-red-900/40 rounded-lg p-3 text-center">
-                          <div className="text-2xl font-bold text-red-700 dark:text-red-300">
-                            {uploadProgress.copyStats.errors.length}
-                          </div>
-                          <div className="text-xs text-red-600 dark:text-red-400">
-                            Errors
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Error messages */}
-                    {uploadProgress.copyStats &&
-                      uploadProgress.copyStats.errors.length > 0 && (
-                        <div className="mt-3 p-3 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 rounded-lg">
-                          <div className="text-sm font-medium text-red-800 dark:text-red-200 mb-2">
-                            ⚠️ Errors encountered:
-                          </div>
-                          <ul className="text-xs text-red-700 dark:text-red-300 space-y-1 max-h-20 overflow-y-auto">
-                            {uploadProgress.copyStats.errors
-                              .slice(0, 5)
-                              .map((err, idx) => (
-                                <li key={idx} className="truncate">
-                                  • {err}
-                                </li>
-                              ))}
-                            {uploadProgress.copyStats.errors.length > 5 && (
-                              <li className="text-red-500">
-                                ...and{" "}
-                                {uploadProgress.copyStats.errors.length - 5}{" "}
-                                more
-                              </li>
-                            )}
-                          </ul>
-                        </div>
-                      )}
                   </div>
                 )}
 
@@ -2688,13 +2625,13 @@ export default function Dashboard() {
               <span className="flex items-center gap-2">
                 <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
                       {uploadProgress && uploadProgress.totalFiles > 0
-                        ? `Copying ${uploadProgress.currentFile}/${uploadProgress.totalFiles}...`
+                        ? `Uploading ${uploadProgress.currentFile}/${uploadProgress.totalFiles}...`
                         : "Starting upload..."}
               </span>
             ) : !selectedCsvFile ? (
                     "Please select a CSV file first"
             ) : (
-                    "Queue Upload Job"
+                    "Start Upload to YouTube"
             )}
           </button>
         </form>
@@ -2702,208 +2639,40 @@ export default function Dashboard() {
           )}
       </div>
 
-      {/* Queue Status */}
+      {/* Upload Status - Simplified */}
       <div className="card">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-            <div className="flex items-center gap-3">
-              <span className="text-3xl">📋</span>
-              <h2 className="text-2xl font-bold text-gray-800 dark:text-white">
-                Upload Queue Status
-              </h2>
-            </div>
-            <div className="flex gap-3 items-center w-full sm:w-auto flex-wrap">
-              {queue.length > 0 && (
-                <>
-                  <button
-                    onClick={async () => {
-                      try {
-                        const res = await fetch(
-                          "/api/export-stats?format=json"
-                        );
-                        const blob = await res.blob();
-                        const url = window.URL.createObjectURL(blob);
-                        const a = document.createElement("a");
-                        a.href = url;
-                        a.download = `youtube-stats-${
-                          new Date().toISOString().split("T")[0]
-                        }.json`;
-                        document.body.appendChild(a);
-                        a.click();
-                        document.body.removeChild(a);
-                        window.URL.revokeObjectURL(url);
-                        setShowToast({
-                          message: "Statistics exported!",
-                          type: "success",
-                        });
-                      } catch (error) {
-                        setShowToast({
-                          message: "Failed to export statistics",
-                          type: "error",
-                        });
-                      }
-                    }}
-                    className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition-colors whitespace-nowrap"
-                    title="Export statistics as JSON"
-                  >
-                    📊 Export JSON
-                  </button>
-                  <button
-                    onClick={async () => {
-                      try {
-                        const res = await fetch("/api/export-stats?format=csv");
-                        const blob = await res.blob();
-                        const url = window.URL.createObjectURL(blob);
-                        const a = document.createElement("a");
-                        a.href = url;
-                        a.download = `youtube-stats-${
-                          new Date().toISOString().split("T")[0]
-                        }.csv`;
-                        document.body.appendChild(a);
-                        a.click();
-                        document.body.removeChild(a);
-                        window.URL.revokeObjectURL(url);
-                        setShowToast({
-                          message: "Statistics exported!",
-                          type: "success",
-                        });
-                      } catch (error) {
-                        setShowToast({
-                          message: "Failed to export statistics",
-                          type: "error",
-                        });
-                      }
-                    }}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-colors whitespace-nowrap"
-                    title="Export statistics as CSV"
-                  >
-                    📊 Export CSV
-                  </button>
-                </>
-              )}
-            {queue.length > 0 && (
-              <>
-                <input
-                  type="text"
-                  placeholder="Search jobs..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="input-field flex-1 sm:max-w-xs"
-                />
-                  {queue.filter(
-                    (job) =>
-                      job.status === "completed" ||
-                      job.status === "failed" ||
-                      job.status === "cancelled"
-                  ).length > 0 && (
-                  <button
-                    onClick={async () => {
-                        const completedCount = queue.filter(
-                          (job) =>
-                            job.status === "completed" ||
-                            job.status === "failed" ||
-                            job.status === "cancelled"
-                      ).length;
-                        if (
-                          confirm(
-                            `Are you sure you want to delete all ${completedCount} completed/failed/cancelled job(s)? This action cannot be undone.`
-                          )
-                        ) {
-                          try {
-                            const res = await fetch("/api/queue-manage", {
-                              method: "POST",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({ action: "delete-all" }),
-                          });
-                          const data = await res.json();
-                          if (res.ok) {
-                              setShowToast({
-                                message: data.message,
-                                type: "success",
-                              });
-                            setSelectedJobId(null);
-                            setJobStatus(null);
-                            fetchQueue();
-                          } else {
-                              setShowToast({
-                                message: data.error || "Failed to delete jobs",
-                                type: "error",
-                              });
-                          }
-                        } catch (error) {
-                            setShowToast({
-                              message: "An error occurred",
-                              type: "error",
-                            });
-                        }
-                      }
-                    }}
-                    className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition-colors whitespace-nowrap"
-                    title="Delete all completed/failed/cancelled jobs"
-                  >
-                    🗑️ Delete All Completed
-                  </button>
-                )}
-              </>
-            )}
+          <div className="flex items-center gap-3 mb-6">
+            <span className="text-3xl">📊</span>
+            <h2 className="text-2xl font-bold text-gray-800 dark:text-white">
+              Upload Status
+            </h2>
+        </div>
+        
+          <div className="text-center py-12">
+          <div className="text-6xl mb-4">🚀</div>
+          <p className="text-gray-600 text-lg dark:text-gray-300">Direct Streaming Upload</p>
+          <p className="text-gray-500 dark:text-gray-400 text-sm mt-2">
+            Upload a CSV file with videos to get started. Videos stream directly to YouTube in batches with real-time progress updates shown above.
+          </p>
+          <div className="mt-6 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-lg max-w-2xl mx-auto">
+            <p className="text-sm text-blue-900 dark:text-blue-100">
+              <strong>💡 How it works:</strong> Upload your CSV and video files together. The system matches files by filename and streams them directly to YouTube in batches. Progress updates appear in real-time during upload.
+            </p>
           </div>
         </div>
         
-        {queue.length === 0 ? (
-          <div className="text-center py-12">
-            <div className="text-6xl mb-4">📭</div>
-              <p className="text-gray-600 text-lg dark:text-gray-300">No upload jobs in queue.</p>
-              <p className="text-gray-500 dark:text-gray-400 text-sm mt-2">
-                Upload a CSV file to get started!
-              </p>
-          </div>
-        ) : (
-            <div className="space-y-6">
-              {/* Quick Stats Summary */}
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 p-4 bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-xl border border-blue-200 dark:border-blue-700">
-                <div className="text-center">
-                  <div className="text-2xl font-bold text-blue-700 dark:text-blue-300">
-                    {queue.length}
-                  </div>
-                  <div className="text-xs text-blue-600 dark:text-blue-400 mt-1">
-                    Total Jobs
-                  </div>
-                </div>
-                <div className="text-center">
-                  <div className="text-2xl font-bold text-yellow-700 dark:text-yellow-300">
-                    {pendingJobs}
-                  </div>
-                  <div className="text-xs text-yellow-600 dark:text-yellow-400 mt-1">
-                    Pending
-                  </div>
-                </div>
-                <div className="text-center">
-                  <div className="text-2xl font-bold text-orange-700 dark:text-orange-300">
-                    {processing}
-                  </div>
-                  <div className="text-xs text-orange-600 dark:text-orange-400 mt-1">
-                    Processing
-                  </div>
-                </div>
-                <div className="text-center">
-                  <div className="text-2xl font-bold text-green-700 dark:text-green-300">
-                    {completedJobs}
-                  </div>
-                  <div className="text-xs text-green-600 dark:text-green-400 mt-1">
-                    Completed
-                  </div>
-                </div>
-                <div className="text-center">
-                  <div className="text-2xl font-bold text-red-700 dark:text-red-300">
-                    {failedJobs}
-                  </div>
-                  <div className="text-xs text-red-600 dark:text-red-400 mt-1">
-                    Failed
-                  </div>
-                </div>
+        {/* Historical jobs (if any) - simplified view */}
+        {queue.length > 0 && (
+            <div className="space-y-4 mt-6">
+              <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-700">
+                <p className="text-sm text-blue-900 dark:text-blue-100">
+                  <strong>ℹ️ Note:</strong> {queue.length} previous upload job{queue.length !== 1 ? 's' : ''} found in history. 
+                  New uploads stream directly to YouTube with real-time progress shown above.
+                </p>
               </div>
 
-              {/* Jobs List */}
-          <div className="flex flex-col gap-4">
+              {/* Simplified Jobs List */}
+          <div className="flex flex-col gap-3">
             {queue
                 .filter(
                   (job) =>
@@ -2911,6 +2680,7 @@ export default function Dashboard() {
                 job.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
                 job.status.toLowerCase().includes(searchQuery.toLowerCase())
               )
+                .slice(0, 10) // Show only first 10 jobs
                 .map((job) => {
                   // Calculate job progress
                   const jobProgress = job.progress || [];
@@ -3027,7 +2797,7 @@ export default function Dashboard() {
                       )}
                     </div>
                             )}
-                          </div>
+                              </div>
                         )}
                         
                         <div className="flex items-center gap-2 mb-2">
@@ -3036,7 +2806,7 @@ export default function Dashboard() {
                               📹 {job.totalVideos} video{job.totalVideos !== 1 ? "s" : ""}
                             </span>
                           )}
-                        </div>
+                            </div>
                         <div className="text-sm text-gray-600 dark:text-gray-400 space-y-1.5">
                           <div className="flex items-center gap-2">
                             <span>📅</span>
