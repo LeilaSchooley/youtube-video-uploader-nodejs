@@ -452,30 +452,37 @@ export default function Dashboard() {
     const uploadedFiles: Array<{ fileName: string; size: number; sizeFormatted: string }> = [];
     const errors: Array<{ fileName: string; error: string }> = [];
 
-    // Upload files one by one for real-time progress updates
-    // This gives better progress feedback even if slightly slower
+    // Batch size: upload 50 files per request for good balance of speed and progress updates
+    const BATCH_SIZE = 50;
+    let processedCount = 0;
+
     try {
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
+      // Upload files in batches of 50
+      for (let batchStart = 0; batchStart < files.length; batchStart += BATCH_SIZE) {
+        const batch = files.slice(batchStart, batchStart + BATCH_SIZE);
+        const batchEnd = Math.min(batchStart + BATCH_SIZE, files.length);
         
-        // Update progress before uploading each file
+        // Update progress before starting batch
         if (type === "video") {
           setStagingVideoProgress({
-            currentFile: i + 1,
+            currentFile: batchStart + 1,
             totalFiles: files.length,
-            currentFileName: file.name,
+            currentFileName: batch[0]?.name || "",
           });
         } else {
           setStagingThumbnailProgress({
-            currentFile: i + 1,
+            currentFile: batchStart + 1,
             totalFiles: files.length,
-            currentFileName: file.name,
+            currentFileName: batch[0]?.name || "",
           });
         }
 
         try {
           const formData = new FormData();
-          formData.append("file", file);
+          // Append all files in this batch
+          batch.forEach((file) => {
+            formData.append("files", file);
+          });
           formData.append("type", type);
 
           const response = await fetch("/api/staging/upload", {
@@ -484,19 +491,52 @@ export default function Dashboard() {
           });
 
           const data = await response.json();
-          if (data.success && data.file) {
-            uploadedFiles.push(data.file);
-          } else {
-            errors.push({
-              fileName: file.name,
-              error: data.error || "Upload failed",
+          if (data.success && data.files) {
+            // Add all successfully uploaded files
+            uploadedFiles.push(...data.files);
+            processedCount += data.files.length;
+            
+            // Update progress after batch completes
+            if (type === "video") {
+              setStagingVideoProgress({
+                currentFile: batchEnd,
+                totalFiles: files.length,
+                currentFileName: batch[batch.length - 1]?.name || "",
+              });
+            } else {
+              setStagingThumbnailProgress({
+                currentFile: batchEnd,
+                totalFiles: files.length,
+                currentFileName: batch[batch.length - 1]?.name || "",
+              });
+            }
+          }
+          
+          // Add any errors from this batch
+          if (data.errors && data.errors.length > 0) {
+            errors.push(...data.errors);
+            processedCount += data.errors.length;
+          }
+          
+          // If batch failed completely
+          if (!data.success && !data.files) {
+            batch.forEach((file) => {
+              errors.push({
+                fileName: file.name,
+                error: data.error || "Upload failed",
+              });
             });
+            processedCount += batch.length;
           }
         } catch (error: any) {
-          errors.push({
-            fileName: file.name,
-            error: error.message || "Upload failed",
+          // If batch request fails, add all files in batch to errors
+          batch.forEach((file) => {
+            errors.push({
+              fileName: file.name,
+              error: error.message || "Upload failed",
+            });
           });
+          processedCount += batch.length;
         }
       }
 
