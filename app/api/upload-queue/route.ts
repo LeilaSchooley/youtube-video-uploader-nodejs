@@ -6,6 +6,8 @@ import { google } from "googleapis";
 import { Readable } from "stream";
 import csvParser from "csv-parser";
 import { parseDate } from "@/lib/utils";
+import fs from "fs";
+import path from "path";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 1800; // 30 minutes for large batches
@@ -14,8 +16,10 @@ export const runtime = 'nodejs';
 interface CSVRow {
   youtube_title?: string;
   youtube_description?: string;
-  thumbnail_path?: string;
-  path?: string;
+  video_name?: string;  // Primary: explicit video filename for matching
+  thumbnail_name?: string;  // Primary: explicit thumbnail filename for matching
+  thumbnail_path?: string;  // Fallback: extract filename from path
+  path?: string;  // Fallback: extract filename from path
   scheduleTime?: string;
   privacyStatus?: string;
 }
@@ -363,37 +367,155 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Get uploaded video files
+  // Get files from server file system (from "All Uploaded Files" section)
+  const uploadsDir = path.join(process.cwd(), "uploads");
+  const safeUserId = userId ? userId.replace(/[^a-zA-Z0-9._-]/g, '_') : null;
+  
+  // Scan for uploaded files on server
   const uploadedFiles: File[] = [];
-  const filesArray = formData.getAll("files") as (File | string)[];
-  for (const file of filesArray) {
-    if (file instanceof File && file.type.startsWith('video/')) {
-      uploadedFiles.push(file);
-    }
-  }
-  const videoFilesArray = formData.getAll("videoFiles") as (File | string)[];
-  for (const file of videoFilesArray) {
-    if (file instanceof File && file.type.startsWith('video/')) {
-      uploadedFiles.push(file);
-    }
-  }
-
-  // Get uploaded thumbnail files
   const uploadedThumbnails: File[] = [];
-  const thumbnailsArray = formData.getAll("thumbnails") as (File | string)[];
-  for (const file of thumbnailsArray) {
-    if (file instanceof File && (file.type.startsWith('image/') || file.name.match(/\.(jpg|jpeg|png|gif|webp)$/i))) {
-      uploadedThumbnails.push(file);
+  
+  // Helper to scan directory for files
+  const scanForFiles = (dir: string, type: 'video' | 'thumbnail'): Array<{ name: string; path: string }> => {
+    const results: Array<{ name: string; path: string }> = [];
+    if (!fs.existsSync(dir)) return results;
+    
+    try {
+      const items = fs.readdirSync(dir);
+      for (const item of items) {
+        const fullPath = path.join(dir, item);
+        try {
+          const stats = fs.statSync(fullPath);
+          if (stats.isFile()) {
+            if (type === 'video' && /\.(mp4|mov|avi|mkv|webm)$/i.test(item)) {
+              results.push({ name: item, path: fullPath });
+            } else if (type === 'thumbnail' && /\.(jpg|jpeg|png|gif|webp)$/i.test(item)) {
+              results.push({ name: item, path: fullPath });
+            }
+          } else if (stats.isDirectory()) {
+            // Recursively scan subdirectories
+            results.push(...scanForFiles(fullPath, type));
+          }
+        } catch (error) {
+          // Skip files that can't be accessed
+        }
+      }
+    } catch (error) {
+      // Skip directories that can't be read
     }
+    return results;
+  };
+  
+  // Scan user's upload directories
+  const dirsToScan: string[] = [];
+  if (safeUserId) {
+    dirsToScan.push(path.join(uploadsDir, safeUserId));
   }
-  const thumbnailFilesArray = formData.getAll("thumbnailFiles") as (File | string)[];
-  for (const file of thumbnailFilesArray) {
-    if (file instanceof File && (file.type.startsWith('image/') || file.name.match(/\.(jpg|jpeg|png|gif|webp)$/i))) {
-      uploadedThumbnails.push(file);
+  dirsToScan.push(path.join(uploadsDir, sessionId));
+  
+  for (const scanDir of dirsToScan) {
+    if (!fs.existsSync(scanDir)) continue;
+    
+    try {
+      const items = fs.readdirSync(scanDir);
+      for (const itemName of items) {
+        const itemPath = path.join(scanDir, itemName);
+        const stats = fs.statSync(itemPath);
+        if (!stats.isDirectory()) continue;
+        
+        // Check if this is an assets directory (from ZIP upload)
+        if (itemName === 'assets') {
+          const videosDir = path.join(itemPath, 'videos');
+          const thumbnailsDir = path.join(itemPath, 'thumbnails');
+          
+          const videoFiles = scanForFiles(videosDir, 'video');
+          const thumbnailFiles = scanForFiles(thumbnailsDir, 'thumbnail');
+          
+          // Convert server files to File objects
+          for (const fileInfo of videoFiles) {
+            try {
+              const mimeType = fileInfo.name.match(/\.(mp4)$/i) ? 'video/mp4' : 
+                             fileInfo.name.match(/\.(mov)$/i) ? 'video/quicktime' :
+                             fileInfo.name.match(/\.(avi)$/i) ? 'video/x-msvideo' :
+                             fileInfo.name.match(/\.(mkv)$/i) ? 'video/x-matroska' :
+                             fileInfo.name.match(/\.(webm)$/i) ? 'video/webm' :
+                             'video/mp4';
+              
+              const fileBuffer = fs.readFileSync(fileInfo.path);
+              const fileBlob = new Blob([fileBuffer], { type: mimeType });
+              const file = new File([fileBlob], fileInfo.name, { type: mimeType });
+              uploadedFiles.push(file);
+            } catch (error) {
+              // Skip files that can't be read
+            }
+          }
+          
+          for (const fileInfo of thumbnailFiles) {
+            try {
+              const mimeType = fileInfo.name.match(/\.(jpg|jpeg)$/i) ? 'image/jpeg' :
+                             fileInfo.name.match(/\.(png)$/i) ? 'image/png' :
+                             fileInfo.name.match(/\.(gif)$/i) ? 'image/gif' :
+                             fileInfo.name.match(/\.(webp)$/i) ? 'image/webp' :
+                             'image/jpeg';
+              
+              const fileBuffer = fs.readFileSync(fileInfo.path);
+              const fileBlob = new Blob([fileBuffer], { type: mimeType });
+              const file = new File([fileBlob], fileInfo.name, { type: mimeType });
+              uploadedThumbnails.push(file);
+            } catch (error) {
+              // Skip files that can't be read
+            }
+          }
+          continue; // Skip to next item
+        }
+        
+        // Otherwise, treat as job directory (legacy structure)
+        const videosDir = path.join(itemPath, 'videos');
+        const thumbnailsDir = path.join(itemPath, 'thumbnails');
+        
+        const videoFiles = scanForFiles(videosDir, 'video');
+        const thumbnailFiles = scanForFiles(thumbnailsDir, 'thumbnail');
+        
+        // Convert server files to File objects
+        for (const fileInfo of videoFiles) {
+          try {
+            const mimeType = fileInfo.name.match(/\.(mp4)$/i) ? 'video/mp4' : 
+                           fileInfo.name.match(/\.(mov)$/i) ? 'video/quicktime' :
+                           fileInfo.name.match(/\.(avi)$/i) ? 'video/x-msvideo' :
+                           fileInfo.name.match(/\.(mkv)$/i) ? 'video/x-matroska' :
+                           fileInfo.name.match(/\.(webm)$/i) ? 'video/webm' : 'video/mp4';
+            
+            const fileBuffer = fs.readFileSync(fileInfo.path);
+            const fileBlob = new Blob([fileBuffer], { type: mimeType });
+            const file = new File([fileBlob], fileInfo.name, { type: mimeType });
+            uploadedFiles.push(file);
+          } catch (error) {
+            console.error(`[UPLOAD-QUEUE] Failed to read video file ${fileInfo.path}:`, error);
+          }
+        }
+        
+        for (const fileInfo of thumbnailFiles) {
+          try {
+            const mimeType = fileInfo.name.match(/\.(jpg|jpeg)$/i) ? 'image/jpeg' : 
+                           fileInfo.name.match(/\.png$/i) ? 'image/png' : 
+                           fileInfo.name.match(/\.gif$/i) ? 'image/gif' : 
+                           fileInfo.name.match(/\.webp$/i) ? 'image/webp' : 'image/jpeg';
+            
+            const fileBuffer = fs.readFileSync(fileInfo.path);
+            const fileBlob = new Blob([fileBuffer], { type: mimeType });
+            const file = new File([fileBlob], fileInfo.name, { type: mimeType });
+            uploadedThumbnails.push(file);
+          } catch (error) {
+            console.error(`[UPLOAD-QUEUE] Failed to read thumbnail file ${fileInfo.path}:`, error);
+          }
+        }
+      }
+    } catch (error) {
+      console.error(`[UPLOAD-QUEUE] Error scanning directory ${scanDir}:`, error);
     }
   }
 
-  console.log(`[UPLOAD-QUEUE] Received CSV + ${uploadedFiles.length} video(s) + ${uploadedThumbnails.length} thumbnail(s), batch size: ${batchSize}`);
+  console.log(`[UPLOAD-QUEUE] Found ${uploadedFiles.length} video(s) and ${uploadedThumbnails.length} thumbnail(s) on server, batch size: ${batchSize}`);
 
   // Parse CSV
   const csvData: CSVRow[] = [];
@@ -430,6 +552,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Helper to create File object from server file path
   // Helper functions for filename matching
   const normalizeFilename = (filename: string): string => {
     if (!filename) return '';
@@ -509,8 +632,15 @@ export async function POST(request: NextRequest) {
   const tasks: VideoUploadTask[] = [];
   for (let i = 0; i < csvData.length; i++) {
     const row = csvData[i];
-    const csvVideoFilename = row.path ? extractFilename(row.path) : '';
-    const csvThumbFilename = row.thumbnail_path ? extractFilename(row.thumbnail_path) : '';
+    // Use video_name column first, fallback to extracting from path
+    const csvVideoFilename = row.video_name 
+      ? row.video_name.toLowerCase().trim()
+      : (row.path ? extractFilename(row.path) : '');
+    
+    // Use thumbnail_name column first, fallback to extracting from thumbnail_path
+    const csvThumbFilename = row.thumbnail_name
+      ? row.thumbnail_name.toLowerCase().trim()
+      : (row.thumbnail_path ? extractFilename(row.thumbnail_path) : '');
     
     const videoFile = csvVideoFilename ? findMatchingFile(csvVideoFilename, uploadedFilesMap) : null;
     const thumbnailFile = csvThumbFilename ? findMatchingFile(csvThumbFilename, uploadedThumbnailsMap) : null;

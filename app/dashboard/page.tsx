@@ -81,6 +81,15 @@ export default function Dashboard() {
   const [uploadProgressInterval, setUploadProgressInterval] =
     useState<NodeJS.Timeout | null>(null);
   const [csvValidationErrors, setCsvValidationErrors] = useState<string[]>([]);
+  const [zipUploading, setZipUploading] = useState<boolean>(false);
+  const [zipUploadProgress, setZipUploadProgress] = useState<{
+    progress: number;
+    message: string;
+    totalFiles?: number;
+    extractedCount?: number;
+    videoCount?: number;
+    thumbnailCount?: number;
+  } | null>(null);
   const [jobFiles, setJobFiles] = useState<any>(null);
   const [loadingFiles, setLoadingFiles] = useState<boolean>(false);
   const [allFiles, setAllFiles] = useState<any>(null);
@@ -1048,6 +1057,126 @@ export default function Dashboard() {
       if (csvFileInputRef.current) {
         csvFileInputRef.current.value = "";
         setSelectedCsvFile(null);
+      }
+    }
+  };
+
+  const handleZipUpload = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setZipUploading(true);
+    setZipUploadProgress({ progress: 0, message: "Starting upload..." });
+
+    const form = e.currentTarget;
+    const formData = new FormData(form);
+    const zipFile = formData.get("zipFile") as File | null;
+
+    if (!zipFile) {
+      setShowToast({ message: "Please select a ZIP file", type: "error" });
+      setZipUploading(false);
+      return;
+    }
+
+    try {
+      const uploadFormData = new FormData();
+      uploadFormData.append("zipFile", zipFile);
+
+      const res = await fetch("/api/upload-zip", {
+        method: "POST",
+        body: uploadFormData,
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ error: "Upload failed" }));
+        throw new Error(errorData.error || "Upload failed");
+      }
+
+      if (!res.body) {
+        throw new Error("No response body");
+      }
+
+      // Read streaming response (Server-Sent Events)
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(line.slice(6));
+
+              switch (data.type) {
+                case "start":
+                  setZipUploadProgress({
+                    progress: 0,
+                    message: data.message || "Starting...",
+                  });
+                  break;
+
+                case "progress":
+                  setZipUploadProgress({
+                    progress: data.progress || 0,
+                    message: data.message || "Processing...",
+                  });
+                  break;
+
+                case "extracting":
+                  setZipUploadProgress({
+                    progress: data.progress || 0,
+                    message: data.message || "Extracting...",
+                    totalFiles: data.totalFiles,
+                    extractedCount: data.extractedCount,
+                    videoCount: data.videoCount,
+                    thumbnailCount: data.thumbnailCount,
+                  });
+                  break;
+
+                case "success":
+                  setZipUploadProgress({
+                    progress: 100,
+                    message: data.message || "Complete!",
+                    totalFiles: data.totalFiles,
+                    videoCount: data.videoCount,
+                    thumbnailCount: data.thumbnailCount,
+                  });
+                  setShowToast({
+                    message: `✅ ${data.message || "ZIP extracted successfully!"}`,
+                    type: "success",
+                  });
+                  // Refresh all files list
+                  fetchAllFiles();
+                  break;
+
+                case "error":
+                  throw new Error(data.error || "Unknown error");
+
+                case "complete":
+                  break;
+              }
+            } catch (parseError) {
+              console.error("Error parsing SSE data:", parseError, line);
+            }
+          }
+        }
+      }
+    } catch (error: any) {
+      console.error("ZIP upload error:", error);
+      setShowToast({
+        message: error?.message || "Failed to upload ZIP file",
+        type: "error",
+      });
+      setZipUploadProgress(null);
+    } finally {
+      setZipUploading(false);
+      if (form) {
+        form.reset();
       }
     }
   };
@@ -2130,12 +2259,109 @@ export default function Dashboard() {
           )}
       </div>
 
-      {/* Batch Upload */}
+      {/* ZIP Asset Upload */}
       <div className="card">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-2xl font-bold text-gray-800 dark:text-white flex items-center gap-2">
               <span className="text-3xl">📦</span>
-              <span>Batch Upload from CSV (Direct Streaming)</span>
+              <span>Upload Assets (ZIP)</span>
+            </h2>
+          </div>
+          
+          <div className="mb-4 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-lg">
+            <p className="text-sm text-blue-900 dark:text-blue-100">
+              <strong>💡 Quick Upload:</strong> Upload all your videos and thumbnails as a ZIP file. 
+              The system will automatically extract and organize them. Then upload your CSV separately to start streaming to YouTube.
+            </p>
+          </div>
+
+          <form onSubmit={handleZipUpload} className="flex flex-col gap-5">
+            <label htmlFor="zipFile" className="label">
+              Upload ZIP File (Videos + Thumbnails)
+            </label>
+            <input
+              type="file"
+              id="zipFile"
+              name="zipFile"
+              accept=".zip"
+              required
+              disabled={zipUploading}
+              className="input-field"
+            />
+
+            {/* ZIP Upload Progress */}
+            {zipUploadProgress && zipUploading && (
+              <div className="p-5 bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl dark:from-blue-900/30 dark:to-indigo-900/30 dark:border-blue-700">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="relative">
+                    <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-800 flex items-center justify-center">
+                      <div className="animate-spin text-xl">📦</div>
+                    </div>
+                  </div>
+                  <div className="flex-1">
+                    <div className="font-bold text-blue-900 dark:text-blue-100 text-lg">
+                      {zipUploadProgress.message}
+                    </div>
+                    {zipUploadProgress.totalFiles && (
+                      <div className="text-sm text-blue-700 dark:text-blue-300">
+                        {zipUploadProgress.extractedCount || 0} / {zipUploadProgress.totalFiles} files extracted
+                        {zipUploadProgress.videoCount !== undefined && (
+                          <span> • {zipUploadProgress.videoCount} videos, {zipUploadProgress.thumbnailCount || 0} thumbnails</span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Progress Bar */}
+                <div className="mb-4">
+                  <div className="flex justify-between text-sm mb-2">
+                    <span className="text-blue-800 dark:text-blue-200 font-medium">
+                      Progress
+                    </span>
+                    <span className="text-blue-600 dark:text-blue-400 font-bold">
+                      {zipUploadProgress.progress}%
+                    </span>
+                  </div>
+                  <div className="w-full bg-blue-200 rounded-full h-3 dark:bg-blue-800 overflow-hidden">
+                    <div
+                      className="bg-gradient-to-r from-blue-500 to-indigo-500 h-3 rounded-full transition-all duration-500 ease-out relative"
+                      style={{
+                        width: `${Math.min(100, zipUploadProgress.progress)}%`,
+                      }}
+                    >
+                      <div className="absolute inset-0 bg-white/20 animate-pulse"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={zipUploading}
+              className={`btn-primary ${
+                zipUploading ? "opacity-50 cursor-not-allowed" : ""
+              }`}
+            >
+              {zipUploading ? (
+                <span className="flex items-center gap-2">
+                  <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                  {zipUploadProgress?.message || "Uploading..."}
+                </span>
+              ) : (
+                "Upload ZIP File"
+              )}
+            </button>
+          </form>
+      </div>
+
+      {/* Batch Upload */}
+      <div className="card">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-2xl font-bold text-gray-800 dark:text-white flex items-center gap-2">
+              <span className="text-3xl">📄</span>
+              <span>Upload CSV & Stream to YouTube</span>
             </h2>
             <button
               type="button"
@@ -2199,10 +2425,11 @@ export default function Dashboard() {
                           <li>
                             •{" "}
                             <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">
-                              path
+                              video_name
                             </code>
+                            {" "}(filename to match uploaded video)
                           </li>
-            </ul>
+                        </ul>
           </div>
                       <div className="p-3 bg-gray-50 dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-700">
                         <div className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-2">
@@ -2212,8 +2439,9 @@ export default function Dashboard() {
                           <li>
                             •{" "}
                             <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">
-                              thumbnail_path
+                              thumbnail_name
                             </code>
+                            {" "}(filename to match uploaded thumbnail)
                           </li>
                           <li>
                             •{" "}
@@ -2227,7 +2455,10 @@ export default function Dashboard() {
                               privacyStatus
                             </code>
                           </li>
-            </ul>
+                          <li className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                            Note: <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">path</code> and <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">thumbnail_path</code> are optional fallbacks
+                          </li>
+                        </ul>
                       </div>
                     </div>
                   </div>
