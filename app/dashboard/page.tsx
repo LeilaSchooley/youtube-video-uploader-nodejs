@@ -399,7 +399,7 @@ export default function Dashboard() {
     // Only poll if uploads are active
     if (!uploadingVideosToStaging && !uploadingThumbnailsToStaging) return;
 
-    // Poll every 2 seconds while uploads are active
+    // Poll every 10 seconds while uploads are active
     const intervalId = setInterval(() => {
       // Refresh staging files if staging section is visible
       if (showStaging) {
@@ -409,7 +409,7 @@ export default function Dashboard() {
       if (showAllFiles) {
         fetchAllFiles();
       }
-    }, 2000);
+    }, 10000);
 
     // Cleanup interval when uploads stop or component unmounts
     return () => clearInterval(intervalId);
@@ -2503,14 +2503,41 @@ export default function Dashboard() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                 {/* Upload Video */}
-                <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6">
+                <div
+                  className={`border-2 border-dashed rounded-lg p-6 transition-colors cursor-pointer ${
+                    uploadingVideosToStaging
+                      ? "border-gray-400 bg-gray-100 dark:bg-gray-800"
+                      : "border-gray-300 dark:border-gray-600 hover:border-purple-500 dark:hover:border-purple-400"
+                  }`}
+                  onClick={() => !uploadingVideosToStaging && stagingVideoInputRef.current?.click()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    if (uploadingVideosToStaging) return;
+                    const files = Array.from(e.dataTransfer.files).filter(
+                      (file) => file.type.startsWith("video/")
+                    );
+                    if (files.length > 0) {
+                      uploadToStaging(files, "video");
+                    }
+                  }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    if (!uploadingVideosToStaging) {
+                      e.currentTarget.classList.add("border-purple-500", "bg-purple-50", "dark:bg-purple-900/20");
+                    }
+                  }}
+                  onDragLeave={(e) => {
+                    e.preventDefault();
+                    e.currentTarget.classList.remove("border-purple-500", "bg-purple-50", "dark:bg-purple-900/20");
+                  }}
+                >
                   <h3 className="text-lg font-semibold mb-3 text-gray-800 dark:text-white">Upload Videos</h3>
                   <input
                     ref={stagingVideoInputRef}
                     type="file"
                     accept="video/*"
                     multiple
-                    className="mb-3 w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100 dark:file:bg-purple-900/30 dark:file:text-purple-300"
+                    className="hidden"
                     onChange={(e) => {
                       const files = Array.from(e.target.files || []).filter(
                         (file) => file.type.startsWith("video/")
@@ -2521,18 +2548,53 @@ export default function Dashboard() {
                     }}
                     disabled={uploadingVideosToStaging}
                   />
-                  <p className="text-xs text-gray-500 dark:text-gray-400">Upload multiple MP4 or other video files</p>
+                  <div className="text-center py-4">
+                    <div className="text-4xl mb-2">📹</div>
+                    <p className="text-gray-600 dark:text-gray-400 mb-1 font-semibold">
+                      Click to upload or drag and drop
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      Upload multiple MP4 or other video files
+                    </p>
+                  </div>
                 </div>
 
                 {/* Upload Thumbnail */}
-                <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6">
+                <div
+                  className={`border-2 border-dashed rounded-lg p-6 transition-colors cursor-pointer ${
+                    uploadingThumbnailsToStaging
+                      ? "border-gray-400 bg-gray-100 dark:bg-gray-800"
+                      : "border-gray-300 dark:border-gray-600 hover:border-purple-500 dark:hover:border-purple-400"
+                  }`}
+                  onClick={() => !uploadingThumbnailsToStaging && stagingThumbnailInputRef.current?.click()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    if (uploadingThumbnailsToStaging) return;
+                    const files = Array.from(e.dataTransfer.files).filter(
+                      (file) => file.type.startsWith("image/") || file.name.match(/\.(jpg|jpeg|png|gif|webp)$/i)
+                    );
+                    if (files.length > 0) {
+                      uploadToStaging(files, "thumbnail");
+                    }
+                  }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    if (!uploadingThumbnailsToStaging) {
+                      e.currentTarget.classList.add("border-purple-500", "bg-purple-50", "dark:bg-purple-900/20");
+                    }
+                  }}
+                  onDragLeave={(e) => {
+                    e.preventDefault();
+                    e.currentTarget.classList.remove("border-purple-500", "bg-purple-50", "dark:bg-purple-900/20");
+                  }}
+                >
                   <h3 className="text-lg font-semibold mb-3 text-gray-800 dark:text-white">Upload Thumbnails</h3>
                   <input
                     ref={stagingThumbnailInputRef}
                     type="file"
                     accept="image/*"
                     multiple
-                    className="mb-3 w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100 dark:file:bg-purple-900/30 dark:file:text-purple-300"
+                    className="hidden"
                     onChange={(e) => {
                       const files = Array.from(e.target.files || []).filter(
                         (file) => file.type.startsWith("image/") || file.name.match(/\.(jpg|jpeg|png|gif|webp)$/i)
@@ -2543,7 +2605,15 @@ export default function Dashboard() {
                     }}
                     disabled={uploadingThumbnailsToStaging}
                   />
-                  <p className="text-xs text-gray-500 dark:text-gray-400">Upload multiple JPG, PNG, or other image files</p>
+                  <div className="text-center py-4">
+                    <div className="text-4xl mb-2">🖼️</div>
+                    <p className="text-gray-600 dark:text-gray-400 mb-1 font-semibold">
+                      Click to upload or drag and drop
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      Upload multiple JPG, PNG, or other image files
+                    </p>
+                  </div>
                 </div>
               </div>
 
