@@ -452,37 +452,30 @@ export default function Dashboard() {
     const uploadedFiles: Array<{ fileName: string; size: number; sizeFormatted: string }> = [];
     const errors: Array<{ fileName: string; error: string }> = [];
 
-    // Batch size: upload 20 files per request for better performance
-    const BATCH_SIZE = 20;
-    let processedCount = 0;
-
+    // Upload files one by one for real-time progress updates
+    // This gives better progress feedback even if slightly slower
     try {
-      // Upload files in batches
-      for (let batchStart = 0; batchStart < files.length; batchStart += BATCH_SIZE) {
-        const batch = files.slice(batchStart, batchStart + BATCH_SIZE);
-        const batchEnd = Math.min(batchStart + BATCH_SIZE, files.length);
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
         
-        // Update progress for current batch
+        // Update progress before uploading each file
         if (type === "video") {
           setStagingVideoProgress({
-            currentFile: batchStart + 1,
+            currentFile: i + 1,
             totalFiles: files.length,
-            currentFileName: batch[0]?.name || "",
+            currentFileName: file.name,
           });
         } else {
           setStagingThumbnailProgress({
-            currentFile: batchStart + 1,
+            currentFile: i + 1,
             totalFiles: files.length,
-            currentFileName: batch[0]?.name || "",
+            currentFileName: file.name,
           });
         }
 
         try {
           const formData = new FormData();
-          // Append all files in this batch
-          batch.forEach((file) => {
-            formData.append("files", file);
-          });
+          formData.append("file", file);
           formData.append("type", type);
 
           const response = await fetch("/api/staging/upload", {
@@ -491,52 +484,19 @@ export default function Dashboard() {
           });
 
           const data = await response.json();
-          if (data.success && data.files) {
-            // Add all successfully uploaded files
-            uploadedFiles.push(...data.files);
-            processedCount += data.files.length;
-            
-            // Update progress after batch completes
-            if (type === "video") {
-              setStagingVideoProgress({
-                currentFile: batchEnd,
-                totalFiles: files.length,
-                currentFileName: batch[batch.length - 1]?.name || "",
-              });
-            } else {
-              setStagingThumbnailProgress({
-                currentFile: batchEnd,
-                totalFiles: files.length,
-                currentFileName: batch[batch.length - 1]?.name || "",
-              });
-            }
-          }
-          
-          // Add any errors from this batch
-          if (data.errors && data.errors.length > 0) {
-            errors.push(...data.errors);
-            processedCount += data.errors.length;
-          }
-          
-          // If batch failed completely
-          if (!data.success && !data.files) {
-            batch.forEach((file) => {
-              errors.push({
-                fileName: file.name,
-                error: data.error || "Upload failed",
-              });
-            });
-            processedCount += batch.length;
-          }
-        } catch (error: any) {
-          // If batch request fails, add all files in batch to errors
-          batch.forEach((file) => {
+          if (data.success && data.file) {
+            uploadedFiles.push(data.file);
+          } else {
             errors.push({
               fileName: file.name,
-              error: error.message || "Upload failed",
+              error: data.error || "Upload failed",
             });
+          }
+        } catch (error: any) {
+          errors.push({
+            fileName: file.name,
+            error: error.message || "Upload failed",
           });
-          processedCount += batch.length;
         }
       }
 
