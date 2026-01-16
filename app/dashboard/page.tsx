@@ -101,6 +101,12 @@ export default function Dashboard() {
   } | null>(null);
   const [loadingStaging, setLoadingStaging] = useState<boolean>(false);
   const [uploadingToStaging, setUploadingToStaging] = useState<boolean>(false);
+  const [stagingUploadProgress, setStagingUploadProgress] = useState<{
+    currentFile: number;
+    totalFiles: number;
+    currentFileName: string;
+    type: "video" | "thumbnail";
+  } | null>(null);
   const [expandedCategories, setExpandedCategories] = useState<{
     videos: boolean;
     thumbnails: boolean;
@@ -422,42 +428,75 @@ export default function Dashboard() {
     if (files.length === 0) return;
     
     setUploadingToStaging(true);
+    setStagingUploadProgress({
+      currentFile: 0,
+      totalFiles: files.length,
+      currentFileName: "",
+      type,
+    });
+
+    const uploadedFiles: Array<{ fileName: string; size: number; sizeFormatted: string }> = [];
+    const errors: Array<{ fileName: string; error: string }> = [];
+
     try {
-      const formData = new FormData();
-      // Append all files
-      files.forEach((file) => {
-        formData.append("files", file);
-      });
-      formData.append("type", type);
+      // Upload files one by one to show progress
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        setStagingUploadProgress({
+          currentFile: i + 1,
+          totalFiles: files.length,
+          currentFileName: file.name,
+          type,
+        });
 
-      const response = await fetch("/api/staging/upload", {
-        method: "POST",
-        body: formData,
-      });
+        try {
+          const formData = new FormData();
+          formData.append("file", file);
+          formData.append("type", type);
 
-      const data = await response.json();
-      if (data.success) {
-        const successCount = data.files?.length || 0;
-        const errorCount = data.errors?.length || 0;
-        let message = `${successCount} ${type === "video" ? "video(s)" : "thumbnail(s)"} uploaded to staging!`;
-        if (errorCount > 0) {
-          message += ` ${errorCount} failed.`;
+          const response = await fetch("/api/staging/upload", {
+            method: "POST",
+            body: formData,
+          });
+
+          const data = await response.json();
+          if (data.success && data.file) {
+            uploadedFiles.push(data.file);
+          } else {
+            errors.push({
+              fileName: file.name,
+              error: data.error || "Upload failed",
+            });
+          }
+        } catch (error: any) {
+          errors.push({
+            fileName: file.name,
+            error: error.message || "Upload failed",
+          });
         }
-        setShowToast({ message, type: successCount > 0 ? "success" : "error" });
-        await fetchStagingFiles();
-        // Clear input
-        if (type === "video" && stagingVideoInputRef.current) {
-          stagingVideoInputRef.current.value = "";
-        } else if (type === "thumbnail" && stagingThumbnailInputRef.current) {
-          stagingThumbnailInputRef.current.value = "";
-        }
-      } else {
-        setShowToast({ message: data.message || data.error || "Failed to upload files", type: "error" });
+      }
+
+      // Show final result
+      const successCount = uploadedFiles.length;
+      const errorCount = errors.length;
+      let message = `${successCount} ${type === "video" ? "video(s)" : "thumbnail(s)"} uploaded to staging!`;
+      if (errorCount > 0) {
+        message += ` ${errorCount} failed.`;
+      }
+      setShowToast({ message, type: successCount > 0 ? "success" : "error" });
+      await fetchStagingFiles();
+      
+      // Clear input
+      if (type === "video" && stagingVideoInputRef.current) {
+        stagingVideoInputRef.current.value = "";
+      } else if (type === "thumbnail" && stagingThumbnailInputRef.current) {
+        stagingThumbnailInputRef.current.value = "";
       }
     } catch (error: any) {
       setShowToast({ message: error.message || "Failed to upload files", type: "error" });
     } finally {
       setUploadingToStaging(false);
+      setStagingUploadProgress(null);
     }
   };
 
@@ -2203,6 +2242,55 @@ export default function Dashboard() {
                   <strong>💡 Workflow:</strong> Upload videos and thumbnails individually here first. Then upload your CSV file in the "Batch Upload" section below. The CSV will automatically match files by filename.
                 </p>
               </div>
+
+              {/* Upload Progress Display */}
+              {stagingUploadProgress && (
+                <div className="mb-6 p-5 bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl dark:from-blue-900/30 dark:to-indigo-900/30 dark:border-blue-700 shadow-sm">
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="relative">
+                      <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-800 flex items-center justify-center">
+                        <div className="animate-spin text-xl">📤</div>
+                      </div>
+                    </div>
+                    <div className="flex-1">
+                      <h4 className="text-lg font-semibold text-blue-900 dark:text-blue-100">
+                        Uploading {stagingUploadProgress.type === "video" ? "Videos" : "Thumbnails"} to Staging
+                      </h4>
+                      <p className="text-sm text-blue-700 dark:text-blue-300">
+                        {stagingUploadProgress.currentFileName || "Preparing..."}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Progress Bar */}
+                  <div className="mb-3">
+                    <div className="flex justify-between text-sm mb-2">
+                      <span className="text-blue-800 dark:text-blue-200 font-medium">
+                        Asset {stagingUploadProgress.currentFile} / {stagingUploadProgress.totalFiles}
+                      </span>
+                      <span className="text-blue-600 dark:text-blue-400 font-bold">
+                        {Math.round(
+                          (stagingUploadProgress.currentFile / stagingUploadProgress.totalFiles) * 100
+                        )}%
+                      </span>
+                    </div>
+                    <div className="w-full bg-blue-200 dark:bg-blue-800 rounded-full h-3 overflow-hidden">
+                      <div
+                        className="bg-gradient-to-r from-blue-500 to-indigo-500 h-3 rounded-full transition-all duration-300 ease-out"
+                        style={{
+                          width: `${(stagingUploadProgress.currentFile / stagingUploadProgress.totalFiles) * 100}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="text-xs text-blue-600 dark:text-blue-400">
+                    {stagingUploadProgress.currentFile === stagingUploadProgress.totalFiles
+                      ? "Finalizing upload..."
+                      : `Uploading file ${stagingUploadProgress.currentFile} of ${stagingUploadProgress.totalFiles}...`}
+                  </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                 {/* Upload Video */}
