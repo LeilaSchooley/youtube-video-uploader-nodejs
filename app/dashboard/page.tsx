@@ -52,10 +52,6 @@ export default function Dashboard() {
   const [darkMode, setDarkMode] = useState<boolean>(false);
   const [selectedVideoFile, setSelectedVideoFile] = useState<File | null>(null);
   const [selectedCsvFile, setSelectedCsvFile] = useState<File | null>(null);
-  const [selectedVideoFiles, setSelectedVideoFiles] = useState<File[]>([]); // For CSV bulk upload
-  const [selectedThumbnailFiles, setSelectedThumbnailFiles] = useState<File[]>(
-    []
-  ); // For CSV bulk upload thumbnails
   const [showDebugPanel, setShowDebugPanel] = useState<boolean>(false);
   const [debugLogs, setDebugLogs] = useState<
     Array<{ time: string; message: string; type: "info" | "success" | "error" }>
@@ -105,8 +101,6 @@ export default function Dashboard() {
   });
   const fileInputRef = useRef<HTMLInputElement>(null);
   const csvFileInputRef = useRef<HTMLInputElement>(null);
-  const videoFilesInputRef = useRef<HTMLInputElement>(null);
-  const thumbnailFilesInputRef = useRef<HTMLInputElement>(null);
   
   // Add debug log helper
   const addDebugLog = useCallback(
@@ -345,7 +339,7 @@ export default function Dashboard() {
   }, []);
 
 
-  // Real-time polling: Refresh staging files and all uploaded files automatically while uploads are active
+  // Real-time polling: Refresh all uploaded files automatically while uploads are active
 
   // Load batch instructions preference from localStorage
   useEffect(() => {
@@ -926,7 +920,7 @@ export default function Dashboard() {
                     totalFiles: totalVideos,
                     currentFileName: "",
                     message: `Starting upload: ${totalVideos} videos in ${totalBatches} batches`,
-                    status: "copying",
+                    status: "uploading",
                   });
                   break;
 
@@ -937,7 +931,7 @@ export default function Dashboard() {
                     totalFiles: totalVideos,
                     currentFileName: `Batch ${currentBatch}/${totalBatches}`,
                     message: `Processing batch ${currentBatch}/${totalBatches} (${data.batchSize} videos)...`,
-                    status: "copying",
+                    status: "uploading",
                   });
                   break;
 
@@ -948,7 +942,7 @@ export default function Dashboard() {
                     totalFiles: totalVideos,
                     currentFileName: data.title || `Video ${currentVideoIndex}`,
                     message: `Uploading video ${currentVideoIndex}/${totalVideos}...`,
-                    status: "copying",
+                    status: "uploading",
                   });
                   break;
 
@@ -959,7 +953,7 @@ export default function Dashboard() {
                     totalFiles: totalVideos,
                     currentFileName: data.title || `Video ${currentVideoIndex}`,
                     message: `✓ Video ${currentVideoIndex}/${totalVideos} uploaded (ID: ${data.videoId?.substring(0, 8)}...)`,
-                    status: "copying",
+                    status: "uploading",
                   });
                   break;
 
@@ -970,7 +964,7 @@ export default function Dashboard() {
                     totalFiles: totalVideos,
                     currentFileName: data.title || `Video ${currentVideoIndex}`,
                     message: `✗ Video ${currentVideoIndex}/${totalVideos} failed: ${data.error}`,
-                    status: "copying",
+                    status: "uploading",
                   });
                   break;
 
@@ -980,7 +974,7 @@ export default function Dashboard() {
                     totalFiles: totalVideos,
                     currentFileName: `Batch ${currentBatch}/${totalBatches} complete`,
                     message: `Batch ${currentBatch}/${totalBatches}: ${data.completed} succeeded, ${data.failed} failed`,
-                    status: "copying",
+                    status: "uploading",
                   });
                   break;
 
@@ -990,7 +984,7 @@ export default function Dashboard() {
                     totalFiles: totalVideos,
                     currentFileName: "",
                     message: `Progress: ${data.totalCompleted} succeeded, ${data.totalFailed} failed (${data.progress}%)`,
-                    status: "copying",
+                    status: "uploading",
                   });
                   break;
 
@@ -1021,8 +1015,6 @@ export default function Dashboard() {
           form.reset();
         }
                   setSelectedCsvFile(null);
-                  setSelectedVideoFiles([]);
-                  setSelectedThumbnailFiles([]);
                   
                   // Refresh queue
         fetchQueue();
@@ -2248,7 +2240,7 @@ export default function Dashboard() {
                           File Upload:
                         </strong>
                         <p className="text-sm text-green-800 dark:text-green-200 mt-1">
-                          Upload your CSV file along with video and thumbnail files below. The system automatically matches files by filename from your CSV's path column.
+                          Upload your CSV file below. Video and thumbnail files should already be uploaded in the "All Uploaded Files" section. The system automatically matches files by filename from your CSV's path column.
             </p>
           </div>
         </div>
@@ -2262,7 +2254,7 @@ export default function Dashboard() {
                           How It Works:
                         </strong>
                         <p className="text-sm text-blue-800 dark:text-blue-200 mt-1">
-                          Upload your CSV and files together. The system extracts filenames from CSV paths and matches them to uploaded files. Videos are streamed directly to YouTube in batches with real-time progress updates.
+                          1. Upload video and thumbnail files in the "All Uploaded Files" section above. 2. Upload your CSV file below. The system extracts filenames from CSV paths and matches them to uploaded files. 3. Videos are streamed directly to YouTube in batches with real-time progress updates.
                         </p>
                       </div>
                     </div>
@@ -2396,125 +2388,6 @@ export default function Dashboard() {
             )}
           </div>
 
-                {/* Upload Video Files */}
-          <label htmlFor="videoFiles" className="label">
-                  Upload Video Files (Optional)
-          </label>
-          <div 
-                  className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-all ${
-              selectedVideoFiles.length > 0
-                      ? "border-green-500 bg-green-50 dark:bg-green-900/20"
-                      : "border-gray-300 hover:border-blue-500"
-            }`}
-            onClick={() => videoFilesInputRef.current?.click()}
-            onDrop={(e) => {
-              e.preventDefault();
-                    const files = Array.from(e.dataTransfer.files).filter(
-                      (file) => file.type.startsWith("video/")
-              );
-              if (files.length > 0) {
-                      setSelectedVideoFiles(files);
-              }
-            }}
-            onDragOver={(e) => e.preventDefault()}
-          >
-            <input
-              ref={videoFilesInputRef}
-              type="file"
-              id="videoFiles"
-              name="videoFiles"
-              accept="video/*"
-              multiple
-              className="hidden"
-              onChange={(e) => {
-                      const files = Array.from(e.target.files || []).filter(
-                        (file) => file.type.startsWith("video/")
-                      );
-                      setSelectedVideoFiles(files);
-              }}
-            />
-            {selectedVideoFiles.length > 0 ? (
-              <div>
-                <div className="text-4xl mb-2">✅</div>
-                      <p className="font-semibold text-green-700 dark:text-green-300 mb-1">
-                        {selectedVideoFiles.length} video file(s) selected
-                      </p>
-                      <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
-                        Click to change files
-                      </p>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="text-4xl mb-2">📹</div>
-                      <p className="text-gray-600 dark:text-gray-400 mb-1">
-                        Click to upload or drag and drop
-                      </p>
-                      <p className="text-sm text-gray-500 dark:text-gray-500">
-                        Video files (MP4, etc.)
-                      </p>
-                    </>
-                  )}
-                </div>
-
-                {/* Upload Thumbnail Files */}
-                <label htmlFor="thumbnailFiles" className="label">
-                  Upload Thumbnail Files (Optional)
-                </label>
-                <div
-                  className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-all ${
-                    selectedThumbnailFiles.length > 0
-                      ? "border-green-500 bg-green-50 dark:bg-green-900/20"
-                      : "border-gray-300 hover:border-blue-500"
-                  }`}
-                  onClick={() => thumbnailFilesInputRef.current?.click()}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    const files = Array.from(e.dataTransfer.files).filter(
-                      (file) => file.type.startsWith("image/") || file.name.match(/\.(jpg|jpeg|png|gif|webp)$/i)
-                    );
-                    if (files.length > 0) {
-                      setSelectedThumbnailFiles(files);
-                    }
-                  }}
-                  onDragOver={(e) => e.preventDefault()}
-                >
-                  <input
-                    ref={thumbnailFilesInputRef}
-                    type="file"
-                    id="thumbnailFiles"
-                    name="thumbnailFiles"
-                    accept="image/*"
-                    multiple
-                    className="hidden"
-                    onChange={(e) => {
-                      const files = Array.from(e.target.files || []).filter(
-                        (file) => file.type.startsWith("image/") || file.name.match(/\.(jpg|jpeg|png|gif|webp)$/i)
-                      );
-                      setSelectedThumbnailFiles(files);
-                    }}
-                  />
-                  {selectedThumbnailFiles.length > 0 ? (
-                    <div>
-                      <div className="text-4xl mb-2">✅</div>
-                      <p className="font-semibold text-green-700 dark:text-green-300 mb-1">
-                        {selectedThumbnailFiles.length} thumbnail file(s) selected
-                      </p>
-                      <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
-                        Click to change files
-                </p>
-              </div>
-            ) : (
-              <>
-                      <div className="text-4xl mb-2">🖼️</div>
-                      <p className="text-gray-600 dark:text-gray-400 mb-1">
-                        Click to upload or drag and drop
-                      </p>
-                      <p className="text-sm text-gray-500 dark:text-gray-500">
-                        Image files (JPG, PNG, etc.)
-                </p>
-              </>
-            )}
-          </div>
 
           <div className="p-4 bg-gray-50 border border-gray-300 rounded-lg">
                   <h3 className="font-semibold text-gray-800 mb-4">
