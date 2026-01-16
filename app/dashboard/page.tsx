@@ -100,12 +100,17 @@ export default function Dashboard() {
     };
   } | null>(null);
   const [loadingStaging, setLoadingStaging] = useState<boolean>(false);
-  const [uploadingToStaging, setUploadingToStaging] = useState<boolean>(false);
-  const [stagingUploadProgress, setStagingUploadProgress] = useState<{
+  const [uploadingVideosToStaging, setUploadingVideosToStaging] = useState<boolean>(false);
+  const [uploadingThumbnailsToStaging, setUploadingThumbnailsToStaging] = useState<boolean>(false);
+  const [stagingVideoProgress, setStagingVideoProgress] = useState<{
     currentFile: number;
     totalFiles: number;
     currentFileName: string;
-    type: "video" | "thumbnail";
+  } | null>(null);
+  const [stagingThumbnailProgress, setStagingThumbnailProgress] = useState<{
+    currentFile: number;
+    totalFiles: number;
+    currentFileName: string;
   } | null>(null);
   const [expandedCategories, setExpandedCategories] = useState<{
     videos: boolean;
@@ -427,31 +432,57 @@ export default function Dashboard() {
   const uploadToStaging = async (files: File[], type: "video" | "thumbnail") => {
     if (files.length === 0) return;
     
-    setUploadingToStaging(true);
-    setStagingUploadProgress({
-      currentFile: 0,
-      totalFiles: files.length,
-      currentFileName: "",
-      type,
-    });
+    // Set appropriate upload flag and progress based on type
+    if (type === "video") {
+      setUploadingVideosToStaging(true);
+      setStagingVideoProgress({
+        currentFile: 0,
+        totalFiles: files.length,
+        currentFileName: "",
+      });
+    } else {
+      setUploadingThumbnailsToStaging(true);
+      setStagingThumbnailProgress({
+        currentFile: 0,
+        totalFiles: files.length,
+        currentFileName: "",
+      });
+    }
 
     const uploadedFiles: Array<{ fileName: string; size: number; sizeFormatted: string }> = [];
     const errors: Array<{ fileName: string; error: string }> = [];
 
+    // Batch size: upload 20 files per request for better performance
+    const BATCH_SIZE = 20;
+    let processedCount = 0;
+
     try {
-      // Upload files one by one to show progress
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        setStagingUploadProgress({
-          currentFile: i + 1,
-          totalFiles: files.length,
-          currentFileName: file.name,
-          type,
-        });
+      // Upload files in batches
+      for (let batchStart = 0; batchStart < files.length; batchStart += BATCH_SIZE) {
+        const batch = files.slice(batchStart, batchStart + BATCH_SIZE);
+        const batchEnd = Math.min(batchStart + BATCH_SIZE, files.length);
+        
+        // Update progress for current batch
+        if (type === "video") {
+          setStagingVideoProgress({
+            currentFile: batchStart + 1,
+            totalFiles: files.length,
+            currentFileName: batch[0]?.name || "",
+          });
+        } else {
+          setStagingThumbnailProgress({
+            currentFile: batchStart + 1,
+            totalFiles: files.length,
+            currentFileName: batch[0]?.name || "",
+          });
+        }
 
         try {
           const formData = new FormData();
-          formData.append("file", file);
+          // Append all files in this batch
+          batch.forEach((file) => {
+            formData.append("files", file);
+          });
           formData.append("type", type);
 
           const response = await fetch("/api/staging/upload", {
@@ -460,19 +491,52 @@ export default function Dashboard() {
           });
 
           const data = await response.json();
-          if (data.success && data.file) {
-            uploadedFiles.push(data.file);
-          } else {
-            errors.push({
-              fileName: file.name,
-              error: data.error || "Upload failed",
+          if (data.success && data.files) {
+            // Add all successfully uploaded files
+            uploadedFiles.push(...data.files);
+            processedCount += data.files.length;
+            
+            // Update progress after batch completes
+            if (type === "video") {
+              setStagingVideoProgress({
+                currentFile: batchEnd,
+                totalFiles: files.length,
+                currentFileName: batch[batch.length - 1]?.name || "",
+              });
+            } else {
+              setStagingThumbnailProgress({
+                currentFile: batchEnd,
+                totalFiles: files.length,
+                currentFileName: batch[batch.length - 1]?.name || "",
+              });
+            }
+          }
+          
+          // Add any errors from this batch
+          if (data.errors && data.errors.length > 0) {
+            errors.push(...data.errors);
+            processedCount += data.errors.length;
+          }
+          
+          // If batch failed completely
+          if (!data.success && !data.files) {
+            batch.forEach((file) => {
+              errors.push({
+                fileName: file.name,
+                error: data.error || "Upload failed",
+              });
             });
+            processedCount += batch.length;
           }
         } catch (error: any) {
-          errors.push({
-            fileName: file.name,
-            error: error.message || "Upload failed",
+          // If batch request fails, add all files in batch to errors
+          batch.forEach((file) => {
+            errors.push({
+              fileName: file.name,
+              error: error.message || "Upload failed",
+            });
           });
+          processedCount += batch.length;
         }
       }
 
@@ -495,8 +559,14 @@ export default function Dashboard() {
     } catch (error: any) {
       setShowToast({ message: error.message || "Failed to upload files", type: "error" });
     } finally {
-      setUploadingToStaging(false);
-      setStagingUploadProgress(null);
+      // Clear appropriate flags and progress
+      if (type === "video") {
+        setUploadingVideosToStaging(false);
+        setStagingVideoProgress(null);
+      } else {
+        setUploadingThumbnailsToStaging(false);
+        setStagingThumbnailProgress(null);
+      }
     }
   };
 
@@ -2244,51 +2314,105 @@ export default function Dashboard() {
               </div>
 
               {/* Upload Progress Display */}
-              {stagingUploadProgress && (
-                <div className="mb-6 p-5 bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl dark:from-blue-900/30 dark:to-indigo-900/30 dark:border-blue-700 shadow-sm">
-                  <div className="flex items-center gap-3 mb-4">
-                    <div className="relative">
-                      <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-800 flex items-center justify-center">
-                        <div className="animate-spin text-xl">📤</div>
+              {(stagingVideoProgress || stagingThumbnailProgress) && (
+                <div className="mb-6 space-y-4">
+                  {/* Video Upload Progress */}
+                  {stagingVideoProgress && (
+                    <div className="p-5 bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl dark:from-blue-900/30 dark:to-indigo-900/30 dark:border-blue-700 shadow-sm">
+                      <div className="flex items-center gap-3 mb-4">
+                        <div className="relative">
+                          <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-800 flex items-center justify-center">
+                            <div className="animate-spin text-xl">📤</div>
+                          </div>
+                        </div>
+                        <div className="flex-1">
+                          <h4 className="text-lg font-semibold text-blue-900 dark:text-blue-100">
+                            Uploading Videos to Staging
+                          </h4>
+                          <p className="text-sm text-blue-700 dark:text-blue-300">
+                            {stagingVideoProgress.currentFileName || "Preparing..."}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Progress Bar */}
+                      <div className="mb-3">
+                        <div className="flex justify-between text-sm mb-2">
+                          <span className="text-blue-800 dark:text-blue-200 font-medium">
+                            Asset {stagingVideoProgress.currentFile} / {stagingVideoProgress.totalFiles}
+                          </span>
+                          <span className="text-blue-600 dark:text-blue-400 font-bold">
+                            {Math.round(
+                              (stagingVideoProgress.currentFile / stagingVideoProgress.totalFiles) * 100
+                            )}%
+                          </span>
+                        </div>
+                        <div className="w-full bg-blue-200 dark:bg-blue-800 rounded-full h-3 overflow-hidden">
+                          <div
+                            className="bg-gradient-to-r from-blue-500 to-indigo-500 h-3 rounded-full transition-all duration-300 ease-out"
+                            style={{
+                              width: `${(stagingVideoProgress.currentFile / stagingVideoProgress.totalFiles) * 100}%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="text-xs text-blue-600 dark:text-blue-400">
+                        {stagingVideoProgress.currentFile === stagingVideoProgress.totalFiles
+                          ? "Finalizing upload..."
+                          : `Uploading file ${stagingVideoProgress.currentFile} of ${stagingVideoProgress.totalFiles}...`}
                       </div>
                     </div>
-                    <div className="flex-1">
-                      <h4 className="text-lg font-semibold text-blue-900 dark:text-blue-100">
-                        Uploading {stagingUploadProgress.type === "video" ? "Videos" : "Thumbnails"} to Staging
-                      </h4>
-                      <p className="text-sm text-blue-700 dark:text-blue-300">
-                        {stagingUploadProgress.currentFileName || "Preparing..."}
-                      </p>
-                    </div>
-                  </div>
+                  )}
 
-                  {/* Progress Bar */}
-                  <div className="mb-3">
-                    <div className="flex justify-between text-sm mb-2">
-                      <span className="text-blue-800 dark:text-blue-200 font-medium">
-                        Asset {stagingUploadProgress.currentFile} / {stagingUploadProgress.totalFiles}
-                      </span>
-                      <span className="text-blue-600 dark:text-blue-400 font-bold">
-                        {Math.round(
-                          (stagingUploadProgress.currentFile / stagingUploadProgress.totalFiles) * 100
-                        )}%
-                      </span>
-                    </div>
-                    <div className="w-full bg-blue-200 dark:bg-blue-800 rounded-full h-3 overflow-hidden">
-                      <div
-                        className="bg-gradient-to-r from-blue-500 to-indigo-500 h-3 rounded-full transition-all duration-300 ease-out"
-                        style={{
-                          width: `${(stagingUploadProgress.currentFile / stagingUploadProgress.totalFiles) * 100}%`,
-                        }}
-                      />
-                    </div>
-                  </div>
+                  {/* Thumbnail Upload Progress */}
+                  {stagingThumbnailProgress && (
+                    <div className="p-5 bg-gradient-to-br from-green-50 to-emerald-50 border border-green-200 rounded-xl dark:from-green-900/30 dark:to-emerald-900/30 dark:border-green-700 shadow-sm">
+                      <div className="flex items-center gap-3 mb-4">
+                        <div className="relative">
+                          <div className="w-10 h-10 rounded-full bg-green-100 dark:bg-green-800 flex items-center justify-center">
+                            <div className="animate-spin text-xl">🖼️</div>
+                          </div>
+                        </div>
+                        <div className="flex-1">
+                          <h4 className="text-lg font-semibold text-green-900 dark:text-green-100">
+                            Uploading Thumbnails to Staging
+                          </h4>
+                          <p className="text-sm text-green-700 dark:text-green-300">
+                            {stagingThumbnailProgress.currentFileName || "Preparing..."}
+                          </p>
+                        </div>
+                      </div>
 
-                  <div className="text-xs text-blue-600 dark:text-blue-400">
-                    {stagingUploadProgress.currentFile === stagingUploadProgress.totalFiles
-                      ? "Finalizing upload..."
-                      : `Uploading file ${stagingUploadProgress.currentFile} of ${stagingUploadProgress.totalFiles}...`}
-                  </div>
+                      {/* Progress Bar */}
+                      <div className="mb-3">
+                        <div className="flex justify-between text-sm mb-2">
+                          <span className="text-green-800 dark:text-green-200 font-medium">
+                            Asset {stagingThumbnailProgress.currentFile} / {stagingThumbnailProgress.totalFiles}
+                          </span>
+                          <span className="text-green-600 dark:text-green-400 font-bold">
+                            {Math.round(
+                              (stagingThumbnailProgress.currentFile / stagingThumbnailProgress.totalFiles) * 100
+                            )}%
+                          </span>
+                        </div>
+                        <div className="w-full bg-green-200 dark:bg-green-800 rounded-full h-3 overflow-hidden">
+                          <div
+                            className="bg-gradient-to-r from-green-500 to-emerald-500 h-3 rounded-full transition-all duration-300 ease-out"
+                            style={{
+                              width: `${(stagingThumbnailProgress.currentFile / stagingThumbnailProgress.totalFiles) * 100}%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="text-xs text-green-600 dark:text-green-400">
+                        {stagingThumbnailProgress.currentFile === stagingThumbnailProgress.totalFiles
+                          ? "Finalizing upload..."
+                          : `Uploading file ${stagingThumbnailProgress.currentFile} of ${stagingThumbnailProgress.totalFiles}...`}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -2310,7 +2434,7 @@ export default function Dashboard() {
                         uploadToStaging(files, "video");
                       }
                     }}
-                    disabled={uploadingToStaging}
+                    disabled={uploadingVideosToStaging}
                   />
                   <p className="text-xs text-gray-500 dark:text-gray-400">Upload multiple MP4 or other video files</p>
                 </div>
@@ -2332,7 +2456,7 @@ export default function Dashboard() {
                         uploadToStaging(files, "thumbnail");
                       }
                     }}
-                    disabled={uploadingToStaging}
+                    disabled={uploadingThumbnailsToStaging}
                   />
                   <p className="text-xs text-gray-500 dark:text-gray-400">Upload multiple JPG, PNG, or other image files</p>
                 </div>
