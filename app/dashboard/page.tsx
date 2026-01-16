@@ -3183,38 +3183,6 @@ export default function Dashboard() {
                             <span>📅</span>
                             <span>Created: {new Date(job.createdAt).toLocaleString()}</span>
                           </div>
-                          {(job.videosPerDay > 0 || job.uploadInterval) &&
-                            (() => {
-                              const uploadInterval =
-                                job.uploadInterval ||
-                                (job.videosPerDay > 0 ? "day" : undefined);
-                              const videosPerInterval =
-                                job.videosPerInterval || job.videosPerDay || 0;
-                              const intervalDescription =
-                                uploadInterval === "day"
-                                  ? "day"
-                                  : uploadInterval === "hour"
-                                  ? "hour"
-                                  : uploadInterval === "12hours"
-                                  ? "12 hours"
-                                  : uploadInterval === "6hours"
-                                  ? "6 hours"
-                                  : uploadInterval === "30mins"
-                                  ? "30 minutes"
-                                  : uploadInterval === "10mins"
-                                  ? "10 minutes"
-                                  : uploadInterval === "custom"
-                                  ? `${job.customIntervalMinutes || 0} minutes`
-                                  : "day";
-                              return (
-                                <div className="flex items-center gap-2">
-                                  <span>📊</span>
-                                  <span>
-                                    Schedule: {videosPerInterval} videos per {intervalDescription} starting {new Date(job.startDate).toLocaleString()}
-                                  </span>
-                                </div>
-                              );
-                            })()}
                           {job.status === "pending" &&
                             (() => {
                               const ageSeconds =
