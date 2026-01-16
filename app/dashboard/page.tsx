@@ -60,16 +60,14 @@ export default function Dashboard() {
   const [debugLogs, setDebugLogs] = useState<
     Array<{ time: string; message: string; type: "info" | "success" | "error" }>
   >([]);
-  const [migrationDirs, setMigrationDirs] = useState<Array<{
-    name: string;
-    hasStaging: boolean;
-    jobCount: number;
+  const [availableChannels, setAvailableChannels] = useState<Array<{
+    userId: string;
+    displayName: string;
     fileCount: number;
-    isCurrentUser: boolean;
+    jobCount: number;
+    isCurrent: boolean;
   }>>([]);
-  const [migrationSource, setMigrationSource] = useState<string>("");
-  const [migrationDest, setMigrationDest] = useState<string>("");
-  const [migratingFiles, setMigratingFiles] = useState<boolean>(false);
+  const [selectedChannel, setSelectedChannel] = useState<string>("");
   const [uploadProgress, setUploadProgress] = useState<{
     currentFile: number;
     totalFiles: number;
@@ -434,6 +432,14 @@ export default function Dashboard() {
     }
   }, []);
 
+  // Refresh files when channel changes
+  useEffect(() => {
+    if (selectedChannel && user?.authenticated) {
+      fetchAllFiles();
+      fetchStagingFiles();
+    }
+  }, [selectedChannel]);
+
   const toggleDarkMode = () => {
     const newMode = !darkMode;
     setDarkMode(newMode);
@@ -461,7 +467,10 @@ export default function Dashboard() {
   const fetchStagingFiles = async () => {
     setLoadingStaging(true);
     try {
-      const response = await fetch("/api/staging/list");
+      const url = selectedChannel 
+        ? `/api/staging/list?channel=${encodeURIComponent(selectedChannel)}`
+        : "/api/staging/list";
+      const response = await fetch(url);
       const data = await response.json();
       if (data.success) {
         setStagingFiles(data);
@@ -695,6 +704,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchUser();
+    fetchAvailableChannels();
     fetchQueue();
 
     // Real-time polling - check every 1 second for near-instant updates
@@ -887,7 +897,10 @@ export default function Dashboard() {
   const fetchAllFiles = async () => {
     try {
       setLoadingAllFiles(true);
-      const res = await fetch("/api/list-all-files");
+      const url = selectedChannel 
+        ? `/api/list-all-files?channel=${encodeURIComponent(selectedChannel)}`
+        : "/api/list-all-files";
+      const res = await fetch(url);
       const data = await res.json();
       if (res.ok && data.success) {
         setAllFiles(data);
@@ -899,61 +912,30 @@ export default function Dashboard() {
     }
   };
 
-  const fetchMigrationDirs = async () => {
+  const fetchAvailableChannels = async () => {
     try {
-      const res = await fetch("/api/migrate-files");
+      const res = await fetch("/api/channels");
       const data = await res.json();
-      if (res.ok && data.directories) {
-        setMigrationDirs(data.directories);
-        // Auto-select current user's directory as destination
-        if (data.currentSafeUserId) {
-          setMigrationDest(data.currentSafeUserId);
+      if (res.ok && data.channels) {
+        setAvailableChannels(data.channels);
+        // Auto-select current channel if not already selected
+        if (!selectedChannel && data.currentChannel) {
+          setSelectedChannel(data.currentChannel);
+        } else if (!selectedChannel && data.channels.length > 0) {
+          // If no current channel, select the first one (usually the one with most files)
+          setSelectedChannel(data.channels[0].userId);
         }
       }
     } catch (error) {
-      console.error("[ERROR] Error fetching migration directories:", error);
+      console.error("[ERROR] Error fetching channels:", error);
     }
   };
 
-  const handleMigrateFiles = async () => {
-    if (!migrationSource || !migrationDest) {
-      setShowToast({ message: "Please select source and destination directories", type: "error" });
-      return;
-    }
-    if (migrationSource === migrationDest) {
-      setShowToast({ message: "Source and destination cannot be the same", type: "error" });
-      return;
-    }
-
-    if (!confirm(`Migrate all files from "${migrationSource}" to "${migrationDest}"?\n\nThis will COPY files (source will remain). Delete source manually after verifying.`)) {
-      return;
-    }
-
-    setMigratingFiles(true);
-    try {
-      const res = await fetch("/api/migrate-files", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sourceDir: migrationSource,
-          destDir: migrationDest,
-          deleteSource: false, // Keep source for safety
-        }),
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setShowToast({ message: `Migrated ${data.filesCopied} files successfully!`, type: "success" });
-        fetchMigrationDirs();
-        fetchAllFiles();
-        fetchStagingFiles();
-      } else {
-        setShowToast({ message: data.error || "Migration failed", type: "error" });
-      }
-    } catch (error: any) {
-      setShowToast({ message: error?.message || "Migration failed", type: "error" });
-    } finally {
-      setMigratingFiles(false);
-    }
+  const handleChannelChange = (channelUserId: string) => {
+    setSelectedChannel(channelUserId);
+    // Refresh files for the new channel
+    fetchAllFiles();
+    fetchStagingFiles();
   };
 
   const fetchUser = async () => {
@@ -1467,6 +1449,26 @@ export default function Dashboard() {
                 </div>
               </div>
             )}
+            {/* Channel Selector */}
+            {availableChannels.length > 1 && (
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-gray-600 dark:text-gray-400 font-medium">
+                  Channel:
+                </label>
+                <select
+                  value={selectedChannel}
+                  onChange={(e) => handleChannelChange(e.target.value)}
+                  className="px-3 py-2 bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 text-gray-700 dark:text-gray-300 font-medium rounded-xl transition-all duration-200 shadow-sm hover:shadow-md text-sm min-w-[200px]"
+                >
+                  {availableChannels.map((channel) => (
+                    <option key={channel.userId} value={channel.userId}>
+                      {channel.displayName} ({channel.fileCount} files)
+                      {channel.isCurrent ? " ✓" : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="flex gap-3 flex-wrap">
               <button
                 onClick={() => setShowDebugPanel(!showDebugPanel)}
@@ -1570,90 +1572,6 @@ export default function Dashboard() {
             </div>
             <div className="mt-3 text-xs text-gray-400">
               Polling: Every 1s | Queue updates logged | Job progress tracked
-            </div>
-
-            {/* File Migration Tool */}
-            <div className="mt-6 pt-4 border-t border-purple-700">
-              <div className="flex justify-between items-center mb-3">
-                <h4 className="text-md font-bold text-yellow-400 flex items-center gap-2">
-                  <span>📁</span>
-                  <span>File Migration Tool</span>
-                </h4>
-                <button
-                  onClick={fetchMigrationDirs}
-                  className="px-3 py-1 bg-purple-600 hover:bg-purple-700 text-white text-xs rounded-lg"
-                >
-                  Refresh Directories
-                </button>
-              </div>
-              <p className="text-xs text-gray-400 mb-3">
-                Use this to consolidate files from different channel logins into one directory.
-              </p>
-              
-              {migrationDirs.length === 0 ? (
-                <button
-                  onClick={fetchMigrationDirs}
-                  className="w-full py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm rounded-lg"
-                >
-                  Load Directories
-                </button>
-              ) : (
-                <div className="space-y-3">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs text-gray-400 mb-1">Source Directory</label>
-                      <select
-                        value={migrationSource}
-                        onChange={(e) => setMigrationSource(e.target.value)}
-                        className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm"
-                      >
-                        <option value="">Select source...</option>
-                        {migrationDirs.map((dir) => (
-                          <option key={dir.name} value={dir.name}>
-                            {dir.name} ({dir.fileCount} files, {dir.jobCount} jobs)
-                            {dir.isCurrentUser ? " ✓ Current" : ""}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-xs text-gray-400 mb-1">Destination Directory</label>
-                      <select
-                        value={migrationDest}
-                        onChange={(e) => setMigrationDest(e.target.value)}
-                        className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm"
-                      >
-                        <option value="">Select destination...</option>
-                        {migrationDirs.map((dir) => (
-                          <option key={dir.name} value={dir.name}>
-                            {dir.name} ({dir.fileCount} files)
-                            {dir.isCurrentUser ? " ✓ Current" : ""}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={handleMigrateFiles}
-                      disabled={migratingFiles || !migrationSource || !migrationDest}
-                      className="flex-1 py-2 bg-yellow-600 hover:bg-yellow-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg flex items-center justify-center gap-2"
-                    >
-                      {migratingFiles ? (
-                        <>
-                          <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></div>
-                          Migrating...
-                        </>
-                      ) : (
-                        <>📤 Migrate Files</>
-                      )}
-                    </button>
-                  </div>
-                  <p className="text-xs text-gray-500">
-                    Files will be COPIED (not moved). Delete the source directory manually after verifying.
-                  </p>
-                </div>
-              )}
             </div>
           </div>
         )}

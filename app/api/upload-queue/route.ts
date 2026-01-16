@@ -114,12 +114,6 @@ export async function POST(request: NextRequest) {
     
     console.log(`[UPLOAD-QUEUE] Received CSV + ${uploadedFiles.length} video file(s) + ${uploadedThumbnails.length} thumbnail file(s) for upload`);
 
-    if (enableScheduling && !videosPerInterval) {
-      return NextResponse.json(
-        { error: "Videos per interval is required when scheduling is enabled" },
-        { status: 400 }
-      );
-    }
     if (enableScheduling && uploadInterval === "custom" && !customIntervalMinutes) {
       return NextResponse.json(
         { error: "Custom interval minutes is required when using custom interval" },

@@ -86,9 +86,13 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    // Check if a specific channel is requested
+    const { searchParams } = new URL(request.url);
+    const requestedChannel = searchParams.get("channel");
+
     // Get userId from session (or fetch if not stored)
     let userId = session.userId;
-    if (!userId) {
+    if (!userId && !requestedChannel) {
       const oAuthClient = getOAuthClient();
       oAuthClient.setCredentials(session.tokens || {});
       const oauth2 = google.oauth2({
@@ -101,13 +105,24 @@ export async function GET(request: NextRequest) {
       session.userId = userId;
     }
 
+    // Use requested channel if provided, otherwise use current userId
+    const targetUserId = requestedChannel || userId;
+    const safeTargetUserId = targetUserId ? targetUserId.replace(/[^a-zA-Z0-9._-]/g, '_') : null;
+
     const queue = getQueue();
     
-    // Filter jobs belonging to this user
+    // Filter jobs belonging to the target channel/user
     const userJobs = queue.filter(item => {
-      const matchesUser = (item.userId && item.userId === userId) || 
-                         (!item.userId && item.sessionId === sessionId);
-      return matchesUser;
+      if (requestedChannel) {
+        // When a specific channel is requested, match by userId only
+        const itemSafeUserId = item.userId ? item.userId.replace(/[^a-zA-Z0-9._-]/g, '_') : null;
+        return itemSafeUserId === safeTargetUserId;
+      } else {
+        // Default behavior: match by userId or sessionId
+        const matchesUser = (item.userId && item.userId === userId) || 
+                           (!item.userId && item.sessionId === sessionId);
+        return matchesUser;
+      }
     });
 
     // Create a set of known job IDs for quick lookup
@@ -132,8 +147,8 @@ export async function GET(request: NextRequest) {
       return `${(bytes / 1024).toFixed(2)} KB`;
     };
 
-    // Sanitize userId to match storage.ts pattern
-    const safeUserId = userId ? userId.replace(/[^a-zA-Z0-9._-]/g, '_') : null;
+    // Use targetUserId for directory scanning
+    const safeUserId = safeTargetUserId;
 
     // Method 1: Scan files from known jobs in queue
     for (const job of userJobs) {
@@ -194,8 +209,10 @@ export async function GET(request: NextRequest) {
       dirsToScan.push(path.join(uploadsDir, safeUserId));
     }
     
-    // Scan sessionId-based directory (old format)
-    dirsToScan.push(path.join(uploadsDir, sessionId));
+    // Only scan sessionId-based directory if no specific channel was requested (backward compatibility)
+    if (!requestedChannel) {
+      dirsToScan.push(path.join(uploadsDir, sessionId));
+    }
     
     for (const scanDir of dirsToScan) {
       if (!fs.existsSync(scanDir)) continue;

@@ -30,29 +30,42 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Get userId (email) from session (or fetch if not stored)
-    let userId = session.userId;
-    if (!userId) {
-      const oAuthClient = getOAuthClient();
-      oAuthClient.setCredentials(session.tokens);
-      const oauth2 = google.oauth2({
-        version: "v2",
-        auth: oAuthClient,
-      });
-      const userInfo = await oauth2.userinfo.get();
-      userId = (userInfo.data.email || userInfo.data.id || undefined) as string | undefined;
-      // Update session with userId for future use
-      if (userId) {
-        session.userId = userId;
-        setSession(sessionId, session);
+    // Check if a specific channel is requested
+    const { searchParams } = new URL(request.url);
+    const requestedChannel = searchParams.get("channel");
+
+    let targetUserId: string | undefined;
+    let targetSessionId: string | undefined;
+
+    if (requestedChannel) {
+      // Use the requested channel's userId directly
+      targetUserId = requestedChannel;
+      // Don't use sessionId for channel-specific requests
+    } else {
+      // Default behavior: use current session's userId
+      targetUserId = session.userId;
+      targetSessionId = sessionId;
+      
+      // Get userId (email) from session (or fetch if not stored)
+      if (!targetUserId) {
+        const oAuthClient = getOAuthClient();
+        oAuthClient.setCredentials(session.tokens);
+        const oauth2 = google.oauth2({
+          version: "v2",
+          auth: oAuthClient,
+        });
+        const userInfo = await oauth2.userinfo.get();
+        targetUserId = (userInfo.data.email || userInfo.data.id || undefined) as string | undefined;
+        // Update session with userId for future use
+        if (targetUserId) {
+          session.userId = targetUserId;
+          setSession(sessionId, session);
+        }
       }
     }
 
-    // Use the new function that scans all directories for this email
-    // This allows access to files uploaded from different channel sessions
-    const stagingFiles = userId 
-      ? listAllStagingFilesForEmail(userId)
-      : listStagingFiles(userId, sessionId);
+    // List staging files for the specific channel
+    const stagingFiles = listStagingFiles(targetUserId, targetSessionId);
 
     // Calculate totals
     const totalVideos = stagingFiles.videos.length;
