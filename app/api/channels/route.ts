@@ -16,18 +16,12 @@ export async function GET(request: NextRequest) {
     const sessionId = cookieStore.get("sessionId")?.value;
 
     if (!sessionId) {
-      return NextResponse.json(
-        { error: "Not authenticated" },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
     const session = getSession(sessionId);
     if (!session || !session.authenticated) {
-      return NextResponse.json(
-        { error: "Not authenticated" },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
     const uploadsDir = path.join(process.cwd(), "uploads");
@@ -48,7 +42,7 @@ export async function GET(request: NextRequest) {
     for (const entry of entries) {
       if (entry.isDirectory()) {
         const dirPath = path.join(uploadsDir, entry.name);
-        
+
         // Count files in this directory
         let fileCount = 0;
         let hasStaging = false;
@@ -64,7 +58,7 @@ export async function GET(request: NextRequest) {
                 const stagingPath = path.join(dirPath, "staging");
                 const videosPath = path.join(stagingPath, "videos");
                 const thumbnailsPath = path.join(stagingPath, "thumbnails");
-                
+
                 if (fs.existsSync(videosPath)) {
                   fileCount += fs.readdirSync(videosPath).length;
                 }
@@ -77,7 +71,7 @@ export async function GET(request: NextRequest) {
                 const jobPath = path.join(dirPath, sub.name);
                 const videosPath = path.join(jobPath, "videos");
                 const thumbnailsPath = path.join(jobPath, "thumbnails");
-                
+
                 if (fs.existsSync(videosPath)) {
                   fileCount += fs.readdirSync(videosPath).length;
                 }
@@ -103,7 +97,10 @@ export async function GET(request: NextRequest) {
 
         channels.push({
           userId: entry.name,
-          displayName: displayName.length > 30 ? displayName.substring(0, 30) + "..." : displayName,
+          displayName:
+            displayName.length > 30
+              ? displayName.substring(0, 30) + "..."
+              : displayName,
           fileCount,
           jobCount,
           hasStaging,
@@ -131,4 +128,3 @@ export async function GET(request: NextRequest) {
     );
   }
 }
-

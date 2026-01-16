@@ -717,23 +717,7 @@ export default function Dashboard() {
             const ageSeconds =
               (Date.now() - new Date(job.createdAt).getTime()) / 1000;
             // Log warning if stuck for more than 15 seconds, but only every 10 seconds to avoid spam
-            if (ageSeconds > 15 && Math.floor(ageSeconds) % 10 === 0) {
-              const warningMsg = `⚠️ Job ${job.id.substring(
-                0,
-                20
-              )}... stuck in pending for ${Math.round(
-                ageSeconds
-              )}s. Check if worker is running!`;
-              console.warn(`[DEBUG] ${warningMsg}`);
-              // Only add to debug log if not already there
-              const lastLog = debugLogs[debugLogs.length - 1];
-              if (
-                !lastLog ||
-                !lastLog.message.includes(job.id.substring(0, 15))
-              ) {
-                addDebugLog(warningMsg, "error");
-              }
-            }
+            // Removed worker check - no longer needed
           });
         }
       }
@@ -1564,9 +1548,7 @@ export default function Dashboard() {
               </div>
               {remaining > 0 && (
                 <div className="text-sm text-yellow-700">
-                    {processing > 0
-                      ? "Worker is processing videos..."
-                      : "Waiting for worker to process..."}
+                    Processing videos...
                 </div>
               )}
             </div>
@@ -2280,7 +2262,7 @@ export default function Dashboard() {
                           How It Works:
                         </strong>
                         <p className="text-sm text-blue-800 dark:text-blue-200 mt-1">
-                          Upload your CSV and files together. The system extracts filenames from CSV paths and matches them to uploaded files. Files are saved directly to the job directory and processed by the background worker.
+                          Upload your CSV and files together. The system extracts filenames from CSV paths and matches them to uploaded files. Videos are streamed directly to YouTube in batches with real-time progress updates.
                         </p>
                       </div>
                     </div>
@@ -3067,21 +3049,7 @@ export default function Dashboard() {
                                   new Date(job.createdAt).getTime()) /
                                 1000;
                         if (ageSeconds > 10) {
-                          return (
-                            <div className="mt-2 p-2 bg-yellow-100 dark:bg-yellow-900/30 border border-yellow-300 dark:border-yellow-700 rounded-lg">
-                              <div className="flex items-center gap-2 text-yellow-800 dark:text-yellow-200 font-semibold text-sm">
-                                <span>⚠️</span>
-                                      <span>
-                                        Waiting for worker... (
-                                        {Math.round(ageSeconds)}s). Make sure
-                                        worker is running:{" "}
-                                        <code className="bg-yellow-200 dark:bg-yellow-800 px-1 rounded">
-                                          npm run worker
-                                        </code>
-                                      </span>
-                              </div>
-                            </div>
-                          );
+                          return null; // Removed worker warning - no longer needed
                         }
                         return null;
                       })()}
@@ -3568,7 +3536,7 @@ export default function Dashboard() {
                 <div className="text-center py-8">
                   <div className="text-5xl mb-3 animate-pulse-slow">⏳</div>
                       <p className="text-gray-600 dark:text-gray-400 font-medium">
-                        Waiting for worker to start processing...
+                        Processing will begin shortly...
                       </p>
                       <p className="text-sm text-gray-500 dark:text-gray-500 mt-2">
                         The first video will upload immediately once processing
@@ -3577,8 +3545,7 @@ export default function Dashboard() {
                       {jobStatus.status === "processing" && (
                     <div className="mt-4 p-3 bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-700 rounded-lg">
                       <p className="text-sm text-yellow-800 dark:text-yellow-200 font-semibold">
-                            ⚡ Worker is processing - first video should start
-                            uploading shortly...
+                            ⚡ Processing videos...
                       </p>
                     </div>
                   )}
