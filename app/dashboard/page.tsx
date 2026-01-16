@@ -422,11 +422,16 @@ export default function Dashboard() {
     }
   };
 
-  const uploadToStaging = async (file: File, type: "video" | "thumbnail") => {
+  const uploadToStaging = async (files: File[], type: "video" | "thumbnail") => {
+    if (files.length === 0) return;
+    
     setUploadingToStaging(true);
     try {
       const formData = new FormData();
-      formData.append("file", file);
+      // Append all files
+      files.forEach((file) => {
+        formData.append("files", file);
+      });
       formData.append("type", type);
 
       const response = await fetch("/api/staging/upload", {
@@ -436,7 +441,13 @@ export default function Dashboard() {
 
       const data = await response.json();
       if (data.success) {
-        setShowToast({ message: `${type === "video" ? "Video" : "Thumbnail"} uploaded to staging!`, type: "success" });
+        const successCount = data.files?.length || 0;
+        const errorCount = data.errors?.length || 0;
+        let message = `${successCount} ${type === "video" ? "video(s)" : "thumbnail(s)"} uploaded to staging!`;
+        if (errorCount > 0) {
+          message += ` ${errorCount} failed.`;
+        }
+        setShowToast({ message, type: successCount > 0 ? "success" : "error" });
         await fetchStagingFiles();
         // Clear input
         if (type === "video" && stagingVideoInputRef.current) {
@@ -445,10 +456,10 @@ export default function Dashboard() {
           stagingThumbnailInputRef.current.value = "";
         }
       } else {
-        setShowToast({ message: data.error || "Failed to upload file", type: "error" });
+        setShowToast({ message: data.message || data.error || "Failed to upload files", type: "error" });
       }
     } catch (error: any) {
-      setShowToast({ message: error.message || "Failed to upload file", type: "error" });
+      setShowToast({ message: error.message || "Failed to upload files", type: "error" });
     } finally {
       setUploadingToStaging(false);
     }
@@ -2252,40 +2263,46 @@ export default function Dashboard() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                 {/* Upload Video */}
                 <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6">
-                  <h3 className="text-lg font-semibold mb-3 text-gray-800 dark:text-white">Upload Video</h3>
+                  <h3 className="text-lg font-semibold mb-3 text-gray-800 dark:text-white">Upload Videos</h3>
                   <input
                     ref={stagingVideoInputRef}
                     type="file"
                     accept="video/*"
+                    multiple
                     className="mb-3 w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100 dark:file:bg-purple-900/30 dark:file:text-purple-300"
                     onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file && file.type.startsWith("video/")) {
-                        uploadToStaging(file, "video");
+                      const files = Array.from(e.target.files || []).filter(
+                        (file) => file.type.startsWith("video/")
+                      );
+                      if (files.length > 0) {
+                        uploadToStaging(files, "video");
                       }
                     }}
                     disabled={uploadingToStaging}
                   />
-                  <p className="text-xs text-gray-500 dark:text-gray-400">Upload MP4 or other video files</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Upload multiple MP4 or other video files</p>
                 </div>
 
                 {/* Upload Thumbnail */}
                 <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6">
-                  <h3 className="text-lg font-semibold mb-3 text-gray-800 dark:text-white">Upload Thumbnail</h3>
+                  <h3 className="text-lg font-semibold mb-3 text-gray-800 dark:text-white">Upload Thumbnails</h3>
                   <input
                     ref={stagingThumbnailInputRef}
                     type="file"
                     accept="image/*"
+                    multiple
                     className="mb-3 w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100 dark:file:bg-purple-900/30 dark:file:text-purple-300"
                     onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file && (file.type.startsWith("image/") || file.name.match(/\.(jpg|jpeg|png|gif|webp)$/i))) {
-                        uploadToStaging(file, "thumbnail");
+                      const files = Array.from(e.target.files || []).filter(
+                        (file) => file.type.startsWith("image/") || file.name.match(/\.(jpg|jpeg|png|gif|webp)$/i)
+                      );
+                      if (files.length > 0) {
+                        uploadToStaging(files, "thumbnail");
                       }
                     }}
                     disabled={uploadingToStaging}
                   />
-                  <p className="text-xs text-gray-500 dark:text-gray-400">Upload JPG, PNG, or other image files</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Upload multiple JPG, PNG, or other image files</p>
                 </div>
               </div>
 
