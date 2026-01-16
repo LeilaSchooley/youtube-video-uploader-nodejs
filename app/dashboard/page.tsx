@@ -112,6 +112,7 @@ export default function Dashboard() {
     totalFiles: number;
     currentFileName: string;
   } | null>(null);
+  const [videoBatchSize, setVideoBatchSize] = useState<number>(10); // Default: 10 videos per batch
   const [expandedCategories, setExpandedCategories] = useState<{
     videos: boolean;
     thumbnails: boolean;
@@ -452,8 +453,8 @@ export default function Dashboard() {
     const uploadedFiles: Array<{ fileName: string; size: number; sizeFormatted: string }> = [];
     const errors: Array<{ fileName: string; error: string }> = [];
 
-    // Batch size: upload 50 files per request for good balance of speed and progress updates
-    const BATCH_SIZE = 50;
+    // Batch size: videos use configurable setting (default 10), thumbnails use fixed 100
+    const BATCH_SIZE = type === "video" ? videoBatchSize : 100;
     let processedCount = 0;
 
     try {
@@ -2311,6 +2312,44 @@ export default function Dashboard() {
                 <p className="text-sm text-purple-900 dark:text-purple-100 font-medium">
                   <strong>💡 Workflow:</strong> Upload videos and thumbnails individually here first. Then upload your CSV file in the "Batch Upload" section below. The CSV will automatically match files by filename.
                 </p>
+              </div>
+
+              {/* Upload Settings */}
+              <div className="mb-5 p-4 bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg">
+                <h3 className="text-md font-semibold mb-3 text-gray-800 dark:text-white">Upload Settings</h3>
+                <div className="flex flex-col gap-3">
+                  <div>
+                    <label htmlFor="videoBatchSize" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Video Batch Size
+                    </label>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="number"
+                        id="videoBatchSize"
+                        min="1"
+                        max="100"
+                        value={videoBatchSize}
+                        onChange={(e) => {
+                          const value = parseInt(e.target.value, 10);
+                          if (!isNaN(value) && value > 0 && value <= 100) {
+                            setVideoBatchSize(value);
+                            localStorage.setItem("videoBatchSize", value.toString());
+                          }
+                        }}
+                        className="w-24 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                      />
+                      <span className="text-sm text-gray-600 dark:text-gray-400">
+                        videos per batch (default: 10)
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      Smaller batches = more frequent progress updates but slower upload. Larger batches = faster upload but less frequent updates.
+                    </p>
+                  </div>
+                  <div className="text-xs text-gray-600 dark:text-gray-400">
+                    <strong>Thumbnail batch size:</strong> Fixed at 100 per batch (thumbnails are small, so larger batches are fine)
+                  </div>
+                </div>
               </div>
 
               {/* Upload Progress Display */}
