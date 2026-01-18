@@ -97,6 +97,40 @@ export default function Dashboard() {
   const [showAllFiles, setShowAllFiles] = useState<boolean>(true); // Expanded by default
   const [showSingleUpload, setShowSingleUpload] = useState<boolean>(true); // Expanded by default
   const [showBatchUpload, setShowBatchUpload] = useState<boolean>(true); // Expanded by default
+  const [showBulkUpload, setShowBulkUpload] = useState<boolean>(false);
+  const [showMetadataUpdate, setShowMetadataUpdate] = useState<boolean>(false);
+  const [bulkUploading, setBulkUploading] = useState<boolean>(false);
+  const [metadataUpdating, setMetadataUpdating] = useState<boolean>(false);
+  const [bulkUploadProgress, setBulkUploadProgress] = useState<{
+    total: number;
+    totalBatches: number;
+    currentBatch: number;
+    completed: number;
+    failed: number;
+    currentFile?: string;
+    message?: string;
+  } | null>(null);
+  const [metadataUpdateProgress, setMetadataUpdateProgress] = useState<{
+    total: number;
+    updated: number;
+    failed: number;
+    thumbnails: number;
+    currentVideo?: string;
+    message?: string;
+    currentBatch?: number;
+    totalBatches?: number;
+    rate?: number; // videos per minute
+    estimatedSeconds?: number;
+    processed?: number;
+    failedVideos?: Array<{ videoName: string; error: string; index: number }>;
+    totalTime?: number;
+    avgRate?: number;
+  } | null>(null);
+  const [showFailedVideos, setShowFailedVideos] = useState<boolean>(false);
+  const [selectedBulkFiles, setSelectedBulkFiles] = useState<File[]>([]);
+  const [selectedMetadataCsv, setSelectedMetadataCsv] = useState<File | null>(null);
+  const bulkFilesInputRef = useRef<HTMLInputElement>(null);
+  const metadataCsvInputRef = useRef<HTMLInputElement>(null);
   const [showBatchInstructions, setShowBatchInstructions] =
     useState<boolean>(false); // Collapsed by default
   const [expandedCategories, setExpandedCategories] = useState<{
@@ -853,6 +887,357 @@ export default function Dashboard() {
         fileInputRef.current.value = "";
         setSelectedVideoFile(null);
       }
+    }
+  };
+
+  const handleBulkUpload = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setBulkUploading(true);
+    setBulkUploadProgress(null);
+    setMessage({ type: null, text: null });
+
+    if (selectedBulkFiles.length === 0) {
+      setShowToast({ message: "Please select video files to upload.", type: "error" });
+      setBulkUploading(false);
+      return;
+    }
+
+    const formData = new FormData();
+    selectedBulkFiles.forEach((file) => {
+      formData.append("files", file);
+    });
+
+    try {
+      const res = await fetch("/api/upload-bulk", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ error: "Bulk upload failed" }));
+        throw new Error(errorData.error || "Bulk upload failed");
+      }
+
+      if (!res.body) {
+        throw new Error("No response body for bulk upload");
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      let totalCompleted = 0;
+      let totalFailed = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(line.slice(6));
+
+              switch (data.type) {
+                case "start":
+                  setBulkUploadProgress({
+                    total: data.total,
+                    totalBatches: data.totalBatches,
+                    currentBatch: 0,
+                    completed: 0,
+                    failed: 0,
+                    message: `Starting bulk upload: ${data.total} videos in ${data.totalBatches} batches`,
+                  });
+                  break;
+
+                case "batch_start":
+                  setBulkUploadProgress(prev => ({
+                    ...prev!,
+                    currentBatch: data.batchNumber,
+                    message: `Processing batch ${data.batchNumber}/${data.totalBatches}`,
+                  }));
+                  break;
+
+                case "upload_start":
+                  setBulkUploadProgress(prev => ({
+                    ...prev!,
+                    currentFile: data.filename,
+                    message: `Uploading: ${data.filename}`,
+                  }));
+                  break;
+
+                case "upload_success":
+                  totalCompleted++;
+                  setBulkUploadProgress(prev => ({
+                    ...prev!,
+                    completed: totalCompleted,
+                    message: `✅ ${data.filename} uploaded (${totalCompleted}/${prev!.total})`,
+                  }));
+                  break;
+
+                case "upload_failed":
+                  totalFailed++;
+                  setBulkUploadProgress(prev => ({
+                    ...prev!,
+                    failed: totalFailed,
+                    message: `❌ ${data.filename} failed: ${data.error}`,
+                  }));
+                  break;
+
+                case "batch_complete":
+                  setBulkUploadProgress(prev => ({
+                    ...prev!,
+                    message: `Batch ${data.batchNumber}/${data.totalBatches} complete: ${data.completed} succeeded, ${data.failed} failed`,
+                  }));
+                  break;
+
+                case "progress":
+                  setBulkUploadProgress(prev => ({
+                    ...prev!,
+                    completed: data.totalCompleted,
+                    failed: data.totalFailed,
+                    message: `Progress: ${data.totalCompleted} succeeded, ${data.totalFailed} failed`,
+                  }));
+                  break;
+
+                case "complete":
+                  totalCompleted = data.totalCompleted;
+                  totalFailed = data.totalFailed;
+                  let finalMessage = `✅ Bulk Upload Complete!\n\n`;
+                  finalMessage += `📊 ${totalCompleted} videos uploaded successfully`;
+                  if (totalFailed > 0) {
+                    finalMessage += `\n⚠️ ${totalFailed} videos failed`;
+                  }
+                  setShowToast({
+                    message: finalMessage.trim(),
+                    type: totalFailed > 0 ? "info" : "success",
+                  });
+                  setMessage({
+                    type: totalFailed > 0 ? "info" : "success",
+                    text: `✅ Bulk upload complete: ${totalCompleted} succeeded${totalFailed > 0 ? `, ${totalFailed} failed` : ""}`,
+                  });
+                  break;
+
+                case "error":
+                  throw new Error(data.error);
+              }
+            } catch (parseError) {
+              console.error("Error parsing SSE data for bulk upload:", parseError, line);
+            }
+          }
+        }
+      }
+
+      // Reset form
+      if (bulkFilesInputRef.current) {
+        bulkFilesInputRef.current.value = "";
+      }
+      setSelectedBulkFiles([]);
+      fetchAllFiles();
+    } catch (error: any) {
+      console.error("=== BULK UPLOAD EXCEPTION (Client) ===");
+      console.error("Error:", error);
+      const errorMsg = error?.message || "An error occurred during bulk upload.";
+      setShowToast({ message: errorMsg, type: "error" });
+      setMessage({ type: "error", text: errorMsg });
+    } finally {
+      setBulkUploading(false);
+    }
+  };
+
+  const handleMetadataUpdate = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setMetadataUpdating(true);
+    setMetadataUpdateProgress(null);
+    setMessage({ type: null, text: null });
+
+    if (!selectedMetadataCsv) {
+      setShowToast({ message: "Please select a CSV file.", type: "error" });
+      setMetadataUpdating(false);
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("csvFile", selectedMetadataCsv);
+
+    try {
+      const res = await fetch("/api/update-metadata", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ error: "Metadata update failed" }));
+        throw new Error(errorData.error || "Metadata update failed");
+      }
+
+      if (!res.body) {
+        throw new Error("No response body for metadata update");
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      let totalUpdated = 0;
+      let totalFailed = 0;
+      let totalThumbnails = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(line.slice(6));
+
+              switch (data.type) {
+                case "start":
+                  setMetadataUpdateProgress({
+                    total: data.total,
+                    updated: 0,
+                    failed: 0,
+                    thumbnails: 0,
+                    processed: 0,
+                    message: `Starting metadata update for ${data.total} videos...`,
+                  });
+                  break;
+
+                case "videos_fetched":
+                  setMetadataUpdateProgress(prev => ({
+                    ...prev!,
+                    message: `Found ${data.totalVideos} private videos, processing ${data.totalRows} CSV rows`,
+                  }));
+                  break;
+
+                case "batches_created":
+                  setMetadataUpdateProgress(prev => ({
+                    ...prev!,
+                    totalBatches: data.totalBatches,
+                    message: `Created ${data.totalBatches} batches (${data.batchSize} videos per batch)`,
+                  }));
+                  break;
+
+                case "batch_start":
+                  setMetadataUpdateProgress(prev => ({
+                    ...prev!,
+                    currentBatch: data.batchNumber,
+                    message: `Processing batch ${data.batchNumber}/${data.totalBatches} (${data.batchSize} videos)`,
+                  }));
+                  break;
+
+                case "row_start":
+                  setMetadataUpdateProgress(prev => ({
+                    ...prev!,
+                    currentVideo: data.videoName,
+                  }));
+                  break;
+
+                case "update_success":
+                  totalUpdated++;
+                  setMetadataUpdateProgress(prev => ({
+                    ...prev!,
+                    updated: totalUpdated,
+                    processed: (prev?.processed || 0) + 1,
+                  }));
+                  break;
+
+                case "update_failed":
+                  totalFailed++;
+                  setMetadataUpdateProgress(prev => ({
+                    ...prev!,
+                    failed: totalFailed,
+                    processed: (prev?.processed || 0) + 1,
+                  }));
+                  break;
+
+                case "thumbnail_success":
+                  totalThumbnails++;
+                  setMetadataUpdateProgress(prev => ({
+                    ...prev!,
+                    thumbnails: totalThumbnails,
+                  }));
+                  break;
+
+                case "batch_complete":
+                  setMetadataUpdateProgress(prev => ({
+                    ...prev!,
+                    updated: data.totalUpdated,
+                    failed: data.totalFailed,
+                    thumbnails: data.totalThumbnails,
+                    processed: data.processed,
+                    rate: data.rate,
+                    estimatedSeconds: data.estimatedSeconds,
+                    message: `Batch ${data.batchNumber}/${data.totalBatches} complete: ${data.totalUpdated} updated, ${data.totalFailed} failed`,
+                  }));
+                  break;
+
+                case "complete":
+                  totalUpdated = data.totalUpdated;
+                  totalFailed = data.totalFailed;
+                  totalThumbnails = data.totalThumbnails;
+                  setMetadataUpdateProgress(prev => ({
+                    ...prev!,
+                    updated: totalUpdated,
+                    failed: totalFailed,
+                    thumbnails: totalThumbnails,
+                    processed: data.total,
+                    totalTime: data.totalTime,
+                    avgRate: data.avgRate,
+                    failedVideos: data.failedVideos || [],
+                    message: `Complete! ${totalUpdated} updated, ${totalFailed} failed in ${data.totalTime}s (${data.avgRate} videos/min)`,
+                  }));
+                  let finalMessage = `✅ Metadata Update Complete!\n\n`;
+                  finalMessage += `📊 ${totalUpdated} videos updated`;
+                  if (totalThumbnails > 0) {
+                    finalMessage += `\n🖼️ ${totalThumbnails} thumbnails uploaded`;
+                  }
+                  if (totalFailed > 0) {
+                    finalMessage += `\n⚠️ ${totalFailed} videos failed`;
+                  }
+                  finalMessage += `\n⏱️ Completed in ${data.totalTime}s (${data.avgRate} videos/min)`;
+                  setShowToast({
+                    message: finalMessage.trim(),
+                    type: totalFailed > 0 ? "info" : "success",
+                  });
+                  setMessage({
+                    type: totalFailed > 0 ? "info" : "success",
+                    text: `✅ Metadata update complete: ${totalUpdated} updated${totalThumbnails > 0 ? `, ${totalThumbnails} thumbnails` : ""}${totalFailed > 0 ? `, ${totalFailed} failed` : ""}`,
+                  });
+                  break;
+
+                case "error":
+                  throw new Error(data.error);
+              }
+            } catch (parseError) {
+              console.error("Error parsing SSE data for metadata update:", parseError, line);
+            }
+          }
+        }
+      }
+
+      // Reset form
+      if (metadataCsvInputRef.current) {
+        metadataCsvInputRef.current.value = "";
+      }
+      setSelectedMetadataCsv(null);
+    } catch (error: any) {
+      console.error("=== METADATA UPDATE EXCEPTION (Client) ===");
+      console.error("Error:", error);
+      const errorMsg = error?.message || "An error occurred during metadata update.";
+      setShowToast({ message: errorMsg, type: "error" });
+      setMessage({ type: "error", text: errorMsg });
+    } finally {
+      setMetadataUpdating(false);
     }
   };
 
@@ -2741,6 +3126,433 @@ export default function Dashboard() {
         </form>
             </>
           )}
+      </div>
+
+      {/* Bulk Upload Section */}
+      <div className="card">
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-3">
+            <span className="text-3xl">📦</span>
+            <h2 className="text-2xl font-bold text-gray-800 dark:text-white">
+              Bulk Upload (Step 1)
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowBulkUpload(!showBulkUpload)}
+            className="px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-white rounded-lg transition-colors"
+          >
+            {showBulkUpload ? "Hide" : "Show"}
+          </button>
+        </div>
+
+        {showBulkUpload && (
+          <div className="space-y-4">
+            <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-lg">
+              <p className="text-sm text-blue-900 dark:text-blue-100">
+                <strong>📦 Bulk Upload:</strong> Upload multiple videos at once. Videos will be uploaded as <strong>private</strong> with the filename as the title. Uploads happen in batches of 5 with real-time progress.
+              </p>
+            </div>
+
+            <form onSubmit={handleBulkUpload} className="flex flex-col gap-5">
+              <label htmlFor="bulkFiles" className="label">
+                Select Video Files
+              </label>
+              <div
+                className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-all ${
+                  selectedBulkFiles.length > 0
+                    ? "border-green-500 bg-green-50 dark:bg-green-900/20"
+                    : "border-gray-300 hover:border-blue-500"
+                }`}
+                onClick={() => bulkFilesInputRef.current?.click()}
+              >
+                <input
+                  ref={bulkFilesInputRef}
+                  type="file"
+                  id="bulkFiles"
+                  name="bulkFiles"
+                  accept="video/*"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => {
+                    const files = Array.from(e.target.files || []);
+                    setSelectedBulkFiles(files);
+                  }}
+                />
+                {selectedBulkFiles.length > 0 ? (
+                  <div>
+                    <div className="text-4xl mb-2">✅</div>
+                    <p className="text-green-700 dark:text-green-300 font-semibold mb-1">
+                      {selectedBulkFiles.length} file(s) selected
+                    </p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      {selectedBulkFiles.map(f => f.name).join(", ").substring(0, 100)}
+                      {selectedBulkFiles.length > 0 && selectedBulkFiles[0].name.length > 100 ? "..." : ""}
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
+                      Click to change files
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="text-4xl mb-2">📹</div>
+                    <p className="text-gray-600 dark:text-gray-400 mb-1">
+                      Click to select videos or drag and drop
+                    </p>
+                    <p className="text-sm text-gray-500 dark:text-gray-500">
+                      Multiple video files (batches of 5)
+                    </p>
+                  </>
+                )}
+              </div>
+
+              {/* Progress Display */}
+              {bulkUploadProgress && bulkUploading && (
+                <div className="p-5 bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl dark:from-blue-900/30 dark:to-indigo-900/30 dark:border-blue-700">
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-800 flex items-center justify-center">
+                      <div className="animate-spin text-xl">📤</div>
+                    </div>
+                    <div className="flex-1">
+                      <div className="font-bold text-blue-900 dark:text-blue-100 text-lg">
+                        Bulk Uploading Videos
+                      </div>
+                      <div className="text-sm text-blue-700 dark:text-blue-300">
+                        {bulkUploadProgress.message || "Preparing..."}
+                      </div>
+                    </div>
+                  </div>
+
+                  {bulkUploadProgress.total > 0 && (
+                    <div className="mb-4">
+                      <div className="flex justify-between text-sm mb-2">
+                        <span className="text-blue-800 dark:text-blue-200 font-medium">
+                          Batch {bulkUploadProgress.currentBatch}/{bulkUploadProgress.totalBatches} • {bulkUploadProgress.completed} succeeded, {bulkUploadProgress.failed} failed
+                        </span>
+                        <span className="text-blue-600 dark:text-blue-400 font-bold">
+                          {Math.round(((bulkUploadProgress.completed + bulkUploadProgress.failed) / bulkUploadProgress.total) * 100)}%
+                        </span>
+                      </div>
+                      <div className="w-full bg-blue-200 rounded-full h-3 dark:bg-blue-800 overflow-hidden">
+                        <div
+                          className="bg-gradient-to-r from-blue-500 to-indigo-500 h-3 rounded-full transition-all duration-500"
+                          style={{
+                            width: `${Math.min(100, ((bulkUploadProgress.completed + bulkUploadProgress.failed) / bulkUploadProgress.total) * 100)}%`,
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {bulkUploadProgress.currentFile && (
+                    <div className="p-3 bg-white/60 dark:bg-gray-800/60 rounded-lg border border-blue-100 dark:border-blue-800">
+                      <div className="flex items-center gap-2">
+                        <span className="text-blue-500">📁</span>
+                        <span className="text-sm font-medium text-gray-700 dark:text-gray-300 truncate">
+                          {bulkUploadProgress.currentFile}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={bulkUploading || selectedBulkFiles.length === 0}
+                className={`btn-primary ${
+                  bulkUploading || selectedBulkFiles.length === 0
+                    ? "opacity-50 cursor-not-allowed"
+                    : ""
+                }`}
+              >
+                {bulkUploading ? (
+                  <span className="flex items-center gap-2">
+                    <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    Uploading...
+                  </span>
+                ) : selectedBulkFiles.length === 0 ? (
+                  "Please select video files first"
+                ) : (
+                  `Upload ${selectedBulkFiles.length} Video(s)`
+                )}
+              </button>
+            </form>
+          </div>
+        )}
+      </div>
+
+      {/* Metadata Update Section */}
+      <div className="card">
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-3">
+            <span className="text-3xl">✏️</span>
+            <h2 className="text-2xl font-bold text-gray-800 dark:text-white">
+              Update Metadata (Step 2)
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowMetadataUpdate(!showMetadataUpdate)}
+            className="px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-white rounded-lg transition-colors"
+          >
+            {showMetadataUpdate ? "Hide" : "Show"}
+          </button>
+        </div>
+
+        {showMetadataUpdate && (
+          <div className="space-y-4">
+            <div className="p-4 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-700 rounded-lg">
+              <p className="text-sm text-purple-900 dark:text-purple-100">
+                <strong>✏️ Update Metadata:</strong> After uploading videos in Step 1, use this to update titles, descriptions, scheduling, and privacy settings. Only <strong>private videos</strong> will be checked and updated.
+              </p>
+            </div>
+
+            <form onSubmit={handleMetadataUpdate} className="flex flex-col gap-5">
+              <label htmlFor="metadataCsv" className="label">
+                Upload CSV File
+              </label>
+              <div
+                className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-all ${
+                  selectedMetadataCsv
+                    ? "border-green-500 bg-green-50 dark:bg-green-900/20"
+                    : "border-gray-300 hover:border-purple-500"
+                }`}
+                onClick={() => metadataCsvInputRef.current?.click()}
+              >
+                <input
+                  ref={metadataCsvInputRef}
+                  type="file"
+                  id="metadataCsv"
+                  name="metadataCsv"
+                  accept=".csv"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      setSelectedMetadataCsv(file);
+                    }
+                  }}
+                />
+                {selectedMetadataCsv ? (
+                  <div>
+                    <div className="text-4xl mb-2">✅</div>
+                    <p className="text-green-700 dark:text-green-300 font-semibold mb-1">
+                      {selectedMetadataCsv.name}
+                    </p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      {(selectedMetadataCsv.size / 1024).toFixed(2)} KB
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
+                      Click to change file
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="text-4xl mb-2">📄</div>
+                    <p className="text-gray-600 dark:text-gray-400 mb-1">
+                      Click to upload CSV file
+                    </p>
+                    <p className="text-sm text-gray-500 dark:text-gray-500">
+                      CSV files only
+                    </p>
+                  </>
+                )}
+              </div>
+
+              <div className="p-4 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg">
+                <h3 className="font-semibold mb-3 text-gray-800 dark:text-white">
+                  CSV Format (Required Columns)
+                </h3>
+                <ul className="text-sm space-y-1 text-gray-700 dark:text-gray-300">
+                  <li>• <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">video_name</code> - Filename to match uploaded video</li>
+                  <li>• <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">youtube_title</code> - New title</li>
+                  <li>• <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">youtube_description</code> - New description</li>
+                  <li>• <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">scheduleTime</code> - Publish date (optional)</li>
+                  <li>• <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">privacyStatus</code> - public/private/unlisted (optional)</li>
+                  <li>• <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">thumbnail_name</code> - Thumbnail filename (optional)</li>
+                </ul>
+              </div>
+
+              {/* Progress Display - Enhanced for Large Batches */}
+              {metadataUpdateProgress && (metadataUpdating || metadataUpdateProgress.processed === metadataUpdateProgress.total) && (
+                <div className="p-6 bg-gradient-to-br from-purple-50 to-pink-50 border border-purple-200 rounded-xl dark:from-purple-900/30 dark:to-pink-900/30 dark:border-purple-700">
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="w-12 h-12 rounded-full bg-purple-100 dark:bg-purple-800 flex items-center justify-center">
+                      {metadataUpdating ? (
+                        <div className="animate-spin text-2xl">✏️</div>
+                      ) : (
+                        <div className="text-2xl">✅</div>
+                      )}
+                    </div>
+                    <div className="flex-1">
+                      <div className="font-bold text-purple-900 dark:text-purple-100 text-lg">
+                        {metadataUpdating ? "Updating Metadata" : "Update Complete"}
+                      </div>
+                      <div className="text-sm text-purple-700 dark:text-purple-300">
+                        {metadataUpdateProgress.message || "Preparing..."}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Stats Grid */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                    <div className="p-3 bg-white/60 dark:bg-gray-800/60 rounded-lg border border-purple-100 dark:border-purple-800">
+                      <div className="text-xs text-purple-600 dark:text-purple-400 mb-1">Total</div>
+                      <div className="text-lg font-bold text-purple-900 dark:text-purple-100">
+                        {metadataUpdateProgress.total}
+                      </div>
+                    </div>
+                    <div className="p-3 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
+                      <div className="text-xs text-green-600 dark:text-green-400 mb-1">Updated</div>
+                      <div className="text-lg font-bold text-green-700 dark:text-green-300">
+                        {metadataUpdateProgress.updated}
+                      </div>
+                    </div>
+                    <div className="p-3 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800">
+                      <div className="text-xs text-red-600 dark:text-red-400 mb-1">Failed</div>
+                      <div className="text-lg font-bold text-red-700 dark:text-red-300">
+                        {metadataUpdateProgress.failed}
+                      </div>
+                    </div>
+                    <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                      <div className="text-xs text-blue-600 dark:text-blue-400 mb-1">Thumbnails</div>
+                      <div className="text-lg font-bold text-blue-700 dark:text-blue-300">
+                        {metadataUpdateProgress.thumbnails}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Progress Bar */}
+                  {metadataUpdateProgress.total > 0 && (
+                    <div className="mb-4">
+                      <div className="flex justify-between text-sm mb-2">
+                        <span className="text-purple-800 dark:text-purple-200 font-medium">
+                          {metadataUpdateProgress.currentBatch && metadataUpdateProgress.totalBatches && (
+                            <>Batch {metadataUpdateProgress.currentBatch}/{metadataUpdateProgress.totalBatches} • </>
+                          )}
+                          {metadataUpdateProgress.processed || (metadataUpdateProgress.updated + metadataUpdateProgress.failed)}/{metadataUpdateProgress.total} processed
+                        </span>
+                        <span className="text-purple-600 dark:text-purple-400 font-bold">
+                          {Math.round(((metadataUpdateProgress.processed || (metadataUpdateProgress.updated + metadataUpdateProgress.failed)) / metadataUpdateProgress.total) * 100)}%
+                        </span>
+                      </div>
+                      <div className="w-full bg-purple-200 rounded-full h-4 dark:bg-purple-800 overflow-hidden">
+                        <div
+                          className="bg-gradient-to-r from-purple-500 to-pink-500 h-4 rounded-full transition-all duration-500 relative"
+                          style={{
+                            width: `${Math.min(100, ((metadataUpdateProgress.processed || (metadataUpdateProgress.updated + metadataUpdateProgress.failed)) / metadataUpdateProgress.total) * 100)}%`,
+                          }}
+                        >
+                          <div className="absolute inset-0 bg-white/20 animate-pulse"></div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Performance Metrics */}
+                  {(metadataUpdateProgress.rate || metadataUpdateProgress.estimatedSeconds) && (
+                    <div className="flex gap-4 text-xs text-purple-700 dark:text-purple-300 mb-4">
+                      {metadataUpdateProgress.rate && (
+                        <div className="flex items-center gap-1">
+                          <span>⚡</span>
+                          <span>{metadataUpdateProgress.rate} videos/min</span>
+                        </div>
+                      )}
+                      {metadataUpdateProgress.estimatedSeconds && metadataUpdateProgress.estimatedSeconds > 0 && (
+                        <div className="flex items-center gap-1">
+                          <span>⏱️</span>
+                          <span>~{Math.round(metadataUpdateProgress.estimatedSeconds / 60)} min remaining</span>
+                        </div>
+                      )}
+                      {metadataUpdateProgress.totalTime && (
+                        <div className="flex items-center gap-1">
+                          <span>✅</span>
+                          <span>Completed in {metadataUpdateProgress.totalTime}s</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Current Video */}
+                  {metadataUpdateProgress.currentVideo && (
+                    <div className="p-3 bg-white/60 dark:bg-gray-800/60 rounded-lg border border-purple-100 dark:border-purple-800 mb-4">
+                      <div className="flex items-center gap-2">
+                        <span className="text-purple-500">📹</span>
+                        <span className="text-sm font-medium text-gray-700 dark:text-gray-300 truncate">
+                          {metadataUpdateProgress.currentVideo}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Failed Videos List */}
+                  {metadataUpdateProgress.failedVideos && metadataUpdateProgress.failedVideos.length > 0 && (
+                    <div className="mt-4">
+                      <button
+                        type="button"
+                        onClick={() => setShowFailedVideos(!showFailedVideos)}
+                        className="w-full p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors text-left"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-semibold text-red-700 dark:text-red-300">
+                            ⚠️ {metadataUpdateProgress.failedVideos.length} Failed Video{metadataUpdateProgress.failedVideos.length !== 1 ? 's' : ''}
+                          </span>
+                          <span className="text-red-600 dark:text-red-400">
+                            {showFailedVideos ? '▼' : '▶'}
+                          </span>
+                        </div>
+                      </button>
+                      {showFailedVideos && (
+                        <div className="mt-2 max-h-64 overflow-y-auto space-y-2">
+                          {metadataUpdateProgress.failedVideos.map((failed, idx) => (
+                            <div
+                              key={idx}
+                              className="p-2 bg-white/60 dark:bg-gray-800/60 rounded border border-red-200 dark:border-red-800 text-xs"
+                            >
+                              <div className="font-medium text-red-700 dark:text-red-300 truncate">
+                                {failed.videoName || `Row ${failed.index + 1}`}
+                              </div>
+                              <div className="text-red-600 dark:text-red-400 mt-1">
+                                {failed.error}
+                              </div>
+                            </div>
+                          ))}
+                          {metadataUpdateProgress.failedVideos.length >= 100 && (
+                            <div className="text-xs text-gray-500 dark:text-gray-400 p-2 text-center">
+                              Showing first 100 failures. Check console for full list.
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={metadataUpdating || !selectedMetadataCsv}
+                className={`btn-primary ${
+                  metadataUpdating || !selectedMetadataCsv
+                    ? "opacity-50 cursor-not-allowed"
+                    : ""
+                }`}
+              >
+                {metadataUpdating ? (
+                  <span className="flex items-center gap-2">
+                    <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    Updating...
+                  </span>
+                ) : !selectedMetadataCsv ? (
+                  "Please select a CSV file first"
+                ) : (
+                  "Update Metadata"
+                )}
+              </button>
+            </form>
+          </div>
+        )}
       </div>
 
       {/* Upload Status - Simplified */}

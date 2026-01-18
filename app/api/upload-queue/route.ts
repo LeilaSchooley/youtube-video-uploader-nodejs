@@ -323,41 +323,41 @@ async function processBatch(
 }
 
 export async function POST(request: NextRequest) {
-  const cookieStore = await cookies();
-  const sessionId = cookieStore.get("sessionId")?.value;
-  
-  if (!sessionId) {
+    const cookieStore = await cookies();
+    const sessionId = cookieStore.get("sessionId")?.value;
+    
+    if (!sessionId) {
     return new Response(
       JSON.stringify({ error: "Not authenticated" }),
       { status: 401, headers: { 'Content-Type': 'application/json' } }
-    );
-  }
+      );
+    }
 
-  const session = getSession(sessionId);
-  if (!session || !session.authenticated || !session.tokens) {
+    const session = getSession(sessionId);
+    if (!session || !session.authenticated || !session.tokens) {
     return new Response(
       JSON.stringify({ error: "Not authenticated" }),
       { status: 401, headers: { 'Content-Type': 'application/json' } }
-    );
-  }
+      );
+    }
 
-  // Get userId from session (or fetch if not stored)
-  let userId = session.userId;
-  if (!userId) {
-    const oAuthClient = getOAuthClient();
-    oAuthClient.setCredentials(session.tokens);
-    const oauth2 = google.oauth2({
-      version: "v2",
-      auth: oAuthClient,
-    });
-    const userInfo = await oauth2.userinfo.get();
-    userId = (userInfo.data.email || userInfo.data.id || undefined) as string | undefined;
-    session.userId = userId;
-    setSession(sessionId, session);
-  }
+    // Get userId from session (or fetch if not stored)
+    let userId = session.userId;
+    if (!userId) {
+      const oAuthClient = getOAuthClient();
+      oAuthClient.setCredentials(session.tokens);
+      const oauth2 = google.oauth2({
+        version: "v2",
+        auth: oAuthClient,
+      });
+      const userInfo = await oauth2.userinfo.get();
+      userId = (userInfo.data.email || userInfo.data.id || undefined) as string | undefined;
+      session.userId = userId;
+      setSession(sessionId, session);
+    }
 
-  const formData = await request.formData();
-  const csvFile = formData.get("csvFile") as File | null;
+    const formData = await request.formData();
+    const csvFile = formData.get("csvFile") as File | null;
   const batchSize = parseInt(formData.get("batchSize") as string || "5", 10); // Default: 5 videos per batch
 
   if (!csvFile) {
@@ -444,7 +444,7 @@ export async function POST(request: NextRequest) {
               const fileBuffer = fs.readFileSync(fileInfo.path);
               const fileBlob = new Blob([fileBuffer], { type: mimeType });
               const file = new File([fileBlob], fileInfo.name, { type: mimeType });
-              uploadedFiles.push(file);
+        uploadedFiles.push(file);
             } catch (error) {
               // Skip files that can't be read
             }
@@ -461,7 +461,7 @@ export async function POST(request: NextRequest) {
               const fileBuffer = fs.readFileSync(fileInfo.path);
               const fileBlob = new Blob([fileBuffer], { type: mimeType });
               const file = new File([fileBlob], fileInfo.name, { type: mimeType });
-              uploadedThumbnails.push(file);
+        uploadedThumbnails.push(file);
             } catch (error) {
               // Skip files that can't be read
             }
@@ -518,34 +518,34 @@ export async function POST(request: NextRequest) {
   console.log(`[UPLOAD-QUEUE] Found ${uploadedFiles.length} video(s) and ${uploadedThumbnails.length} thumbnail(s) on server, batch size: ${batchSize}`);
 
   // Parse CSV
-  const csvData: CSVRow[] = [];
-  const bytes = await csvFile.arrayBuffer();
-  const buffer = Buffer.from(bytes);
-  const csvStream = Readable.from(buffer);
+    const csvData: CSVRow[] = [];
+    const bytes = await csvFile.arrayBuffer();
+    const buffer = Buffer.from(bytes);
+    const csvStream = Readable.from(buffer);
 
-  try {
-    await new Promise<void>((resolve, reject) => {
-      csvStream
-        .pipe(csvParser())
-        .on("data", (row: CSVRow) => {
-          csvData.push(row);
-        })
-        .on("end", () => {
+    try {
+      await new Promise<void>((resolve, reject) => {
+        csvStream
+          .pipe(csvParser())
+          .on("data", (row: CSVRow) => {
+            csvData.push(row);
+          })
+          .on("end", () => {
           console.log(`[UPLOAD-QUEUE] CSV parsed: ${csvData.length} rows`);
-          resolve();
-        })
-        .on("error", (err) => {
+            resolve();
+          })
+          .on("error", (err) => {
           reject(new Error(`Failed to parse CSV: ${err.message}`));
-        });
-    });
-  } catch (parseError: any) {
+          });
+      });
+    } catch (parseError: any) {
     return new Response(
       JSON.stringify({ error: `CSV parsing failed: ${parseError?.message}` }),
       { status: 400, headers: { 'Content-Type': 'application/json' } }
-    );
-  }
+      );
+    }
 
-  if (csvData.length === 0) {
+    if (csvData.length === 0) {
     return new Response(
       JSON.stringify({ error: "CSV file is empty" }),
       { status: 400, headers: { 'Content-Type': 'application/json' } }
@@ -563,9 +563,9 @@ export async function POST(request: NextRequest) {
       .replace(/^_+|_+$/g, '');
   };
 
-  const extractFilename = (filePath: string): string => {
-    if (!filePath) return '';
-    const normalized = filePath.replace(/\\/g, '/');
+    const extractFilename = (filePath: string): string => {
+      if (!filePath) return '';
+      const normalized = filePath.replace(/\\/g, '/');
     return normalized.split('/').pop()?.toLowerCase() || '';
   };
 
@@ -721,8 +721,8 @@ export async function POST(request: NextRequest) {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       'Connection': 'keep-alive',
-    },
-  });
+      },
+    });
 }
 
 // Keep GET endpoint for queue status (if needed)
