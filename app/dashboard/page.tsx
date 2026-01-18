@@ -2467,7 +2467,7 @@ export default function Dashboard() {
                       <p className="text-yellow-700 dark:text-yellow-300">Session dir exists: {allFiles.debug.sessionDirExists ? "Yes" : "No"}</p>
                       <p className="text-yellow-700 dark:text-yellow-300">Jobs in queue: {allFiles.jobs}</p>
                       <p className="text-yellow-700 dark:text-yellow-300 mt-2 text-xs">
-                        Files are stored in: <code className="bg-yellow-100 dark:bg-yellow-800 px-1 rounded">/uploads/{'<user-id>'} / {'<job-id>'} /</code>
+                        Files are stored in: <code className="bg-yellow-100 dark:bg-yellow-800 px-1 rounded">/uploads/&lt;user-id&gt; / &lt;job-id&gt; /</code>
                       </p>
                     </div>
                   )}
@@ -3095,7 +3095,7 @@ export default function Dashboard() {
               <span className="flex items-center gap-2">
                 <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
                       {uploadProgress && uploadProgress.totalFiles > 0
-                        ? `Uploading ${uploadProgress.currentFile}/${uploadProgress.totalFiles}...`
+                        ? `Uploading ${uploadProgress.currentFile} / ${uploadProgress.totalFiles}...`
                         : "Starting upload..."}
               </span>
             ) : !selectedCsvFile ? (
@@ -3222,7 +3222,9 @@ export default function Dashboard() {
                       <div
                         className="bg-gradient-to-r from-blue-500 to-indigo-500 h-4 rounded-full transition-all duration-500 relative"
                         style={{
-                          width: `${Math.min(100, bulkUploadProgress.total > 0 ? ((bulkUploadProgress.completed + bulkUploadProgress.failed) / bulkUploadProgress.total) * 100 : 0)}%`,
+                          width: bulkUploadProgress.total > 0 
+                            ? `${Math.min(100, Math.round(((bulkUploadProgress.completed + bulkUploadProgress.failed) / bulkUploadProgress.total) * 100))}%`
+                            : "0%",
                         }}
                       >
                         <div className="absolute inset-0 bg-white/20 animate-pulse"></div>
