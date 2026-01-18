@@ -3429,7 +3429,9 @@ export default function Dashboard() {
                         <div
                           className="bg-gradient-to-r from-purple-500 to-pink-500 h-4 rounded-full transition-all duration-500 relative"
                           style={{
-                            width: `${Math.min(100, ((metadataUpdateProgress.processed || (metadataUpdateProgress.updated + metadataUpdateProgress.failed)) / metadataUpdateProgress.total) * 100)}%`,
+                            width: metadataUpdateProgress.total > 0
+                              ? `${Math.min(100, Math.round(((metadataUpdateProgress.processed || (metadataUpdateProgress.updated + metadataUpdateProgress.failed)) / metadataUpdateProgress.total) * 100))}%`
+                              : "0%",
                           }}
                         >
                           <div className="absolute inset-0 bg-white/20 animate-pulse"></div>
@@ -4094,15 +4096,14 @@ export default function Dashboard() {
                             const hours = Math.floor(seconds / 3600);
                             const minutes = Math.floor((seconds % 3600) / 60);
                             const secs = Math.floor(seconds % 60);
-                            if (hours > 0)
-                              return `${hours}:${minutes
-                                .toString()
-                                .padStart(2, "0")}:${secs
-                                .toString()
-                                .padStart(2, "0")}`;
-                            return `${minutes}:${secs
-                              .toString()
-                              .padStart(2, "0")}`;
+                            if (hours > 0) {
+                              const mins = minutes.toString().padStart(2, "0");
+                              const secsStr = secs.toString().padStart(2, "0");
+                              return `${hours}:${mins}:${secsStr}`;
+                            }
+                            const mins = minutes.toString().padStart(2, "0");
+                            const secsStr = secs.toString().padStart(2, "0");
+                            return `${mins}:${secsStr}`;
                           };
                       
                       return (
