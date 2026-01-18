@@ -95,7 +95,7 @@ export default function Dashboard() {
   const [allFiles, setAllFiles] = useState<any>(null);
   const [loadingAllFiles, setLoadingAllFiles] = useState<boolean>(false);
   const [showAllFiles, setShowAllFiles] = useState<boolean>(true); // Expanded by default
-  const [showSingleUpload, setShowSingleUpload] = useState<boolean>(true); // Expanded by default
+  const [showSingleUpload, setShowSingleUpload] = useState<boolean>(false); // Collapsed by default
   const [showBatchUpload, setShowBatchUpload] = useState<boolean>(true); // Expanded by default
   const [showBulkUpload, setShowBulkUpload] = useState<boolean>(false);
   const [showMetadataUpdate, setShowMetadataUpdate] = useState<boolean>(false);
@@ -958,6 +958,7 @@ export default function Dashboard() {
                   setBulkUploadProgress(prev => ({
                     ...prev!,
                     currentBatch: data.batchNumber,
+                    totalBatches: data.totalBatches,
                     message: `Processing batch ${data.batchNumber}/${data.totalBatches}`,
                   }));
                   break;
@@ -991,6 +992,8 @@ export default function Dashboard() {
                 case "batch_complete":
                   setBulkUploadProgress(prev => ({
                     ...prev!,
+                    completed: data.completed,
+                    failed: data.failed,
                     message: `Batch ${data.batchNumber}/${data.totalBatches} complete: ${data.completed} succeeded, ${data.failed} failed`,
                   }));
                   break;
@@ -1000,6 +1003,7 @@ export default function Dashboard() {
                     ...prev!,
                     completed: data.totalCompleted,
                     failed: data.totalFailed,
+                    total: data.total || prev?.total || 0,
                     message: `Progress: ${data.totalCompleted} succeeded, ${data.totalFailed} failed`,
                   }));
                   break;
@@ -1867,33 +1871,8 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Statistics Dashboard */}
-      {queue.length === 0 ? (
-        <div className="bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl shadow-2xl p-12 mb-10 text-center text-white">
-          <div className="text-5xl mb-5">📊</div>
-            <h2 className="text-3xl font-bold mb-4">
-              Welcome to Your Upload Dashboard
-            </h2>
-          <p className="text-lg opacity-95 mb-8 max-w-2xl mx-auto">
-              Start uploading videos to see real-time statistics, progress
-              tracking, and detailed analytics.
-          </p>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5 max-w-2xl mx-auto mt-8">
-            <div className="p-5 bg-white/20 backdrop-blur-lg rounded-xl">
-              <div className="text-4xl font-bold">0</div>
-              <div className="text-sm opacity-90 mt-2">Total Videos</div>
-            </div>
-            <div className="p-5 bg-white/20 backdrop-blur-lg rounded-xl">
-              <div className="text-4xl font-bold">0</div>
-              <div className="text-sm opacity-90 mt-2">Completed</div>
-            </div>
-            <div className="p-5 bg-white/20 backdrop-blur-lg rounded-xl">
-              <div className="text-4xl font-bold">0</div>
-              <div className="text-sm opacity-90 mt-2">Jobs</div>
-            </div>
-          </div>
-        </div>
-      ) : (
+      {/* Statistics Dashboard - Only show if there are jobs */}
+      {queue.length > 0 && (
         <div className="card border border-gray-100 dark:border-gray-700">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
               <h2 className="text-2xl sm:text-3xl font-bold text-gray-800 dark:text-white">
@@ -1962,7 +1941,7 @@ export default function Dashboard() {
                 </div>
               {totalVideos > 0 && (
                 <div className="text-xs text-green-600 dark:text-green-400 mt-1">
-                  {Math.round((completed / totalVideos) * 100)}% of total
+                  {Math.round((completed / totalVideos) * 100)}% complete
                 </div>
               )}
             </div>
@@ -1978,7 +1957,7 @@ export default function Dashboard() {
                 </div>
               {totalVideos > 0 && (
                 <div className="text-xs text-yellow-600 dark:text-yellow-400 mt-1">
-                  {Math.round((pending / totalVideos) * 100)}% of total
+                  {Math.round((pending / totalVideos) * 100)}% complete
                 </div>
               )}
             </div>
@@ -1994,7 +1973,7 @@ export default function Dashboard() {
                 </div>
               {totalVideos > 0 && (
                 <div className="text-xs text-red-600 dark:text-red-400 mt-1">
-                  {Math.round((failed / totalVideos) * 100)}% of total
+                  {Math.round((failed / totalVideos) * 100)}% complete
                 </div>
               )}
             </div>
@@ -2071,7 +2050,8 @@ export default function Dashboard() {
         </div>
       )}
 
-        {/* All Uploaded Files Section */}
+      {/* All Uploaded Files Section - Only show if files exist */}
+      {((allFiles && allFiles.totalFiles > 0) || showAllFiles) && (
       <div className="card animate-fade-in">
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-2xl font-bold text-gray-800 dark:text-white flex items-center gap-2">
@@ -2487,7 +2467,7 @@ export default function Dashboard() {
                       <p className="text-yellow-700 dark:text-yellow-300">Session dir exists: {allFiles.debug.sessionDirExists ? "Yes" : "No"}</p>
                       <p className="text-yellow-700 dark:text-yellow-300">Jobs in queue: {allFiles.jobs}</p>
                       <p className="text-yellow-700 dark:text-yellow-300 mt-2 text-xs">
-                        Files are stored in: <code className="bg-yellow-100 dark:bg-yellow-800 px-1 rounded">/uploads/{'<user-id>'}/{'<job-id>'}/</code>
+                        Files are stored in: <code className="bg-yellow-100 dark:bg-yellow-800 px-1 rounded">/uploads/{'<user-id>'} / {'<job-id>'} /</code>
                       </p>
                     </div>
                   )}
@@ -2495,7 +2475,8 @@ export default function Dashboard() {
               )}
             </div>
           )}
-      </div>
+        </div>
+      )}
 
       {/* Single Video Upload */}
       <div className="card animate-fade-in">
@@ -3223,26 +3204,31 @@ export default function Dashboard() {
                     </div>
                   </div>
 
-                  {bulkUploadProgress.total > 0 && (
-                    <div className="mb-4">
-                      <div className="flex justify-between text-sm mb-2">
-                        <span className="text-blue-800 dark:text-blue-200 font-medium">
-                          Batch {bulkUploadProgress.currentBatch}/{bulkUploadProgress.totalBatches} • {bulkUploadProgress.completed} succeeded, {bulkUploadProgress.failed} failed
-                        </span>
-                        <span className="text-blue-600 dark:text-blue-400 font-bold">
-                          {Math.round(((bulkUploadProgress.completed + bulkUploadProgress.failed) / bulkUploadProgress.total) * 100)}%
-                        </span>
-                      </div>
-                      <div className="w-full bg-blue-200 rounded-full h-3 dark:bg-blue-800 overflow-hidden">
-                        <div
-                          className="bg-gradient-to-r from-blue-500 to-indigo-500 h-3 rounded-full transition-all duration-500"
-                          style={{
-                            width: `${Math.min(100, ((bulkUploadProgress.completed + bulkUploadProgress.failed) / bulkUploadProgress.total) * 100)}%`,
-                          }}
-                        />
+                  {/* Progress Bar - Always show when uploading */}
+                  <div className="mb-4">
+                    <div className="flex justify-between text-sm mb-2">
+                      <span className="text-blue-800 dark:text-blue-200 font-medium">
+                        {bulkUploadProgress.currentBatch && bulkUploadProgress.totalBatches ? (
+                          <span>Batch {bulkUploadProgress.currentBatch} / {bulkUploadProgress.totalBatches} • </span>
+                        ) : null}
+                        {bulkUploadProgress.completed || 0} succeeded, {bulkUploadProgress.failed || 0} failed
+                        {bulkUploadProgress.total ? (" of " + bulkUploadProgress.total) : ""}
+                      </span>
+                      <span className="text-blue-600 dark:text-blue-400 font-bold">
+                        {bulkUploadProgress.total > 0 ? Math.round(((bulkUploadProgress.completed + bulkUploadProgress.failed) / bulkUploadProgress.total) * 100) : 0}%
+                      </span>
+                    </div>
+                    <div className="w-full bg-blue-200 rounded-full h-4 dark:bg-blue-800 overflow-hidden">
+                      <div
+                        className="bg-gradient-to-r from-blue-500 to-indigo-500 h-4 rounded-full transition-all duration-500 relative"
+                        style={{
+                          width: `${Math.min(100, bulkUploadProgress.total > 0 ? ((bulkUploadProgress.completed + bulkUploadProgress.failed) / bulkUploadProgress.total) * 100 : 0)}%`,
+                        }}
+                      >
+                        <div className="absolute inset-0 bg-white/20 animate-pulse"></div>
                       </div>
                     </div>
-                  )}
+                  </div>
 
                   {bulkUploadProgress.currentFile && (
                     <div className="p-3 bg-white/60 dark:bg-gray-800/60 rounded-lg border border-blue-100 dark:border-blue-800">
@@ -3429,9 +3415,9 @@ export default function Dashboard() {
                       <div className="flex justify-between text-sm mb-2">
                         <span className="text-purple-800 dark:text-purple-200 font-medium">
                           {metadataUpdateProgress.currentBatch && metadataUpdateProgress.totalBatches && (
-                            <>Batch {metadataUpdateProgress.currentBatch}/{metadataUpdateProgress.totalBatches} • </>
+                            <>Batch {metadataUpdateProgress.currentBatch} / {metadataUpdateProgress.totalBatches} • </>
                           )}
-                          {metadataUpdateProgress.processed || (metadataUpdateProgress.updated + metadataUpdateProgress.failed)}/{metadataUpdateProgress.total} processed
+                          {metadataUpdateProgress.processed || (metadataUpdateProgress.updated + metadataUpdateProgress.failed)} / {metadataUpdateProgress.total} processed
                         </span>
                         <span className="text-purple-600 dark:text-purple-400 font-bold">
                           {Math.round(((metadataUpdateProgress.processed || (metadataUpdateProgress.updated + metadataUpdateProgress.failed)) / metadataUpdateProgress.total) * 100)}%
@@ -3555,39 +3541,17 @@ export default function Dashboard() {
         )}
       </div>
 
-      {/* Upload Status - Simplified */}
-      <div className="card">
+      {/* Historical Jobs - Only show if there are jobs */}
+      {queue.length > 0 && (
+        <div className="card">
           <div className="flex items-center gap-3 mb-6">
             <span className="text-3xl">📊</span>
             <h2 className="text-2xl font-bold text-gray-800 dark:text-white">
-              Upload Status
+              Upload History
             </h2>
-        </div>
-        
-          <div className="text-center py-12">
-          <div className="text-6xl mb-4">🚀</div>
-          <p className="text-gray-600 text-lg dark:text-gray-300">Direct Streaming Upload</p>
-          <p className="text-gray-500 dark:text-gray-400 text-sm mt-2">
-            Upload a CSV file with videos to get started. Videos stream directly to YouTube in batches with real-time progress updates shown above.
-          </p>
-          <div className="mt-6 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-lg max-w-2xl mx-auto">
-            <p className="text-sm text-blue-900 dark:text-blue-100">
-              <strong>💡 How it works:</strong> Upload your CSV and video files together. The system matches files by filename and streams them directly to YouTube in batches. Progress updates appear in real-time during upload.
-            </p>
           </div>
-        </div>
-        
-        {/* Historical jobs (if any) - simplified view */}
-        {queue.length > 0 && (
-            <div className="space-y-4 mt-6">
-              <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-700">
-                <p className="text-sm text-blue-900 dark:text-blue-100">
-                  <strong>ℹ️ Note:</strong> {queue.length} previous upload job{queue.length !== 1 ? 's' : ''} found in history. 
-                  New uploads stream directly to YouTube with real-time progress shown above.
-                </p>
-              </div>
-
-              {/* Simplified Jobs List */}
+          
+          {/* Simplified Jobs List */}
           <div className="flex flex-col gap-3">
             {queue
                 .filter(
@@ -4077,7 +4041,7 @@ export default function Dashboard() {
               {progress.length > 0 ? (
                 <div>
                   <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
-                    Video Details ({completed}/{totalVideos} completed)
+                    Video Details ({completed} / {totalVideos} completed)
                   </h4>
                   <div className="max-h-96 overflow-y-auto space-y-2 pr-2">
                         {progress.map((item: any, idx: number) => {
