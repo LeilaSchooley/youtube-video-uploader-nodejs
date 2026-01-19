@@ -69,6 +69,12 @@ interface UploadFormsProps {
     currentFile?: string;
     message?: string;
   } | null;
+  bulkUrls: string[];
+  setBulkUrls: (urls: string[]) => void;
+  urlAuthHeaders: string;
+  setUrlAuthHeaders: (headers: string) => void;
+  urlTimeout: string;
+  setUrlTimeout: (timeout: string) => void;
 
   // Metadata Update
   showMetadataUpdate: boolean;
@@ -133,6 +139,12 @@ export default function UploadForms({
   bulkFilesInputRef,
   bulkUploading,
   bulkUploadProgress,
+  bulkUrls,
+  setBulkUrls,
+  urlAuthHeaders,
+  setUrlAuthHeaders,
+  urlTimeout,
+  setUrlTimeout,
   showMetadataUpdate,
   setShowMetadataUpdate,
   handleMetadataUpdate,
@@ -465,7 +477,18 @@ export default function UploadForms({
                           <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">
                             video_name
                           </code>{" "}
-                          (filename to match uploaded video)
+                          or{" "}
+                          <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">
+                            video_url
+                          </code>{" "}
+                          (filename or URL)
+                        </li>
+                        <li>
+                          •{" "}
+                          <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">
+                            path
+                          </code>{" "}
+                          (file path or URL - auto-detected)
                         </li>
                       </ul>
                     </div>
@@ -479,7 +502,25 @@ export default function UploadForms({
                           <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">
                             thumbnail_name
                           </code>{" "}
-                          (filename to match uploaded thumbnail)
+                          or{" "}
+                          <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">
+                            thumbnail_url
+                          </code>{" "}
+                          (filename or URL)
+                        </li>
+                        <li>
+                          •{" "}
+                          <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">
+                            url_auth_headers
+                          </code>{" "}
+                          (JSON auth headers for URLs)
+                        </li>
+                        <li>
+                          •{" "}
+                          <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">
+                            url_timeout
+                          </code>{" "}
+                          (timeout in milliseconds)
                         </li>
                         <li>
                           •{" "}
@@ -511,12 +552,13 @@ export default function UploadForms({
                     <span className="text-lg">✅</span>
                     <div className="flex-1">
                       <strong className="text-green-900 dark:text-green-100">
-                        File Upload:
+                        File or URL Upload:
                       </strong>
                       <p className="text-sm text-green-800 dark:text-green-200 mt-1">
-                        Upload your CSV file below. Video and thumbnail files should already be
-                        uploaded in the "All Uploaded Files" section. The system automatically
-                        matches files by filename from your CSV's path column.
+                        Upload your CSV file below. Videos can be from uploaded files OR external URLs. 
+                        Use <code className="bg-green-100 dark:bg-green-800 px-1 rounded">video_url</code> or 
+                        put URLs in the <code className="bg-green-100 dark:bg-green-800 px-1 rounded">path</code> column. 
+                        URLs stream directly - no download needed!
                       </p>
                     </div>
                   </div>
@@ -528,10 +570,11 @@ export default function UploadForms({
                     <div className="flex-1">
                       <strong className="text-blue-900 dark:text-blue-100">How It Works:</strong>
                       <p className="text-sm text-blue-800 dark:text-blue-200 mt-1">
-                        1. Upload video and thumbnail files in the "All Uploaded Files" section
-                        above. 2. Upload your CSV file below. The system extracts filenames from
-                        CSV paths and matches them to uploaded files. 3. Videos are streamed
-                        directly to YouTube in batches with real-time progress updates.
+                        1. Upload video/thumbnail files OR use URLs in your CSV. 2. Upload your CSV file below. 
+                        The system auto-detects URLs in <code className="bg-blue-100 dark:bg-blue-800 px-1 rounded">path</code> or 
+                        <code className="bg-blue-100 dark:bg-blue-800 px-1 rounded">video_url</code> columns. 
+                        3. Videos stream directly to YouTube - files from server, URLs from external servers. 
+                        No disk storage needed for URLs!
                       </p>
                     </div>
                   </div>
@@ -792,18 +835,18 @@ export default function UploadForms({
 
         {showBulkUpload && (
           <div className="space-y-4">
-            <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-lg">
+            <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border border-blue-200 dark:border-blue-700 rounded-lg">
               <p className="text-sm text-blue-900 dark:text-blue-100">
-                <strong>📦 Bulk Upload:</strong> Upload multiple videos at once. Videos will be
-                uploaded as <strong>private</strong> with the filename as the title. Uploads
-                happen in batches of 5 with real-time progress.
+                <strong>📦 Bulk Upload:</strong> Upload multiple videos from files or URLs. Videos stream directly to YouTube - no disk storage needed! Uploads are processed in the background.
               </p>
             </div>
 
             <form onSubmit={handleBulkUpload} className="flex flex-col gap-5">
-              <label htmlFor="bulkFiles" className="label">
-                Select Video Files
-              </label>
+              {/* File Upload */}
+              <div>
+                <label htmlFor="bulkFiles" className="label">
+                  📁 Upload Video Files (Optional)
+                </label>
               <div
                 className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-all ${
                   selectedBulkFiles.length > 0
@@ -857,6 +900,71 @@ export default function UploadForms({
                   </>
                 )}
               </div>
+              </div>
+
+              {/* URL Upload */}
+              <div>
+                <label htmlFor="bulkUrls" className="label">
+                  🌐 Or Enter Video URLs (One per line)
+                </label>
+                <textarea
+                  id="bulkUrls"
+                  name="bulkUrls"
+                  placeholder="https://cdn.example.com/video1.mp4&#10;https://cdn.example.com/video2.mp4&#10;https://cdn.example.com/video3.mp4"
+                  value={bulkUrls.join("\n")}
+                  onChange={(e) => {
+                    const urls = e.target.value.split("\n").filter(url => url.trim());
+                    setBulkUrls(urls);
+                  }}
+                  rows={5}
+                  className="input-field font-mono text-sm"
+                />
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Enter one URL per line. Videos stream directly from external servers - no download needed!
+                </p>
+              </div>
+
+              {/* Auth Headers (Optional) */}
+              {(bulkUrls.length > 0) && (
+                <div>
+                  <label htmlFor="urlAuthHeaders" className="label">
+                    🔐 Authentication Headers (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    id="urlAuthHeaders"
+                    name="urlAuthHeaders"
+                    placeholder='{"Authorization":"Bearer token123"}'
+                    value={urlAuthHeaders}
+                    onChange={(e) => setUrlAuthHeaders(e.target.value)}
+                    className="input-field font-mono text-sm"
+                  />
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    JSON format. Only needed if URLs require authentication.
+                  </p>
+                </div>
+              )}
+
+              {/* Timeout (Optional) */}
+              {(bulkUrls.length > 0) && (
+                <div>
+                  <label htmlFor="urlTimeout" className="label">
+                    ⏱️ Timeout (Optional, milliseconds)
+                  </label>
+                  <input
+                    type="number"
+                    id="urlTimeout"
+                    name="urlTimeout"
+                    placeholder="600000"
+                    value={urlTimeout}
+                    onChange={(e) => setUrlTimeout(e.target.value)}
+                    className="input-field"
+                  />
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    Default: 10 minutes (600000ms). Increase for large files.
+                  </p>
+                </div>
+              )}
 
               {/* Progress Display */}
               {bulkUploadProgress && bulkUploading && (
@@ -939,9 +1047,9 @@ export default function UploadForms({
 
               <button
                 type="submit"
-                disabled={bulkUploading || selectedBulkFiles.length === 0}
+                disabled={bulkUploading || (selectedBulkFiles.length === 0 && bulkUrls.length === 0)}
                 className={`btn-primary ${
-                  bulkUploading || selectedBulkFiles.length === 0
+                  bulkUploading || (selectedBulkFiles.length === 0 && bulkUrls.length === 0)
                     ? "opacity-50 cursor-not-allowed"
                     : ""
                 }`}
@@ -949,12 +1057,12 @@ export default function UploadForms({
                 {bulkUploading ? (
                   <span className="flex items-center gap-2">
                     <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                    Uploading...
+                    Queuing...
                   </span>
-                ) : selectedBulkFiles.length === 0 ? (
-                  "Please select video files first"
+                ) : (selectedBulkFiles.length === 0 && bulkUrls.length === 0) ? (
+                  "Please select files or enter URLs"
                 ) : (
-                  `Upload ${selectedBulkFiles.length} Video(s)`
+                  `Queue ${selectedBulkFiles.length + bulkUrls.length} Video(s) for Upload`
                 )}
               </button>
             </form>

@@ -8,6 +8,7 @@ import csvParser from "csv-parser";
 import { parseDate } from "@/lib/utils";
 import fs from "fs";
 import path from "path";
+import { fetchFileAsStream, isValidUrl } from "@/lib/url-stream";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 1800; // 30 minutes for large batches
@@ -20,6 +21,10 @@ interface CSVRow {
   thumbnail_name?: string;  // Primary: explicit thumbnail filename for matching
   thumbnail_path?: string;  // Fallback: extract filename from path
   path?: string;  // Fallback: extract filename from path
+  video_url?: string;  // URL to video file
+  thumbnail_url?: string;  // URL to thumbnail file
+  url_auth_headers?: string;  // JSON string of auth headers
+  url_timeout?: string;  // Timeout in milliseconds
   scheduleTime?: string;
   privacyStatus?: string;
 }
@@ -29,6 +34,10 @@ interface VideoUploadTask {
   row: CSVRow;
   videoFile: File | null;
   thumbnailFile: File | null;
+  videoUrl?: string;
+  thumbnailUrl?: string;
+  authHeaders?: Record<string, string>;
+  timeout?: number;
 }
 
 interface BatchProgress {
@@ -95,10 +104,11 @@ async function uploadVideo(
     };
   }
 
-  if (!videoFile) {
+  // Check if we have a video source (file or URL)
+  if (!videoFile && !task.videoUrl) {
     return { 
       success: false, 
-      error: 'Video file not found' 
+      error: 'Video file or URL not found' 
     };
   }
 
@@ -141,16 +151,37 @@ async function uploadVideo(
       requestBody.status.publishAt = publishDate.toISOString();
     }
 
-    // Stream video file directly to YouTube
+    // Stream video file or URL directly to YouTube
     sendProgress({
       type: 'video_upload_start',
       index: task.index,
       title: youtube_title.substring(0, 50),
     });
 
-    const videoBytes = await videoFile.arrayBuffer();
-    const videoBuffer = Buffer.from(videoBytes);
-    const videoStream = Readable.from(videoBuffer);
+    let videoStream: Readable;
+    
+    // Handle URL-based upload
+    if (task.videoUrl && isValidUrl(task.videoUrl)) {
+      sendProgress({
+        type: 'video_fetch_start',
+        index: task.index,
+        title: youtube_title.substring(0, 50),
+      });
+      videoStream = await fetchFileAsStream(task.videoUrl, {
+        timeout: task.timeout || 10 * 60 * 1000, // 10 minutes default
+        headers: task.authHeaders || {},
+      });
+    } else if (videoFile) {
+      // Handle file-based upload
+      const videoBytes = await videoFile.arrayBuffer();
+      const videoBuffer = Buffer.from(videoBytes);
+      videoStream = Readable.from(videoBuffer);
+    } else {
+      return {
+        success: false,
+        error: 'No valid video source found',
+      };
+    }
 
     const uploadStartTime = Date.now();
     const resultVideoUpload = await youtube.videos.insert({
@@ -177,8 +208,8 @@ async function uploadVideo(
       duration: uploadDuration,
     });
 
-    // Upload thumbnail if provided
-    if (thumbnailFile && videoId) {
+    // Upload thumbnail if provided (file or URL)
+    if (videoId && (thumbnailFile || task.thumbnailUrl)) {
       sendProgress({
         type: 'thumbnail_upload_start',
         index: task.index,
@@ -186,9 +217,21 @@ async function uploadVideo(
       });
 
       try {
-        const thumbnailBytes = await thumbnailFile.arrayBuffer();
-        const thumbnailBuffer = Buffer.from(thumbnailBytes);
-        const thumbnailStream = Readable.from(thumbnailBuffer);
+        let thumbnailStream: Readable;
+        
+        // Handle thumbnail URL
+        if (task.thumbnailUrl && isValidUrl(task.thumbnailUrl)) {
+          thumbnailStream = await fetchFileAsStream(task.thumbnailUrl, {
+            timeout: 60000, // 1 minute for thumbnails
+          });
+        } else if (thumbnailFile) {
+          // Handle thumbnail file
+          const thumbnailBytes = await thumbnailFile.arrayBuffer();
+          const thumbnailBuffer = Buffer.from(thumbnailBytes);
+          thumbnailStream = Readable.from(thumbnailBuffer);
+        } else {
+          throw new Error('No valid thumbnail source');
+        }
 
         await youtube.thumbnails.set({
           videoId: videoId,
@@ -632,34 +675,78 @@ export async function POST(request: NextRequest) {
   const tasks: VideoUploadTask[] = [];
   for (let i = 0; i < csvData.length; i++) {
     const row = csvData[i];
-    // Use video_name column first, fallback to extracting from path
-    const csvVideoFilename = row.video_name 
-      ? row.video_name.toLowerCase().trim()
-      : (row.path ? extractFilename(row.path) : '');
     
-    // Use thumbnail_name column first, fallback to extracting from thumbnail_path
-    const csvThumbFilename = row.thumbnail_name
-      ? row.thumbnail_name.toLowerCase().trim()
-      : (row.thumbnail_path ? extractFilename(row.thumbnail_path) : '');
+    // Smart detection: check if video URL is provided or if path contains a URL
+    let videoUrl: string | undefined;
+    let thumbnailUrl: string | undefined;
     
-    const videoFile = csvVideoFilename ? findMatchingFile(csvVideoFilename, uploadedFilesMap) : null;
-    const thumbnailFile = csvThumbFilename ? findMatchingFile(csvThumbFilename, uploadedThumbnailsMap) : null;
+    // Priority: video_url column > path column (auto-detect URL in path)
+    if (row.video_url && isValidUrl(row.video_url)) {
+      videoUrl = row.video_url;
+    } else if (row.path && isValidUrl(row.path)) {
+      // Auto-detect: path column contains a URL
+      videoUrl = row.path;
+    }
+    
+    // Priority: thumbnail_url column > thumbnail_path (auto-detect URL)
+    if (row.thumbnail_url && isValidUrl(row.thumbnail_url)) {
+      thumbnailUrl = row.thumbnail_url;
+    } else if (row.thumbnail_path && isValidUrl(row.thumbnail_path)) {
+      // Auto-detect: thumbnail_path column contains a URL
+      thumbnailUrl = row.thumbnail_path;
+    }
+    
+    // Parse auth headers if provided
+    let authHeaders: Record<string, string> | undefined;
+    if (row.url_auth_headers) {
+      try {
+        authHeaders = JSON.parse(row.url_auth_headers);
+      } catch (e) {
+        console.warn(`Failed to parse auth headers for row ${i}:`, e);
+      }
+    }
+    
+    // Parse timeout if provided
+    const timeout = row.url_timeout ? parseInt(row.url_timeout, 10) : undefined;
+    
+    // If URL is provided, use it; otherwise try to find file
+    let videoFile: File | null = null;
+    let thumbnailFile: File | null = null;
+    
+    if (!videoUrl) {
+      // Use video_name column first, fallback to extracting from path
+      const csvVideoFilename = row.video_name 
+        ? row.video_name.toLowerCase().trim()
+        : (row.path ? extractFilename(row.path) : '');
+      
+      // Use thumbnail_name column first, fallback to extracting from thumbnail_path
+      const csvThumbFilename = row.thumbnail_name
+        ? row.thumbnail_name.toLowerCase().trim()
+        : (row.thumbnail_path ? extractFilename(row.thumbnail_path) : '');
+      
+      videoFile = csvVideoFilename ? findMatchingFile(csvVideoFilename, uploadedFilesMap) : null;
+      thumbnailFile = csvThumbFilename ? findMatchingFile(csvThumbFilename, uploadedThumbnailsMap) : null;
+    }
 
     tasks.push({
       index: i,
       row,
       videoFile,
       thumbnailFile,
+      videoUrl,
+      thumbnailUrl,
+      authHeaders,
+      timeout,
     });
   }
 
-  // Filter out tasks without video files
-  const validTasks = tasks.filter(t => t.videoFile !== null);
+  // Filter out tasks without video files or URLs
+  const validTasks = tasks.filter(t => t.videoFile !== null || t.videoUrl !== undefined);
   const invalidCount = tasks.length - validTasks.length;
 
   if (validTasks.length === 0) {
     return new Response(
-      JSON.stringify({ error: "No matching video files found" }),
+      JSON.stringify({ error: "No matching video files or URLs found" }),
       { status: 400, headers: { 'Content-Type': 'application/json' } }
     );
   }

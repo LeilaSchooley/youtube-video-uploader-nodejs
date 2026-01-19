@@ -21,6 +21,25 @@ module.exports = {
       watch: false,
       max_memory_restart: "1G",
     },
+    {
+      name: "bulk-upload-worker",
+      script: path.join(__dirname, "node_modules/tsx/dist/cli.mjs"),
+      args: "worker.ts",
+      cwd: __dirname,
+      instances: 1,
+      exec_mode: "fork",
+      env: {
+        NODE_ENV: "production",
+      },
+      error_file: path.join(__dirname, "logs/worker-error.log"),
+      out_file: path.join(__dirname, "logs/worker-out.log"),
+      log_date_format: "YYYY-MM-DD HH:mm:ss Z",
+      merge_logs: true,
+      autorestart: true,
+      watch: false,
+      max_memory_restart: "1G",
+      restart_delay: 5000,
+    },
   ],
 };
 

@@ -6,6 +6,7 @@ import { google } from "googleapis";
 import { cookies } from "next/headers";
 import { Readable } from "stream";
 import fs from "fs";
+import { fetchFileAsStream, isValidUrl } from "@/lib/url-stream";
 
 // csv-parser is a CommonJS module
 const csvParser = require("csv-parser");
@@ -15,6 +16,10 @@ interface CSVRow {
   youtube_description?: string;
   thumbnail_path?: string;
   path?: string;
+  video_url?: string;
+  thumbnail_url?: string;
+  url_auth_headers?: string;  // JSON string of auth headers
+  url_timeout?: string;  // Timeout in milliseconds
   scheduleTime?: string;
   privacyStatus?: string;
 }
@@ -242,13 +247,50 @@ export async function POST(request: NextRequest) {
       }
 
       try {
-        // Upload video
-        if (!path || !fs.existsSync(path)) {
-          progress[i] = { index: i, status: "Video file not found" };
+        // Get video stream from file or URL
+        // Smart detection: check if path/video_url is a URL or file path
+        let videoStream: Readable;
+        let videoSource: string | null = null;
+        
+        // Priority: video_url column > path column (auto-detect URL in path)
+        if (csvData[i].video_url && isValidUrl(csvData[i].video_url!)) {
+          videoSource = csvData[i].video_url!;
+        } else if (path && isValidUrl(path)) {
+          // Auto-detect: path column contains a URL
+          videoSource = path;
+        } else if (csvData[i].video_url) {
+          // video_url column exists but not valid URL - try as path
+          videoSource = csvData[i].video_url;
+        }
+        
+        if (videoSource && isValidUrl(videoSource)) {
+          // Handle URL-based upload
+          progress[i].status = "Fetching video from URL...";
+          
+          // Parse auth headers if provided
+          let authHeaders: Record<string, string> = {};
+          if (csvData[i].url_auth_headers) {
+            try {
+              authHeaders = JSON.parse(csvData[i].url_auth_headers!);
+            } catch (e) {
+              console.warn(`Failed to parse auth headers for row ${i}:`, e);
+            }
+          }
+          
+          const timeout = csvData[i].url_timeout ? parseInt(csvData[i].url_timeout!, 10) : 10 * 60 * 1000;
+          videoStream = await fetchFileAsStream(videoSource, {
+            timeout,
+            headers: authHeaders,
+          });
+        } else if (path && fs.existsSync(path)) {
+          // Handle file-based upload (local file path)
+          videoStream = fs.createReadStream(path);
+        } else {
+          progress[i] = { index: i, status: `Video file or URL not found: ${path || csvData[i].video_url || 'N/A'}` };
           continue;
         }
 
-        const videoStream = fs.createReadStream(path);
+        progress[i].status = "Uploading video...";
         const resultVideoUpload = await youtube.videos.insert({
           part: ["snippet", "status"],
           requestBody,
@@ -256,16 +298,39 @@ export async function POST(request: NextRequest) {
         });
         const videoId = resultVideoUpload.data.id;
 
-        // Upload thumbnail (if provided)
-        if (thumbnail_path && videoId && fs.existsSync(thumbnail_path)) {
-          progress[i].status = "Uploading Thumbnail";
-          const thumbnailStream = fs.createReadStream(thumbnail_path);
-          await youtube.thumbnails.set({
-            videoId: videoId,
-            media: {
-              body: thumbnailStream,
-            },
-          });
+        // Upload thumbnail (if provided) - support both file and URL
+        // Smart detection: auto-detect URL in thumbnail_path column
+        if (videoId) {
+          let thumbnailStream: Readable | null = null;
+          let thumbnailSource: string | null = null;
+          
+          // Priority: thumbnail_url column > thumbnail_path (auto-detect URL)
+          if (csvData[i].thumbnail_url && isValidUrl(csvData[i].thumbnail_url!)) {
+            thumbnailSource = csvData[i].thumbnail_url!;
+          } else if (thumbnail_path && isValidUrl(thumbnail_path)) {
+            // Auto-detect: thumbnail_path column contains a URL
+            thumbnailSource = thumbnail_path;
+          }
+          
+          if (thumbnailSource) {
+            progress[i].status = "Uploading Thumbnail from URL...";
+            thumbnailStream = await fetchFileAsStream(thumbnailSource, {
+              timeout: 60000, // 1 minute for thumbnails
+            });
+          } else if (thumbnail_path && fs.existsSync(thumbnail_path)) {
+            progress[i].status = "Uploading Thumbnail...";
+            thumbnailStream = fs.createReadStream(thumbnail_path);
+          }
+          
+          if (thumbnailStream) {
+            await youtube.thumbnails.set({
+              videoId: videoId,
+              media: {
+                body: thumbnailStream,
+              },
+            });
+            progress[i].status = "Thumbnail uploaded";
+          }
         }
         
         // If we uploaded as private (for scheduling) but want public/unlisted,

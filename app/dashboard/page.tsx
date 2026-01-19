@@ -140,6 +140,9 @@ export default function Dashboard() {
   } | null>(null);
   const [showFailedVideos, setShowFailedVideos] = useState<boolean>(false);
   const [selectedBulkFiles, setSelectedBulkFiles] = useState<File[]>([]);
+  const [bulkUrls, setBulkUrls] = useState<string[]>([]);
+  const [urlAuthHeaders, setUrlAuthHeaders] = useState<string>("");
+  const [urlTimeout, setUrlTimeout] = useState<string>("");
   const [selectedMetadataCsv, setSelectedMetadataCsv] = useState<File | null>(null);
   const bulkFilesInputRef = useRef<HTMLInputElement>(null);
   const metadataCsvInputRef = useRef<HTMLInputElement>(null);
@@ -899,16 +902,38 @@ export default function Dashboard() {
     setBulkUploadProgress(null);
     setMessage({ type: null, text: null });
 
-    if (selectedBulkFiles.length === 0) {
-      setShowToast({ message: "Please select video files to upload.", type: "error" });
+    if (selectedBulkFiles.length === 0 && bulkUrls.length === 0) {
+      setShowToast({ message: "Please select video files or enter URLs to upload.", type: "error" });
       setBulkUploading(false);
       return;
     }
 
     const formData = new FormData();
+    
+    // Add files
     selectedBulkFiles.forEach((file) => {
       formData.append("files", file);
     });
+    
+    // Add URLs
+    bulkUrls.forEach((url) => {
+      if (url.trim()) {
+        formData.append("urls", url.trim());
+      }
+    });
+    
+    // Add auth headers if provided
+    if (urlAuthHeaders.trim()) {
+      formData.append("urlAuthHeaders", urlAuthHeaders.trim());
+    }
+    
+    // Add timeout if provided
+    if (urlTimeout.trim()) {
+      formData.append("urlTimeout", urlTimeout.trim());
+    }
+    
+    // Use worker by default
+    formData.append("useWorker", "true");
 
     try {
       const res = await fetch("/api/upload-bulk", {
@@ -919,6 +944,29 @@ export default function Dashboard() {
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({ error: "Bulk upload failed" }));
         throw new Error(errorData.error || "Bulk upload failed");
+      }
+
+      // Check if job was queued (202 status)
+      if (res.status === 202) {
+        const data = await res.json();
+        setShowToast({
+          message: `✅ Upload queued! Job ID: ${data.jobId}. Processing ${data.totalItems} items in background.`,
+          type: "success",
+        });
+        setMessage({
+          type: "success",
+          text: `Upload queued: ${data.totalItems} items. Check status below.`,
+        });
+        setBulkUploading(false);
+        // Reset form
+        setSelectedBulkFiles([]);
+        setBulkUrls([]);
+        setUrlAuthHeaders("");
+        setUrlTimeout("");
+        if (bulkFilesInputRef.current) {
+          bulkFilesInputRef.current.value = "";
+        }
+        return;
       }
 
       if (!res.body) {
@@ -1778,6 +1826,12 @@ export default function Dashboard() {
         bulkFilesInputRef={bulkFilesInputRef}
         bulkUploading={bulkUploading}
         bulkUploadProgress={bulkUploadProgress}
+        bulkUrls={bulkUrls}
+        setBulkUrls={setBulkUrls}
+        urlAuthHeaders={urlAuthHeaders}
+        setUrlAuthHeaders={setUrlAuthHeaders}
+        urlTimeout={urlTimeout}
+        setUrlTimeout={setUrlTimeout}
         showMetadataUpdate={showMetadataUpdate}
         setShowMetadataUpdate={setShowMetadataUpdate}
         handleMetadataUpdate={handleMetadataUpdate}
