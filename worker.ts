@@ -10,6 +10,7 @@ import { getSession } from "./lib/session";
 import { getOAuthClient } from "./lib/auth";
 import { google } from "googleapis";
 import { fetchFileAsStream, isValidUrl } from "./lib/url-stream";
+import { downloadDriveFile, isDriveFileId, renameDriveFile, moveDriveFile, deleteDriveFile, getDriveFileMetadata } from "./lib/drive";
 import { Readable } from "stream";
 import fs from "fs";
 
@@ -24,6 +25,8 @@ interface UploadTask {
       path?: string;
     };
     url?: string;
+    driveFileId?: string;
+    driveThumbnailId?: string;
     authHeaders?: Record<string, string>;
     timeout?: number;
     title?: string;
@@ -32,14 +35,21 @@ interface UploadTask {
     publishDate?: string;
     thumbnailUrl?: string;
     thumbnailPath?: string;
+    postUploadAction?: string;
+    completedFolderId?: string;
   };
 }
 
 /**
- * Get video stream from file or URL
+ * Get video stream from file, URL, or Drive
  */
-async function getVideoStream(task: UploadTask): Promise<Readable> {
+async function getVideoStream(task: UploadTask, oAuthClient: ReturnType<typeof getOAuthClient>): Promise<Readable> {
   const { item } = task;
+
+  // Priority: Drive > URL > File
+  if (item.driveFileId && isDriveFileId(item.driveFileId)) {
+    return await downloadDriveFile(item.driveFileId, oAuthClient);
+  }
 
   // Handle URL-based upload
   if (item.url && isValidUrl(item.url)) {
@@ -65,8 +75,13 @@ async function getVideoStream(task: UploadTask): Promise<Readable> {
 /**
  * Get thumbnail stream if available
  */
-async function getThumbnailStream(task: UploadTask): Promise<Readable | null> {
+async function getThumbnailStream(task: UploadTask, oAuthClient: ReturnType<typeof getOAuthClient>): Promise<Readable | null> {
   const { item } = task;
+
+  // Priority: Drive > URL > File
+  if (item.driveThumbnailId && isDriveFileId(item.driveThumbnailId)) {
+    return await downloadDriveFile(item.driveThumbnailId, oAuthClient);
+  }
 
   // Thumbnail URL
   if (item.thumbnailUrl && isValidUrl(item.thumbnailUrl)) {
@@ -89,7 +104,8 @@ async function getThumbnailStream(task: UploadTask): Promise<Readable | null> {
 async function uploadVideo(
   youtube: ReturnType<typeof google.youtube>,
   task: UploadTask,
-  sendProgress: (index: number, status: string, videoId?: string, error?: string) => void
+  sendProgress: (index: number, status: string, videoId?: string, error?: string) => void,
+  oAuthClient: ReturnType<typeof getOAuthClient>
 ): Promise<{ success: boolean; videoId?: string; error?: string }> {
   const { index, item } = task;
 
@@ -115,7 +131,7 @@ async function uploadVideo(
     sendProgress(index, "Fetching video...");
 
     // Get video stream
-    const videoStream = await getVideoStream(task);
+    const videoStream = await getVideoStream(task, oAuthClient);
 
     sendProgress(index, "Uploading to YouTube...");
 
@@ -139,7 +155,7 @@ async function uploadVideo(
     sendProgress(index, `Uploaded successfully (${uploadDuration.toFixed(1)}s)`, videoId);
 
     // Upload thumbnail if available
-    const thumbnailStream = await getThumbnailStream(task);
+    const thumbnailStream = await getThumbnailStream(task, oAuthClient);
     if (thumbnailStream && videoId) {
       sendProgress(index, "Uploading thumbnail...", videoId);
       try {
@@ -151,6 +167,38 @@ async function uploadVideo(
       } catch (thumbError: any) {
         console.error(`[WORKER] Thumbnail upload failed for video ${index}:`, thumbError);
         // Don't fail the whole upload
+      }
+    }
+
+    // Post-upload actions for Drive files
+    if (item.driveFileId && videoId && item.postUploadAction && item.postUploadAction !== "none") {
+      try {
+        switch (item.postUploadAction.toLowerCase()) {
+          case "rename":
+            const fileMetadata = await getDriveFileMetadata(item.driveFileId, oAuthClient);
+            const extension = fileMetadata.name.split('.').pop() || 'mp4';
+            const newName = `${videoId}.${extension}`;
+            await renameDriveFile(item.driveFileId, newName, oAuthClient);
+            sendProgress(index, `Renamed to ${newName}`, videoId);
+            break;
+            
+          case "delete":
+            await deleteDriveFile(item.driveFileId, oAuthClient);
+            sendProgress(index, "Deleted from Drive", videoId);
+            break;
+            
+          case "move":
+            if (item.completedFolderId) {
+              await moveDriveFile(item.driveFileId, item.completedFolderId, oAuthClient);
+              sendProgress(index, `Moved to folder`, videoId);
+            } else {
+              console.warn(`[WORKER] Move action requested but no completedFolderId provided`);
+            }
+            break;
+        }
+      } catch (actionError: any) {
+        console.error(`[WORKER] Post-upload action failed for video ${index}:`, actionError);
+        // Don't fail the upload - action is optional
       }
     }
 
@@ -172,10 +220,11 @@ async function uploadVideo(
 async function processBatch(
   youtube: ReturnType<typeof google.youtube>,
   batch: UploadTask[],
-  sendProgress: (index: number, status: string, videoId?: string, error?: string) => void
+  sendProgress: (index: number, status: string, videoId?: string, error?: string) => void,
+  oAuthClient: ReturnType<typeof getOAuthClient>
 ): Promise<void> {
   const results = await Promise.allSettled(
-    batch.map((task) => uploadVideo(youtube, task, sendProgress))
+    batch.map((task) => uploadVideo(youtube, task, sendProgress, oAuthClient))
   );
 
   results.forEach((result, i) => {
@@ -266,7 +315,7 @@ async function processBulkJob(jobId: string): Promise<void> {
       console.log(
         `[WORKER] Processing batch ${i + 1}/${batches.length} (${batch.length} items)`
       );
-      await processBatch(youtube, batch, sendProgress);
+      await processBatch(youtube, batch, sendProgress, oAuthClient);
     }
 
     markBulkAsCompleted(jobId);

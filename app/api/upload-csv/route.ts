@@ -7,6 +7,7 @@ import { cookies } from "next/headers";
 import { Readable } from "stream";
 import fs from "fs";
 import { fetchFileAsStream, isValidUrl } from "@/lib/url-stream";
+import { downloadDriveFile, isDriveFileId, renameDriveFile, moveDriveFile, deleteDriveFile, getDriveFileMetadata } from "@/lib/drive";
 
 // csv-parser is a CommonJS module
 const csvParser = require("csv-parser");
@@ -18,10 +19,14 @@ interface CSVRow {
   path?: string;
   video_url?: string;
   thumbnail_url?: string;
+  drive_file_id?: string;  // Google Drive file ID for video
+  drive_thumbnail_id?: string;  // Google Drive file ID for thumbnail
   url_auth_headers?: string;  // JSON string of auth headers
   url_timeout?: string;  // Timeout in milliseconds
   scheduleTime?: string;
   privacyStatus?: string;
+  post_upload_action?: string;  // "rename", "delete", "move", or "none"
+  completed_folder_id?: string;  // Drive folder ID for move action
 }
 
 interface ProgressItem {
@@ -247,47 +252,59 @@ export async function POST(request: NextRequest) {
       }
 
       try {
-        // Get video stream from file or URL
-        // Smart detection: check if path/video_url is a URL or file path
+        // Get video stream from file, URL, or Drive
+        // Priority: Drive > URL > File path
         let videoStream: Readable;
-        let videoSource: string | null = null;
+        let driveFileId: string | null = null;
         
-        // Priority: video_url column > path column (auto-detect URL in path)
-        if (csvData[i].video_url && isValidUrl(csvData[i].video_url!)) {
-          videoSource = csvData[i].video_url!;
-        } else if (path && isValidUrl(path)) {
-          // Auto-detect: path column contains a URL
-          videoSource = path;
-        } else if (csvData[i].video_url) {
-          // video_url column exists but not valid URL - try as path
-          videoSource = csvData[i].video_url;
+        // Check for Drive file ID first
+        if (csvData[i].drive_file_id && isDriveFileId(csvData[i].drive_file_id!)) {
+          driveFileId = csvData[i].drive_file_id!;
+        } else if (path && isDriveFileId(path)) {
+          // Auto-detect: path column contains a Drive file ID
+          driveFileId = path;
         }
         
-        if (videoSource && isValidUrl(videoSource)) {
-          // Handle URL-based upload
-          progress[i].status = "Fetching video from URL...";
-          
-          // Parse auth headers if provided
-          let authHeaders: Record<string, string> = {};
-          if (csvData[i].url_auth_headers) {
-            try {
-              authHeaders = JSON.parse(csvData[i].url_auth_headers!);
-            } catch (e) {
-              console.warn(`Failed to parse auth headers for row ${i}:`, e);
-            }
+        if (driveFileId) {
+          // Handle Drive-based upload
+          progress[i].status = "Fetching video from Google Drive...";
+          videoStream = await downloadDriveFile(driveFileId, oAuthClient);
+        } else {
+          // Check for URL
+          let videoSource: string | null = null;
+          if (csvData[i].video_url && isValidUrl(csvData[i].video_url!)) {
+            videoSource = csvData[i].video_url!;
+          } else if (path && isValidUrl(path)) {
+            videoSource = path;
+          } else if (csvData[i].video_url) {
+            videoSource = csvData[i].video_url || null;
           }
           
-          const timeout = csvData[i].url_timeout ? parseInt(csvData[i].url_timeout!, 10) : 10 * 60 * 1000;
-          videoStream = await fetchFileAsStream(videoSource, {
-            timeout,
-            headers: authHeaders,
-          });
-        } else if (path && fs.existsSync(path)) {
-          // Handle file-based upload (local file path)
-          videoStream = fs.createReadStream(path);
-        } else {
-          progress[i] = { index: i, status: `Video file or URL not found: ${path || csvData[i].video_url || 'N/A'}` };
-          continue;
+          if (videoSource && isValidUrl(videoSource)) {
+            // Handle URL-based upload
+            progress[i].status = "Fetching video from URL...";
+            
+            let authHeaders: Record<string, string> = {};
+            if (csvData[i].url_auth_headers) {
+              try {
+                authHeaders = JSON.parse(csvData[i].url_auth_headers!);
+              } catch (e) {
+                console.warn(`Failed to parse auth headers for row ${i}:`, e);
+              }
+            }
+            
+            const timeout = csvData[i].url_timeout ? parseInt(csvData[i].url_timeout!, 10) : 10 * 60 * 1000;
+            videoStream = await fetchFileAsStream(videoSource, {
+              timeout,
+              headers: authHeaders,
+            });
+          } else if (path && fs.existsSync(path)) {
+            // Handle file-based upload (local file path)
+            videoStream = fs.createReadStream(path);
+          } else {
+            progress[i] = { index: i, status: `Video file, URL, or Drive ID not found: ${path || csvData[i].video_url || csvData[i].drive_file_id || 'N/A'}` };
+            continue;
+          }
         }
 
         progress[i].status = "Uploading video...";
@@ -298,28 +315,40 @@ export async function POST(request: NextRequest) {
         });
         const videoId = resultVideoUpload.data.id;
 
-        // Upload thumbnail (if provided) - support both file and URL
-        // Smart detection: auto-detect URL in thumbnail_path column
+        // Upload thumbnail (if provided) - support file, URL, or Drive
+        // Priority: Drive > URL > File path
         if (videoId) {
           let thumbnailStream: Readable | null = null;
-          let thumbnailSource: string | null = null;
+          let driveThumbnailId: string | null = null;
           
-          // Priority: thumbnail_url column > thumbnail_path (auto-detect URL)
-          if (csvData[i].thumbnail_url && isValidUrl(csvData[i].thumbnail_url!)) {
-            thumbnailSource = csvData[i].thumbnail_url!;
-          } else if (thumbnail_path && isValidUrl(thumbnail_path)) {
-            // Auto-detect: thumbnail_path column contains a URL
-            thumbnailSource = thumbnail_path;
+          // Check for Drive thumbnail ID
+          if (csvData[i].drive_thumbnail_id && isDriveFileId(csvData[i].drive_thumbnail_id!)) {
+            driveThumbnailId = csvData[i].drive_thumbnail_id!;
+          } else if (thumbnail_path && isDriveFileId(thumbnail_path)) {
+            driveThumbnailId = thumbnail_path;
           }
           
-          if (thumbnailSource) {
-            progress[i].status = "Uploading Thumbnail from URL...";
-            thumbnailStream = await fetchFileAsStream(thumbnailSource, {
-              timeout: 60000, // 1 minute for thumbnails
-            });
-          } else if (thumbnail_path && fs.existsSync(thumbnail_path)) {
-            progress[i].status = "Uploading Thumbnail...";
-            thumbnailStream = fs.createReadStream(thumbnail_path);
+          if (driveThumbnailId) {
+            progress[i].status = "Uploading Thumbnail from Drive...";
+            thumbnailStream = await downloadDriveFile(driveThumbnailId, oAuthClient);
+          } else {
+            // Check for URL
+            let thumbnailSource: string | null = null;
+            if (csvData[i].thumbnail_url && isValidUrl(csvData[i].thumbnail_url!)) {
+              thumbnailSource = csvData[i].thumbnail_url!;
+            } else if (thumbnail_path && isValidUrl(thumbnail_path)) {
+              thumbnailSource = thumbnail_path;
+            }
+            
+            if (thumbnailSource) {
+              progress[i].status = "Uploading Thumbnail from URL...";
+              thumbnailStream = await fetchFileAsStream(thumbnailSource, {
+                timeout: 60000, // 1 minute for thumbnails
+              });
+            } else if (thumbnail_path && fs.existsSync(thumbnail_path)) {
+              progress[i].status = "Uploading Thumbnail...";
+              thumbnailStream = fs.createReadStream(thumbnail_path);
+            }
           }
           
           if (thumbnailStream) {
@@ -330,6 +359,39 @@ export async function POST(request: NextRequest) {
               },
             });
             progress[i].status = "Thumbnail uploaded";
+          }
+        }
+        
+        // Post-upload actions for Drive files
+        if (driveFileId && videoId && csvData[i].post_upload_action && csvData[i].post_upload_action !== "none") {
+          try {
+            switch (csvData[i].post_upload_action!.toLowerCase()) {
+              case "rename":
+                // Get file extension and rename to video ID
+                const fileMetadata = await getDriveFileMetadata(driveFileId, oAuthClient);
+                const extension = fileMetadata.name.split('.').pop() || 'mp4';
+                const newName = `${videoId}.${extension}`;
+                await renameDriveFile(driveFileId, newName, oAuthClient);
+                progress[i].status = `Uploaded & renamed to ${newName}`;
+                break;
+                
+              case "delete":
+                await deleteDriveFile(driveFileId, oAuthClient);
+                progress[i].status = "Uploaded & deleted from Drive";
+                break;
+                
+              case "move":
+                if (csvData[i].completed_folder_id) {
+                  await moveDriveFile(driveFileId, csvData[i].completed_folder_id!, oAuthClient);
+                  progress[i].status = `Uploaded & moved to folder`;
+                } else {
+                  console.warn(`[UPLOAD-CSV] Move action requested but no completed_folder_id provided for row ${i}`);
+                }
+                break;
+            }
+          } catch (actionError: any) {
+            console.error(`[UPLOAD-CSV] Post-upload action failed for row ${i}:`, actionError);
+            // Don't fail - action is optional
           }
         }
         

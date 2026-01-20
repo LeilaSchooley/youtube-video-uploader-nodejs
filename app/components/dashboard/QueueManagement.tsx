@@ -646,6 +646,7 @@ export default function QueueManagement({
                             {item.status}
                           </span>
                         </div>
+                        </div>
                       </div>
                     );
                   })}

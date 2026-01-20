@@ -400,8 +400,6 @@ export async function POST(request: NextRequest) {
   }
 }
 
-<<<<<<< Updated upstream
-=======
 // GET endpoint to check job status
 export async function GET(request: NextRequest) {
   try {
@@ -460,5 +458,4 @@ export async function GET(request: NextRequest) {
     );
   }
 }
->>>>>>> Stashed changes
 

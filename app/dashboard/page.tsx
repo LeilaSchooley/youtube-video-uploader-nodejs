@@ -204,8 +204,9 @@ export default function Dashboard() {
         if (!row.youtube_description || !row.youtube_description.trim()) {
           errors.push(`Row ${i + 1}: Missing youtube_description`);
         }
-        if (!row.path || !row.path.trim()) {
-          errors.push(`Row ${i + 1}: Missing path`);
+        // Check for video source: path, video_url, or drive_file_id
+        if (!row.path?.trim() && !row.video_url?.trim() && !row.drive_file_id?.trim()) {
+          errors.push(`Row ${i + 1}: Missing video source (path, video_url, or drive_file_id)`);
         }
       }
     } catch (error) {

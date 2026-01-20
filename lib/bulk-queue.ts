@@ -14,6 +14,9 @@ export interface BulkUploadItem {
     };
     // For URL-based uploads
     url?: string;
+    // For Drive-based uploads
+    driveFileId?: string;
+    driveThumbnailId?: string;
     authHeaders?: Record<string, string>; // Optional auth headers for URL
     timeout?: number; // Optional timeout override
     // Common metadata
@@ -23,6 +26,9 @@ export interface BulkUploadItem {
     publishDate?: string; // ISO date string
     thumbnailUrl?: string;
     thumbnailPath?: string;
+    // Post-upload actions
+    postUploadAction?: string; // "rename", "delete", "move", or "none"
+    completedFolderId?: string; // Drive folder ID for move action
   }>;
   status: "pending" | "processing" | "completed" | "failed" | "paused" | "cancelled";
   progress: Array<{

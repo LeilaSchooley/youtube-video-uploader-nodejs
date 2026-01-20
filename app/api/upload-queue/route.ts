@@ -9,6 +9,7 @@ import { parseDate } from "@/lib/utils";
 import fs from "fs";
 import path from "path";
 import { fetchFileAsStream, isValidUrl } from "@/lib/url-stream";
+import { downloadDriveFile, isDriveFileId, getDriveFileMetadata, renameDriveFile, moveDriveFile, deleteDriveFile } from "@/lib/drive";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 1800; // 30 minutes for large batches
@@ -23,10 +24,14 @@ interface CSVRow {
   path?: string;  // Fallback: extract filename from path
   video_url?: string;  // URL to video file
   thumbnail_url?: string;  // URL to thumbnail file
+  drive_file_id?: string;  // Google Drive file ID for video
+  drive_thumbnail_id?: string;  // Google Drive file ID for thumbnail
   url_auth_headers?: string;  // JSON string of auth headers
   url_timeout?: string;  // Timeout in milliseconds
   scheduleTime?: string;
   privacyStatus?: string;
+  post_upload_action?: string;  // "rename", "delete", "move", or "none"
+  completed_folder_id?: string;  // Drive folder ID for move action
 }
 
 interface VideoUploadTask {
@@ -36,8 +41,12 @@ interface VideoUploadTask {
   thumbnailFile: File | null;
   videoUrl?: string;
   thumbnailUrl?: string;
+  driveFileId?: string;
+  driveThumbnailId?: string;
   authHeaders?: Record<string, string>;
   timeout?: number;
+  postUploadAction?: string;
+  completedFolderId?: string;
 }
 
 interface BatchProgress {
@@ -92,7 +101,8 @@ function createProgressStream(
 async function uploadVideo(
   youtube: ReturnType<typeof google.youtube>,
   task: VideoUploadTask,
-  sendProgress: (data: any) => void
+  sendProgress: (data: any) => void,
+  oAuthClient: ReturnType<typeof getOAuthClient>
 ): Promise<{ success: boolean; videoId?: string; error?: string }> {
   const { row, videoFile, thumbnailFile } = task;
   const { youtube_title, youtube_description, scheduleTime, privacyStatus } = row;
@@ -104,11 +114,11 @@ async function uploadVideo(
     };
   }
 
-  // Check if we have a video source (file or URL)
-  if (!videoFile && !task.videoUrl) {
+  // Check if we have a video source (file, URL, or Drive)
+  if (!videoFile && !task.videoUrl && !task.driveFileId) {
     return { 
       success: false, 
-      error: 'Video file or URL not found' 
+      error: 'Video file, URL, or Drive file ID not found' 
     };
   }
 
@@ -160,8 +170,17 @@ async function uploadVideo(
 
     let videoStream: Readable;
     
-    // Handle URL-based upload
-    if (task.videoUrl && isValidUrl(task.videoUrl)) {
+    // Priority: Drive > URL > File
+    if (task.driveFileId) {
+      // Handle Drive-based upload
+      sendProgress({
+        type: 'video_fetch_start',
+        index: task.index,
+        title: youtube_title.substring(0, 50),
+      });
+      videoStream = await downloadDriveFile(task.driveFileId, oAuthClient);
+    } else if (task.videoUrl && isValidUrl(task.videoUrl)) {
+      // Handle URL-based upload
       sendProgress({
         type: 'video_fetch_start',
         index: task.index,
@@ -208,8 +227,8 @@ async function uploadVideo(
       duration: uploadDuration,
     });
 
-    // Upload thumbnail if provided (file or URL)
-    if (videoId && (thumbnailFile || task.thumbnailUrl)) {
+    // Upload thumbnail if provided (file, URL, or Drive)
+    if (videoId && (thumbnailFile || task.thumbnailUrl || task.driveThumbnailId)) {
       sendProgress({
         type: 'thumbnail_upload_start',
         index: task.index,
@@ -219,13 +238,14 @@ async function uploadVideo(
       try {
         let thumbnailStream: Readable;
         
-        // Handle thumbnail URL
-        if (task.thumbnailUrl && isValidUrl(task.thumbnailUrl)) {
+        // Priority: Drive > URL > File
+        if (task.driveThumbnailId) {
+          thumbnailStream = await downloadDriveFile(task.driveThumbnailId, oAuthClient);
+        } else if (task.thumbnailUrl && isValidUrl(task.thumbnailUrl)) {
           thumbnailStream = await fetchFileAsStream(task.thumbnailUrl, {
             timeout: 60000, // 1 minute for thumbnails
           });
         } else if (thumbnailFile) {
-          // Handle thumbnail file
           const thumbnailBytes = await thumbnailFile.arrayBuffer();
           const thumbnailBuffer = Buffer.from(thumbnailBytes);
           thumbnailStream = Readable.from(thumbnailBuffer);
@@ -279,6 +299,63 @@ async function uploadVideo(
       }
     }
 
+    // Post-upload actions for Drive files
+    if (task.driveFileId && videoId && task.postUploadAction && task.postUploadAction !== "none") {
+      try {
+        switch (task.postUploadAction.toLowerCase()) {
+          case "rename":
+            // Rename file to video ID for tracking
+            const fileMetadata = await getDriveFileMetadata(task.driveFileId, oAuthClient);
+            const extension = fileMetadata.name.split('.').pop() || 'mp4';
+            const newName = `${videoId}.${extension}`;
+            await renameDriveFile(task.driveFileId, newName, oAuthClient);
+            sendProgress({
+              type: 'post_upload_action',
+              index: task.index,
+              videoId,
+              action: 'renamed',
+              message: `Renamed to ${newName}`,
+            });
+            break;
+            
+          case "delete":
+            await deleteDriveFile(task.driveFileId, oAuthClient);
+            sendProgress({
+              type: 'post_upload_action',
+              index: task.index,
+              videoId,
+              action: 'deleted',
+              message: 'File deleted from Drive',
+            });
+            break;
+            
+          case "move":
+            if (task.completedFolderId) {
+              await moveDriveFile(task.driveFileId, task.completedFolderId, oAuthClient);
+              sendProgress({
+                type: 'post_upload_action',
+                index: task.index,
+                videoId,
+                action: 'moved',
+                message: `Moved to folder ${task.completedFolderId}`,
+              });
+            } else {
+              console.warn(`[UPLOAD-QUEUE] Move action requested but no completed_folder_id provided`);
+            }
+            break;
+        }
+      } catch (actionError: any) {
+        console.error(`[UPLOAD-QUEUE] Post-upload action failed for video ${task.index}:`, actionError);
+        // Don't fail the upload - action is optional
+        sendProgress({
+          type: 'post_upload_action_failed',
+          index: task.index,
+          videoId,
+          error: actionError?.message || 'Unknown error',
+        });
+      }
+    }
+
     return { success: true, videoId };
   } catch (error: any) {
     const errorMessage = error?.response?.data?.error?.message || 
@@ -307,7 +384,8 @@ async function processBatch(
   batch: VideoUploadTask[],
   batchNumber: number,
   totalBatches: number,
-  sendProgress: (data: any) => void
+  sendProgress: (data: any) => void,
+  oAuthClient: ReturnType<typeof getOAuthClient>
 ): Promise<BatchProgress> {
   sendProgress({
     type: 'batch_start',
@@ -317,7 +395,7 @@ async function processBatch(
   });
 
   const results = await Promise.allSettled(
-    batch.map(task => uploadVideo(youtube, task, sendProgress))
+    batch.map(task => uploadVideo(youtube, task, sendProgress, oAuthClient))
   );
 
   const completed = results.filter(r => r.status === 'fulfilled' && r.value.success).length;
@@ -676,24 +754,47 @@ export async function POST(request: NextRequest) {
   for (let i = 0; i < csvData.length; i++) {
     const row = csvData[i];
     
-    // Smart detection: check if video URL is provided or if path contains a URL
+    // Check if video source is provided
+    // Priority: drive_file_id > video_url > path (auto-detect URL/Drive ID)
     let videoUrl: string | undefined;
     let thumbnailUrl: string | undefined;
+    let driveFileId: string | undefined;
+    let driveThumbnailId: string | undefined;
     
-    // Priority: video_url column > path column (auto-detect URL in path)
-    if (row.video_url && isValidUrl(row.video_url)) {
-      videoUrl = row.video_url;
-    } else if (row.path && isValidUrl(row.path)) {
-      // Auto-detect: path column contains a URL
-      videoUrl = row.path;
+    // Check for Drive file ID
+    if (row.drive_file_id && isDriveFileId(row.drive_file_id)) {
+      driveFileId = row.drive_file_id;
+    } else if (row.path && isDriveFileId(row.path)) {
+      // Auto-detect: path column contains a Drive file ID
+      driveFileId = row.path;
     }
     
-    // Priority: thumbnail_url column > thumbnail_path (auto-detect URL)
-    if (row.thumbnail_url && isValidUrl(row.thumbnail_url)) {
-      thumbnailUrl = row.thumbnail_url;
-    } else if (row.thumbnail_path && isValidUrl(row.thumbnail_path)) {
-      // Auto-detect: thumbnail_path column contains a URL
-      thumbnailUrl = row.thumbnail_path;
+    // Check for video URL (if not Drive)
+    if (!driveFileId) {
+      if (row.video_url && isValidUrl(row.video_url)) {
+        videoUrl = row.video_url;
+      } else if (row.path && isValidUrl(row.path)) {
+        // Auto-detect: path column contains a URL
+        videoUrl = row.path;
+      }
+    }
+    
+    // Check for Drive thumbnail ID
+    if (row.drive_thumbnail_id && isDriveFileId(row.drive_thumbnail_id)) {
+      driveThumbnailId = row.drive_thumbnail_id;
+    } else if (row.thumbnail_path && isDriveFileId(row.thumbnail_path)) {
+      // Auto-detect: thumbnail_path column contains a Drive file ID
+      driveThumbnailId = row.thumbnail_path;
+    }
+    
+    // Check for thumbnail URL (if not Drive)
+    if (!driveThumbnailId) {
+      if (row.thumbnail_url && isValidUrl(row.thumbnail_url)) {
+        thumbnailUrl = row.thumbnail_url;
+      } else if (row.thumbnail_path && isValidUrl(row.thumbnail_path)) {
+        // Auto-detect: thumbnail_path column contains a URL
+        thumbnailUrl = row.thumbnail_path;
+      }
     }
     
     // Parse auth headers if provided
@@ -735,18 +836,26 @@ export async function POST(request: NextRequest) {
       thumbnailFile,
       videoUrl,
       thumbnailUrl,
+      driveFileId,
+      driveThumbnailId,
       authHeaders,
       timeout,
+      postUploadAction: row.post_upload_action || "none",
+      completedFolderId: row.completed_folder_id,
     });
   }
 
-  // Filter out tasks without video files or URLs
-  const validTasks = tasks.filter(t => t.videoFile !== null || t.videoUrl !== undefined);
+  // Filter out tasks without video files, URLs, or Drive IDs
+  const validTasks = tasks.filter(t => 
+    t.videoFile !== null || 
+    t.videoUrl !== undefined || 
+    t.driveFileId !== undefined
+  );
   const invalidCount = tasks.length - validTasks.length;
 
   if (validTasks.length === 0) {
     return new Response(
-      JSON.stringify({ error: "No matching video files or URLs found" }),
+      JSON.stringify({ error: "No matching video files, URLs, or Drive file IDs found" }),
       { status: 400, headers: { 'Content-Type': 'application/json' } }
     );
   }
@@ -779,7 +888,8 @@ export async function POST(request: NextRequest) {
         batch,
         i + 1,
         totalBatches,
-        send
+        send,
+        oAuthClient
       );
 
       totalCompleted += batchProgress.completed;

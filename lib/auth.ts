@@ -44,13 +44,19 @@ if (!CLIENT_ID || !CLIENT_SECRET || !REDIRECT_URL) {
 }
 
 const scopes =
-  "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email";
+  "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file";
 
 export function getOAuthClient(): OAuth2Client {
+  if (!CLIENT_ID || !CLIENT_SECRET || !REDIRECT_URL) {
+    throw new Error("OAuth credentials not configured. Please set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REDIRECT_URI environment variables.");
+  }
   return new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, REDIRECT_URL);
 }
 
 export function generateAuthUrl(): string {
+  if (!CLIENT_ID || !CLIENT_SECRET || !REDIRECT_URL) {
+    throw new Error("OAuth credentials not configured. Please set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REDIRECT_URI environment variables.");
+  }
   const oAuthClient = getOAuthClient();
   return oAuthClient.generateAuthUrl({
     access_type: "offline",

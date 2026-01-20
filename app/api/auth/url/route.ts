@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { generateAuthUrl } from "@/lib/auth";
 
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 export async function GET() {
   try {
     const url = generateAuthUrl();
