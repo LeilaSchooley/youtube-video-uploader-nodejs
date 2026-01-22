@@ -232,7 +232,7 @@ export async function POST(request: NextRequest) {
       }
       
       // Try partial match (filename contains video_name or vice versa)
-      for (const [driveFileName, fileId] of driveFilesMap.entries()) {
+      for (const [driveFileName, fileId] of Array.from(driveFilesMap.entries())) {
         if (driveFileName.includes(normalizedName) || normalizedName.includes(driveFileName)) {
           return fileId;
         }

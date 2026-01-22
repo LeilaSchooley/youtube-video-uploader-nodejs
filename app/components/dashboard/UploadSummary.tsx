@@ -103,9 +103,11 @@ export default function UploadSummary({
         completedVideos:
           job.progress?.filter(
             (p) =>
-              p.status.includes("Uploaded") ||
-              p.status.includes("scheduled") ||
-              p.status.includes("Scheduled")
+              p && p.status && (
+                p.status.includes("Uploaded") ||
+                p.status.includes("scheduled") ||
+                p.status.includes("Scheduled")
+              )
           ).length || 0,
       };
     });
@@ -137,9 +139,11 @@ export default function UploadSummary({
       const totalVideos = job.items?.length || job.totalVideos || 0;
       const completedCount = job.progress?.filter(
         (p) =>
-          p.status.includes("Uploaded") ||
-          p.status.includes("scheduled") ||
-          p.status.includes("Scheduled")
+          p && p.status && (
+            p.status.includes("Uploaded") ||
+            p.status.includes("scheduled") ||
+            p.status.includes("Scheduled")
+          )
       ).length || 0;
       
       // Calculate which videos are scheduled for tomorrow
@@ -151,16 +155,40 @@ export default function UploadSummary({
       for (let i = startIndex; i < endIndex && i < totalVideos; i++) {
         // Check if this video is already completed
         const isCompleted = job.progress?.some(
-          (p) => p.index === i && (p.status.includes("Uploaded") || p.status.includes("scheduled") || p.status.includes("Scheduled"))
+          (p) => p && p.index === i && p.status && (p.status.includes("Uploaded") || p.status.includes("scheduled") || p.status.includes("Scheduled"))
         );
         
         if (!isCompleted && i >= completedCount) {
-          // Get video title
+          // Get video title - prefer items array (from sheet), fallback to progress
           let videoTitle = `Video ${i + 1}`;
-          if (job.items && job.items[i]) {
-            videoTitle = job.items[i].title || videoTitle;
-          } else if (job.progress && job.progress[i]) {
-            videoTitle = job.progress[i].title || videoTitle;
+          
+          // Try to get title from job.items (from sheet) first
+          if (job.items && Array.isArray(job.items) && job.items.length > i) {
+            const item = job.items[i];
+            if (item && typeof item === 'object') {
+              const itemTitle = item.title;
+              if (itemTitle && typeof itemTitle === 'string' && itemTitle.trim() && itemTitle.trim() !== `Video ${i + 1}`) {
+                videoTitle = itemTitle.trim();
+              }
+            }
+          }
+          
+          // Fallback to progress title if still using default
+          if (videoTitle === `Video ${i + 1}`) {
+            // Check by array index
+            if (job.progress && job.progress[i] && job.progress[i].title) {
+              const progressTitle = job.progress[i].title;
+              if (progressTitle && typeof progressTitle === 'string' && progressTitle.trim()) {
+                videoTitle = progressTitle.trim();
+              }
+            }
+            // Also check by index match
+            if (videoTitle === `Video ${i + 1}`) {
+              const progressItem = job.progress?.find((p) => p && p.index === i);
+              if (progressItem && progressItem.title && typeof progressItem.title === 'string' && progressItem.title.trim()) {
+                videoTitle = progressItem.title.trim();
+              }
+            }
           }
           
           nextDayVideos.push({

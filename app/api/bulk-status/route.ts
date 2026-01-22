@@ -56,9 +56,12 @@ export async function GET(request: NextRequest) {
         status: job.status,
         progress: job.progress,
         totalItems: job.items.length,
+        items: job.items.map(item => ({ title: item.title })), // Include titles for display
         createdAt: job.createdAt,
         updatedAt: job.updatedAt,
         error: job.error,
+        videosPerDay: job.videosPerDay,
+        startDate: job.startDate,
       });
     } else {
       // Get all jobs for this session

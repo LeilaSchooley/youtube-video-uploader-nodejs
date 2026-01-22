@@ -275,4 +275,3 @@ export function deleteAllJobs(userId?: string, sessionId?: string): { deleted: n
   
   return { deleted, errors };
 }
-

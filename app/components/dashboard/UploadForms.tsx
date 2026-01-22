@@ -1143,15 +1143,15 @@ export default function UploadForms({
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                   Leave 0 or empty to upload all immediately. If set, videos will upload X per day starting today.
                 </p>
-              </div>
+                          </div>
               <div className="mt-3 p-3 bg-blue-100 dark:bg-blue-900/30 rounded text-xs text-blue-800 dark:text-blue-200">
                 <strong>💡 How it works:</strong> If you set "5 videos per day", 
                 the first 5 videos will upload today, videos 6-10 tomorrow, and so on. 
                 Videos are uploaded immediately but scheduled to publish on their assigned dates.
                 <br />
                 <strong>Note:</strong> If a video has a <code className="bg-blue-200 dark:bg-blue-800 px-1 rounded">scheduleTime</code> or <code className="bg-blue-200 dark:bg-blue-800 px-1 rounded">publishAt</code> date in your sheet, that date will be used instead.
-              </div>
-            </div>
+                        </div>
+                      </div>
 
             <div className="p-4 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg">
               <h3 className="font-semibold text-gray-800 dark:text-white mb-2 text-sm">
@@ -1172,7 +1172,7 @@ export default function UploadForms({
                 <li><code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">url_auth_headers</code>, <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">url_timeout</code></li>
                 <li><code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">post_upload_action</code>, <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">completed_folder_id</code></li>
               </ul>
-                        </div>
+                          </div>
 
             <div className="flex gap-3">
                         <button

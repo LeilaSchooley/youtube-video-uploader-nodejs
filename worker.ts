@@ -37,6 +37,7 @@ interface UploadTask {
     thumbnailPath?: string;
     postUploadAction?: string;
     completedFolderId?: string;
+    madeForKids?: boolean;
   };
 }
 
@@ -449,7 +450,15 @@ async function processBulkJob(jobId: string): Promise<void> {
         return;
       }
 
-      // Job completed (may have some failures, but at least one succeeded)
+      // Only mark as completed if ALL items have been processed (either succeeded or failed)
+      const totalProcessed = successfulItems + failedItems;
+      if (totalProcessed < totalItems) {
+        // Not all items have been processed yet - keep as processing
+        console.log(`[WORKER] Job ${jobId}: ${totalProcessed}/${totalItems} items processed, keeping as processing`);
+        return; // Don't mark as completed yet
+      }
+
+      // Job completed (all items processed, may have some failures)
       if (failedItems > 0) {
         console.warn(`[WORKER] Job ${jobId} completed with ${failedItems} failure(s) - check individual items for details`);
       }

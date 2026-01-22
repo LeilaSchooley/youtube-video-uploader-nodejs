@@ -19,28 +19,34 @@ export default function Statistics({ queue, nextUploadTime, timeUntilNext }: Sta
   
   const completed = allProgress.filter(
     (p) =>
-      p.status.includes("Uploaded") || 
-      p.status.includes("scheduled") ||
-      p.status.includes("Scheduled") ||
-      p.status.includes("Already uploaded")
+      p && p.status && (
+        p.status.includes("Uploaded") || 
+        p.status.includes("scheduled") ||
+        p.status.includes("Scheduled") ||
+        p.status.includes("Already uploaded")
+      )
   ).length;
   
   const failed = allProgress.filter(
     (p) =>
-      p.status.includes("Failed") || 
-      p.status.includes("Missing") ||
-      p.status.includes("Invalid") ||
-      p.status.includes("not found") ||
-      p.status.includes("Cannot access") ||
-      p.status.includes("error")
+      p && p.status && (
+        p.status.includes("Failed") || 
+        p.status.includes("Missing") ||
+        p.status.includes("Invalid") ||
+        p.status.includes("not found") ||
+        p.status.includes("Cannot access") ||
+        p.status.includes("error")
+      )
   ).length;
   
   const pending = allProgress.filter(
     (p) =>
-      p.status === "Pending" || 
-      p.status.includes("Uploading") ||
-      p.status.includes("thumbnail") ||
-      p.status.includes("Checking")
+      p && p.status && (
+        p.status === "Pending" || 
+        p.status.includes("Uploading") ||
+        p.status.includes("thumbnail") ||
+        p.status.includes("Checking")
+      )
   ).length;
   
   const processing = queue.filter((job) => job.status === "processing").length;

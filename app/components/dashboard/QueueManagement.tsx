@@ -123,8 +123,10 @@ export default function QueueManagement({
               )
               .slice(0, 10) // Show only first 10 jobs
               .map((job) => {
+                // Use jobStatus if available (has full items data), otherwise use job from queue
+                const displayJob = (selectedJobId === job.id && jobStatus) ? jobStatus : job;
                 // Calculate job progress
-                const jobProgress = job.progress || [];
+                const jobProgress = displayJob.progress || [];
                 const completedCount = jobProgress.filter(
                   (p: any) =>
                     p && p.status && (
@@ -136,7 +138,17 @@ export default function QueueManagement({
                 const failedCount = jobProgress.filter((p: any) =>
                   p && p.status && p.status.includes("Failed")
                 ).length;
-                const totalVideos = job.totalVideos || jobProgress.length || 0;
+                const totalVideos = displayJob.totalVideos || jobProgress.length || 0;
+                const pendingCount = totalVideos - completedCount - failedCount;
+                
+                // Override status if there are pending videos
+                const displayStatus = (pendingCount > 0 && displayJob.status === "completed") 
+                  ? "processing" 
+                  : displayJob.status;
+                
+                // Get items from displayJob (prefer jobStatus if available for full data)
+                const jobItems = displayJob.items || job.items || [];
+                
                 const progressPercent =
                   totalVideos > 0
                     ? Math.round((completedCount / totalVideos) * 100)
@@ -162,13 +174,13 @@ export default function QueueManagement({
                         <div className="flex items-center gap-3 mb-3">
                           <div
                             className={`w-4 h-4 rounded-full flex-shrink-0 ${
-                              job.status === "completed"
+                              displayStatus === "completed"
                                 ? "bg-green-500 shadow-lg shadow-green-500/50"
-                                : job.status === "failed"
+                                : displayStatus === "failed"
                                 ? "bg-red-500 shadow-lg shadow-red-500/50"
-                                : job.status === "processing"
+                                : displayStatus === "processing"
                                 ? "bg-yellow-500 animate-pulse shadow-lg shadow-yellow-500/50"
-                                : job.status === "paused"
+                                : displayStatus === "paused"
                                 ? "bg-blue-500 shadow-lg shadow-blue-500/50"
                                 : "bg-gray-400"
                             }`}
@@ -178,22 +190,22 @@ export default function QueueManagement({
                           </span>
                           <span
                             className={`px-3 py-1 rounded-full text-xs font-semibold flex-shrink-0 ${
-                              job.status === "completed"
+                              displayStatus === "completed"
                                 ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
-                                : job.status === "failed"
+                                : displayStatus === "failed"
                                 ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
-                                : job.status === "processing"
+                                : displayStatus === "processing"
                                 ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200 animate-pulse"
-                                : job.status === "paused"
+                                : displayStatus === "paused"
                                 ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
                                 : "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200"
                             }`}
                           >
-                            {job.status === "completed" && "✓ "}
-                            {job.status === "failed" && "✕ "}
-                            {job.status === "processing" && "⚡ "}
-                            {job.status === "paused" && "⏸ "}
-                            {job.status.toUpperCase()}
+                            {displayStatus === "completed" && "✓ "}
+                            {displayStatus === "failed" && "✕ "}
+                            {displayStatus === "processing" && "⚡ "}
+                            {displayStatus === "paused" && "⏸ "}
+                            {displayStatus.toUpperCase()}
                           </span>
                         </div>
 
@@ -211,11 +223,11 @@ export default function QueueManagement({
                             <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5 overflow-hidden">
                               <div
                                 className={`h-2.5 rounded-full transition-all duration-300 ${
-                                  job.status === "completed"
+                                  displayStatus === "completed"
                                     ? "bg-gradient-to-r from-green-500 to-emerald-500"
-                                    : job.status === "failed"
+                                    : displayStatus === "failed"
                                     ? "bg-gradient-to-r from-red-500 to-pink-500"
-                                    : job.status === "processing"
+                                    : displayStatus === "processing"
                                     ? "bg-gradient-to-r from-yellow-500 to-orange-500 animate-pulse"
                                     : "bg-gradient-to-r from-blue-500 to-indigo-500"
                                 }`}
@@ -259,7 +271,193 @@ export default function QueueManagement({
                             <span>📅</span>
                             <span>Created: {new Date(job.createdAt).toLocaleString()}</span>
                           </div>
-                          {job.status === "processing" &&
+                          
+                          {/* Next Batch/Pending Videos Information */}
+                          {pendingCount > 0 && (
+                            (() => {
+                              // Find the next pending video(s) to upload
+                              const nextPendingVideos: Array<{ index: number; title: string }> = [];
+                              
+                              // If videosPerDay is set, find the next batch
+                              if (displayJob.videosPerDay && displayJob.videosPerDay > 0) {
+                                const startDate = displayJob.startDate ? new Date(displayJob.startDate) : new Date(displayJob.createdAt);
+                                startDate.setHours(12, 0, 0, 0);
+                                
+                                // Find the next batch that hasn't been completed yet
+                                const currentBatch = Math.floor(completedCount / displayJob.videosPerDay);
+                                let nextBatchStartIndex = currentBatch * displayJob.videosPerDay;
+                                
+                                // Skip batches that are already completed
+                                while (nextBatchStartIndex < totalVideos) {
+                                  const batchEndIndex = Math.min(nextBatchStartIndex + displayJob.videosPerDay, totalVideos);
+                                  // Check if this batch has any uncompleted videos
+                                  const batchCompleted = jobProgress.filter(
+                                    (p: any) => 
+                                      p && p.index >= nextBatchStartIndex && 
+                                      p.index < batchEndIndex &&
+                                      p.status && (
+                                        p.status.includes("Uploaded") ||
+                                        p.status.includes("Scheduled") ||
+                                        p.status.includes("Already uploaded")
+                                      )
+                                  ).length;
+                                  
+                                  if (batchCompleted < (batchEndIndex - nextBatchStartIndex)) {
+                                    // Found a batch with uncompleted videos
+                                    break;
+                                  }
+                                  nextBatchStartIndex = batchEndIndex;
+                                }
+                                
+                                if (nextBatchStartIndex < totalVideos) {
+                                  const nextBatchEndIndex = Math.min(nextBatchStartIndex + displayJob.videosPerDay, totalVideos);
+                                  
+                                  // Get video titles for next batch
+                                  for (let i = nextBatchStartIndex; i < nextBatchEndIndex && i < totalVideos; i++) {
+                                    let title = `Video ${i + 1}`;
+                                    
+                                    // Try to get title from jobItems (from sheet) - check multiple ways
+                                    if (jobItems && Array.isArray(jobItems) && jobItems.length > i) {
+                                      const item = jobItems[i];
+                                      // Check if item exists and has a valid title
+                                      if (item && typeof item === 'object') {
+                                        const itemTitle = item.title;
+                                        if (itemTitle && typeof itemTitle === 'string' && itemTitle.trim() && itemTitle.trim() !== `Video ${i + 1}`) {
+                                          title = itemTitle.trim();
+                                        }
+                                      }
+                                    }
+                                    // Fallback to progress title if available (check by array index)
+                                    if (title === `Video ${i + 1}` && jobProgress[i] && jobProgress[i].title) {
+                                      title = jobProgress[i].title;
+                                    }
+                                    // Also check progress by index match (more reliable)
+                                    if (title === `Video ${i + 1}`) {
+                                      const progressItem = jobProgress.find((p: any) => p && p.index === i);
+                                      if (progressItem && progressItem.title) {
+                                        title = progressItem.title;
+                                      }
+                                    }
+                                    
+                                    // Only add if not already completed
+                                    const isCompleted = jobProgress.some(
+                                      (p: any) => 
+                                        p && p.index === i && 
+                                        p.status && (
+                                          p.status.includes("Uploaded") ||
+                                          p.status.includes("Scheduled") ||
+                                          p.status.includes("Already uploaded")
+                                        )
+                                    );
+                                    
+                                    if (!isCompleted) {
+                                      nextPendingVideos.push({ index: i, title });
+                                    }
+                                  }
+                                  
+                                  const nextBatchDate = new Date(startDate);
+                                  const batchNumber = Math.floor(nextBatchStartIndex / job.videosPerDay);
+                                  nextBatchDate.setDate(startDate.getDate() + batchNumber);
+                                  
+                                  const now = new Date();
+                                  const isToday = nextBatchDate.toDateString() === now.toDateString();
+                                  const isTomorrow = nextBatchDate.toDateString() === new Date(now.getTime() + 24 * 60 * 60 * 1000).toDateString();
+                                  
+                                  if (nextPendingVideos.length > 0) {
+                                    return (
+                                      <div className="mt-2 p-3 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 rounded-lg">
+                                        <div className="flex items-center gap-2 text-blue-800 dark:text-blue-200 font-semibold text-sm mb-1">
+                                          <span>📅</span>
+                                          <span>
+                                            Next Batch: {nextPendingVideos.length} video{nextPendingVideos.length !== 1 ? "s" : ""} 
+                                            {isToday ? " (Today)" : isTomorrow ? " (Tomorrow)" : ` (${nextBatchDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })})`}
+                                          </span>
+                                        </div>
+                                        <div className="text-xs text-blue-700 dark:text-blue-300 mt-1 space-y-0.5">
+                                          {nextPendingVideos.slice(0, 5).map((video, idx) => (
+                                            <div key={idx} className="truncate">• {video.title}</div>
+                                          ))}
+                                          {nextPendingVideos.length > 5 && (
+                                            <div className="text-blue-600 dark:text-blue-400">+ {nextPendingVideos.length - 5} more...</div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  }
+                                }
+                              } else {
+                                // No videosPerDay set - show all pending videos
+                                for (let i = 0; i < totalVideos; i++) {
+                                  const isCompleted = jobProgress.some(
+                                    (p: any) => 
+                                      p && p.index === i && 
+                                      p.status && (
+                                        p.status.includes("Uploaded") ||
+                                        p.status.includes("Scheduled") ||
+                                        p.status.includes("Already uploaded")
+                                      )
+                                  );
+                                  
+                                  if (!isCompleted) {
+                                    let title = `Video ${i + 1}`;
+                                    
+                                    // Try to get title from jobItems (from sheet) - check multiple ways
+                                    if (jobItems && Array.isArray(jobItems) && jobItems.length > i) {
+                                      const item = jobItems[i];
+                                      // Check if item exists and has a valid title
+                                      if (item && typeof item === 'object') {
+                                        const itemTitle = item.title;
+                                        if (itemTitle && typeof itemTitle === 'string' && itemTitle.trim() && itemTitle.trim() !== `Video ${i + 1}`) {
+                                          title = itemTitle.trim();
+                                        }
+                                      }
+                                    }
+                                    // Fallback to progress title if available (check by array index)
+                                    if (title === `Video ${i + 1}` && jobProgress[i] && jobProgress[i].title) {
+                                      title = jobProgress[i].title;
+                                    }
+                                    // Also check progress by index match (more reliable)
+                                    if (title === `Video ${i + 1}`) {
+                                      const progressItem = jobProgress.find((p: any) => p && p.index === i);
+                                      if (progressItem && progressItem.title) {
+                                        title = progressItem.title;
+                                      }
+                                    }
+                                    
+                                    nextPendingVideos.push({ index: i, title });
+                                    
+                                    // Limit to first 5 for display
+                                    if (nextPendingVideos.length >= 5) break;
+                                  }
+                                }
+                                
+                                if (nextPendingVideos.length > 0) {
+                                  return (
+                                    <div className="mt-2 p-3 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 rounded-lg">
+                                      <div className="flex items-center gap-2 text-blue-800 dark:text-blue-200 font-semibold text-sm mb-1">
+                                        <span>⏳</span>
+                                        <span>
+                                          Next: {nextPendingVideos.length} video{nextPendingVideos.length !== 1 ? "s" : ""} pending
+                                        </span>
+                                      </div>
+                                      <div className="text-xs text-blue-700 dark:text-blue-300 mt-1 space-y-0.5">
+                                        {nextPendingVideos.map((video, idx) => (
+                                          <div key={idx} className="truncate">• {video.title}</div>
+                                        ))}
+                                        {pendingCount > nextPendingVideos.length && (
+                                          <div className="text-blue-600 dark:text-blue-400">+ {pendingCount - nextPendingVideos.length} more...</div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                }
+                              }
+                              
+                              return null;
+                            })()
+                          )}
+                          
+                          {displayJob.status === "processing" &&
                             job.progress &&
                             job.progress.length > 0 &&
                             job.progress[0] &&
@@ -713,162 +911,6 @@ export default function QueueManagement({
                       </div>
                     );
                   })}
-                </div>
-
-                {/* Uploaded Files Management */}
-                <div className="mt-8 pt-6 border-t border-gray-200 dark:border-gray-700">
-                  <div className="flex justify-between items-center mb-4">
-                    <h4 className="text-lg font-bold text-gray-800 dark:text-white flex items-center gap-2">
-                      <span>📁</span>
-                      <span>Uploaded Files on Server</span>
-                    </h4>
-                    {jobFiles &&
-                      (jobFiles.files.videos.length > 0 ||
-                        jobFiles.files.thumbnails.length > 0) && (
-                        <button
-                          onClick={() => handleDeleteAllFiles(selectedJobId!)}
-                          className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition-colors"
-                        >
-                          🗑️ Delete All Files
-                        </button>
-                      )}
-                  </div>
-
-                  {loadingFiles ? (
-                    <div className="text-center py-4">
-                      <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-gray-800 dark:border-white"></div>
-                      <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
-                        Loading files...
-                      </p>
-                    </div>
-                  ) : jobFiles &&
-                    (jobFiles.files.videos.length > 0 ||
-                      jobFiles.files.thumbnails.length > 0 ||
-                      jobFiles.files.csv) ? (
-                    <div className="space-y-4">
-                      {/* Total Size Info */}
-                      <div className="p-3 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 rounded-lg">
-                        <div className="flex justify-between items-center text-sm">
-                          <span className="text-blue-800 dark:text-blue-200 font-medium">
-                            Total Storage: {jobFiles.totalSizeFormatted}
-                          </span>
-                          <span className="text-blue-600 dark:text-blue-400">
-                            {jobFiles.totalFiles} file
-                            {jobFiles.totalFiles !== 1 ? "s" : ""}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Video Files */}
-                      {jobFiles.files.videos.length > 0 && (
-                        <div>
-                          <h5 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                            📹 Video Files ({jobFiles.files.videos.length})
-                          </h5>
-                          <div className="space-y-2">
-                            {jobFiles.files.videos.map((file: any, idx: number) => (
-                              <div
-                                key={idx}
-                                className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
-                              >
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-sm font-medium text-gray-800 dark:text-white truncate">
-                                    {file.name}
-                                  </p>
-                                  <p className="text-xs text-gray-500 dark:text-gray-400">
-                                    {file.sizeFormatted}
-                                  </p>
-                                </div>
-                                <button
-                                  onClick={() =>
-                                    handleDeleteFile(selectedJobId!, file.path, file.name)
-                                  }
-                                  className="ml-3 px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold rounded-lg transition-colors flex-shrink-0"
-                                  title={`Delete ${file.name}`}
-                                >
-                                  🗑️ Delete
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Thumbnail Files */}
-                      {jobFiles.files.thumbnails.length > 0 && (
-                        <div>
-                          <h5 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                            🖼️ Thumbnail Files ({jobFiles.files.thumbnails.length})
-                          </h5>
-                          <div className="space-y-2">
-                            {jobFiles.files.thumbnails.map((file: any, idx: number) => (
-                              <div
-                                key={idx}
-                                className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
-                              >
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-sm font-medium text-gray-800 dark:text-white truncate">
-                                    {file.name}
-                                  </p>
-                                  <p className="text-xs text-gray-500 dark:text-gray-400">
-                                    {file.sizeFormatted}
-                                  </p>
-                                </div>
-                                <button
-                                  onClick={() =>
-                                    handleDeleteFile(selectedJobId!, file.path, file.name)
-                                  }
-                                  className="ml-3 px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold rounded-lg transition-colors flex-shrink-0"
-                                  title={`Delete ${file.name}`}
-                                >
-                                  🗑️ Delete
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* CSV File */}
-                      {jobFiles.files.csv && (
-                        <div>
-                          <h5 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                            📄 CSV File
-                          </h5>
-                          <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium text-gray-800 dark:text-white truncate">
-                                {jobFiles.files.csv.name}
-                              </p>
-                              <p className="text-xs text-gray-500 dark:text-gray-400">
-                                {jobFiles.files.csv.sizeFormatted}
-                              </p>
-                            </div>
-                            <button
-                              onClick={() =>
-                                handleDeleteFile(
-                                  selectedJobId!,
-                                  jobFiles.files.csv.path,
-                                  jobFiles.files.csv.name
-                                )
-                              }
-                              className="ml-3 px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold rounded-lg transition-colors flex-shrink-0"
-                              title={`Delete ${jobFiles.files.csv.name}`}
-                            >
-                              🗑️ Delete
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="text-center py-6 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
-                      <div className="text-4xl mb-2">📭</div>
-                      <p className="text-sm text-gray-600 dark:text-gray-400">
-                        No files found on server for this job
-                      </p>
-                    </div>
-                  )}
                 </div>
               </div>
             ) : (

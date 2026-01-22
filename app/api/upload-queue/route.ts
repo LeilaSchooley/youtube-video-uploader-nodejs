@@ -986,6 +986,9 @@ export async function GET(request: NextRequest) {
         status: job.status,
         progress: job.progress,
         totalVideos: job.items.length,
+        items: job.items.map((item, idx) => ({ 
+          title: item.title && item.title.trim() ? item.title.trim() : `Video ${idx + 1}` 
+        })), // Include titles for next batch display (with fallback)
         createdAt: job.createdAt,
         updatedAt: job.updatedAt,
         error: job.error,

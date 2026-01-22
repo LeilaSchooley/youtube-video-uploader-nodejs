@@ -235,7 +235,7 @@ export default function Dashboard() {
         const completedCount =
           job.progress?.filter(
             (p: ProgressItem) =>
-              p.status && (
+              p && p.status && (
                 p.status.includes("Uploaded") || 
                 p.status.includes("scheduled") ||
                 p.status.includes("Scheduled")
@@ -668,7 +668,10 @@ export default function Dashboard() {
           const prevCompletedCount =
             jobStatus?.progress?.filter(
               (p: ProgressItem) =>
-            p.status.includes("Uploaded") || p.status.includes("Scheduled")
+                p && p.status && (
+                  p.status.includes("Uploaded") || 
+                  p.status.includes("Scheduled")
+                )
           ).length || 0;
           
           // Normalize bulk job data to match queue job format
@@ -677,6 +680,9 @@ export default function Dashboard() {
             status: jobData.status,
             progress: jobData.progress || [],
             totalVideos: jobData.totalItems || jobData.progress?.length || 0,
+            items: jobData.items || [], // Include items for title display
+            videosPerDay: jobData.videosPerDay,
+            startDate: jobData.startDate,
             createdAt: jobData.createdAt,
             updatedAt: jobData.updatedAt,
             error: jobData.error,
@@ -689,7 +695,7 @@ export default function Dashboard() {
           const newCompletedCount =
             normalizedJob.progress?.filter(
               (p: ProgressItem) =>
-                p.status && (
+                p && p.status && (
                   p.status.includes("Uploaded") ||
                   p.status.includes("Scheduled") ||
                   p.status.includes("scheduled")
