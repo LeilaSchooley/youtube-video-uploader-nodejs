@@ -6,6 +6,8 @@ export interface BulkUploadItem {
   sessionId: string;
   userId?: string;
   type: "files" | "urls"; // Whether this is file-based or URL-based upload
+  videosPerDay?: number; // Number of videos to upload per day (0 = upload all immediately)
+  startDate?: string; // Start date for scheduling (ISO string)
   items: Array<{
     // For file-based uploads
     file?: {

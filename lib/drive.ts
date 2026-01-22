@@ -286,3 +286,169 @@ export async function getDriveFolderMetadata(
     throw new Error(`Failed to get Drive folder metadata: ${error?.message || "Unknown error"}`);
   }
 }
+
+/**
+ * List Google Sheets from Drive
+ * @param folderId - If provided, lists sheets in that folder. If null or 'root', lists sheets in root. If 'all', lists all sheets.
+ */
+export async function listDriveSheets(
+  folderId: string | null,
+  auth: OAuth2Client
+): Promise<Array<{
+  id: string;
+  name: string;
+  modifiedTime?: string;
+  webViewLink?: string;
+}>> {
+  const drive = getDriveClient(auth);
+  
+  try {
+    let query: string;
+    
+    if (folderId === 'all') {
+      // List all sheets across entire Drive
+      query = "mimeType='application/vnd.google-apps.spreadsheet' and trashed=false";
+    } else if (folderId === null || folderId === 'root') {
+      // List root folder - use 'root' as special identifier
+      query = "'root' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false";
+    } else {
+      query = `'${folderId}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`;
+    }
+
+    const response = await drive.files.list({
+      q: query,
+      fields: "files(id, name, webViewLink, modifiedTime)",
+      pageSize: 1000,
+      orderBy: "modifiedTime desc",
+    });
+
+    const files = response.data.files || [];
+    return files
+      .filter((file): file is { id: string; name: string; webViewLink?: string; modifiedTime?: string } => 
+        !!file.id && !!file.name
+      )
+      .map(file => ({
+        id: file.id!,
+        name: file.name!,
+        webViewLink: file.webViewLink || undefined,
+        modifiedTime: file.modifiedTime || undefined,
+      }));
+  } catch (error: any) {
+    console.error(`[DRIVE] Error listing sheets:`, error?.message);
+    throw new Error(`Failed to list Drive sheets: ${error?.message || "Unknown error"}`);
+  }
+}
+
+/**
+ * List folders and files in a Drive folder (for browsing)
+ */
+export async function listDriveItems(
+  folderId: string | null,
+  auth: OAuth2Client
+): Promise<{
+  folders: Array<{
+    id: string;
+    name: string;
+    modifiedTime?: string;
+  }>;
+  files: Array<{
+    id: string;
+    name: string;
+    mimeType: string;
+    size?: string;
+    modifiedTime?: string;
+    webViewLink?: string;
+  }>;
+  currentFolder?: {
+    id: string;
+    name: string;
+    webViewLink?: string;
+  };
+}> {
+  const drive = getDriveClient(auth);
+  
+  try {
+    // If folderId is null, get root folder (My Drive)
+    let query: string;
+    let currentFolder: { id: string; name: string; webViewLink?: string } | undefined;
+    
+    if (folderId === null || folderId === 'root') {
+      // List root folder - use 'root' as special identifier
+      query = "'root' in parents and trashed=false";
+      currentFolder = {
+        id: 'root',
+        name: 'My Drive',
+      };
+    } else {
+      // Verify folder exists and get its metadata
+      try {
+        const folderResponse = await drive.files.get({
+          fileId: folderId,
+          fields: "id, name, webViewLink, mimeType",
+        });
+        
+        if (folderResponse.data.mimeType !== "application/vnd.google-apps.folder") {
+          throw new Error("Specified ID is not a folder");
+        }
+        
+        currentFolder = {
+          id: folderResponse.data.id!,
+          name: folderResponse.data.name!,
+          webViewLink: folderResponse.data.webViewLink || undefined,
+        };
+        
+        query = `'${folderId}' in parents and trashed=false`;
+      } catch (error: any) {
+        throw new Error(`Failed to access folder: ${error?.message || "Unknown error"}`);
+      }
+    }
+
+    const response = await drive.files.list({
+      q: query,
+      fields: "files(id, name, mimeType, size, webViewLink, modifiedTime)",
+      pageSize: 1000,
+      orderBy: "folder,name",
+    });
+
+    const items = response.data.files || [];
+    const folders: Array<{ id: string; name: string; modifiedTime?: string }> = [];
+    const files: Array<{
+      id: string;
+      name: string;
+      mimeType: string;
+      size?: string;
+      modifiedTime?: string;
+      webViewLink?: string;
+    }> = [];
+
+    for (const item of items) {
+      if (!item.id || !item.name || !item.mimeType) continue;
+
+      if (item.mimeType === "application/vnd.google-apps.folder") {
+        folders.push({
+          id: item.id,
+          name: item.name,
+          modifiedTime: item.modifiedTime || undefined,
+        });
+      } else {
+        files.push({
+          id: item.id,
+          name: item.name,
+          mimeType: item.mimeType,
+          size: item.size || undefined,
+          modifiedTime: item.modifiedTime || undefined,
+          webViewLink: item.webViewLink || undefined,
+        });
+      }
+    }
+
+    return {
+      folders,
+      files,
+      currentFolder,
+    };
+  } catch (error: any) {
+    console.error(`[DRIVE] Error listing items:`, error?.message);
+    throw new Error(`Failed to list Drive items: ${error?.message || "Unknown error"}`);
+  }
+}

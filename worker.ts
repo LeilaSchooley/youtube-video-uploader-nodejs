@@ -286,11 +286,39 @@ async function processBulkJob(jobId: string): Promise<void> {
     auth: oAuthClient,
   });
 
-  // Create upload tasks
-  const tasks: UploadTask[] = job.items.map((item, index) => ({
-    index,
-    item,
-  }));
+  // Calculate scheduled publish dates if videosPerDay is set
+  let scheduledDates: Date[] = [];
+  if (job.videosPerDay && job.videosPerDay > 0 && job.startDate) {
+    const startDate = new Date(job.startDate);
+    startDate.setHours(12, 0, 0, 0); // Set to noon for consistency
+    
+    for (let i = 0; i < job.items.length; i++) {
+      const dayIndex = Math.floor(i / job.videosPerDay);
+      const scheduledDate = new Date(startDate);
+      scheduledDate.setDate(startDate.getDate() + dayIndex);
+      scheduledDates.push(scheduledDate);
+    }
+  }
+
+  // Create upload tasks with scheduled dates
+  const tasks: UploadTask[] = job.items.map((item, index) => {
+    const taskItem = { ...item };
+    
+    // If videosPerDay is set and we have a scheduled date, use it
+    // Otherwise, use the publishDate from the item if it exists
+    if (job.videosPerDay && job.videosPerDay > 0 && scheduledDates[index]) {
+      taskItem.publishDate = scheduledDates[index].toISOString();
+      // Set privacy to private for scheduled videos (YouTube requirement)
+      if (!taskItem.privacyStatus) {
+        taskItem.privacyStatus = "private";
+      }
+    }
+    
+    return {
+      index,
+      item: taskItem,
+    };
+  });
 
   // Process in batches
   const batches: UploadTask[][] = [];

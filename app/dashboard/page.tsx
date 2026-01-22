@@ -5,7 +5,6 @@
  * 
  * Refactored: Extracted components to reduce file size from 4087 to 1824 lines:
  * - Statistics component - extracted to app/components/dashboard/Statistics.tsx
- * - AllFilesSection component - extracted to app/components/dashboard/AllFilesSection.tsx
  * - UploadForms component - extracted to app/components/dashboard/UploadForms.tsx
  * - QueueManagement component - extracted to app/components/dashboard/QueueManagement.tsx
  */
@@ -23,9 +22,9 @@ import Link from "next/link";
 import Toast from "@/app/components/Toast";
 import Header from "@/app/components/dashboard/Header";
 import Statistics from "@/app/components/dashboard/Statistics";
-import AllFilesSection from "@/app/components/dashboard/AllFilesSection";
 import UploadForms from "@/app/components/dashboard/UploadForms";
 import QueueManagement from "@/app/components/dashboard/QueueManagement";
+import UploadSummary from "@/app/components/dashboard/UploadSummary";
 import type { User } from "@/app/components/dashboard/types";
 
 // User interface moved to types.ts
@@ -93,26 +92,12 @@ export default function Dashboard() {
   const [uploadProgressInterval, setUploadProgressInterval] =
     useState<NodeJS.Timeout | null>(null);
   const [csvValidationErrors, setCsvValidationErrors] = useState<string[]>([]);
-  const [zipUploading, setZipUploading] = useState<boolean>(false);
-  const [zipUploadProgress, setZipUploadProgress] = useState<{
-    progress: number;
-    message: string;
-    totalFiles?: number;
-    extractedCount?: number;
-    videoCount?: number;
-    thumbnailCount?: number;
-  } | null>(null);
   const [jobFiles, setJobFiles] = useState<any>(null);
   const [loadingFiles, setLoadingFiles] = useState<boolean>(false);
-  const [allFiles, setAllFiles] = useState<any>(null);
-  const [loadingAllFiles, setLoadingAllFiles] = useState<boolean>(false);
-  const [showAllFiles, setShowAllFiles] = useState<boolean>(true); // Expanded by default
   const [showSingleUpload, setShowSingleUpload] = useState<boolean>(false); // Collapsed by default
   const [showBatchUpload, setShowBatchUpload] = useState<boolean>(true); // Expanded by default
   const [showBulkUpload, setShowBulkUpload] = useState<boolean>(false);
-  const [showMetadataUpdate, setShowMetadataUpdate] = useState<boolean>(false);
   const [bulkUploading, setBulkUploading] = useState<boolean>(false);
-  const [metadataUpdating, setMetadataUpdating] = useState<boolean>(false);
   const [bulkUploadProgress, setBulkUploadProgress] = useState<{
     total: number;
     totalBatches: number;
@@ -122,30 +107,11 @@ export default function Dashboard() {
     currentFile?: string;
     message?: string;
   } | null>(null);
-  const [metadataUpdateProgress, setMetadataUpdateProgress] = useState<{
-    total: number;
-    updated: number;
-    failed: number;
-    thumbnails: number;
-    currentVideo?: string;
-    message?: string;
-    currentBatch?: number;
-    totalBatches?: number;
-    rate?: number; // videos per minute
-    estimatedSeconds?: number;
-    processed?: number;
-    failedVideos?: Array<{ videoName: string; error: string; index: number }>;
-    totalTime?: number;
-    avgRate?: number;
-  } | null>(null);
-  const [showFailedVideos, setShowFailedVideos] = useState<boolean>(false);
   const [selectedBulkFiles, setSelectedBulkFiles] = useState<File[]>([]);
   const [bulkUrls, setBulkUrls] = useState<string[]>([]);
   const [urlAuthHeaders, setUrlAuthHeaders] = useState<string>("");
   const [urlTimeout, setUrlTimeout] = useState<string>("");
-  const [selectedMetadataCsv, setSelectedMetadataCsv] = useState<File | null>(null);
   const bulkFilesInputRef = useRef<HTMLInputElement>(null);
-  const metadataCsvInputRef = useRef<HTMLInputElement>(null);
   const [showBatchInstructions, setShowBatchInstructions] =
     useState<boolean>(false); // Collapsed by default
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -342,13 +308,6 @@ export default function Dashboard() {
     return () => clearInterval(timerInterval);
   }, [nextUploadTime]);
 
-  // Fetch all files on component load if expanded by default
-  useEffect(() => {
-    if (user?.authenticated && showAllFiles && !allFiles) {
-      fetchAllFiles();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.authenticated, showAllFiles]);
 
   // Recalculate next upload time when queue changes
   useEffect(() => {
@@ -399,12 +358,6 @@ export default function Dashboard() {
     }
   }, []);
 
-  // Refresh files when channel changes
-  useEffect(() => {
-    if (selectedChannel && user?.authenticated) {
-      fetchAllFiles();
-    }
-  }, [selectedChannel]);
 
   const toggleDarkMode = () => {
     const newMode = !darkMode;
@@ -511,6 +464,7 @@ export default function Dashboard() {
     }
   };
 
+
   const handleDeleteFile = async (
     jobId: string,
     filePath: string,
@@ -540,9 +494,6 @@ export default function Dashboard() {
           type: "success",
         });
         fetchJobFiles(jobId); // Refresh file list
-        if (showAllFiles) {
-          fetchAllFiles(); // Refresh all files view
-        }
       } else {
         setShowToast({
           message: data.error || "Failed to delete file",
@@ -552,72 +503,6 @@ export default function Dashboard() {
     } catch (error) {
       setShowToast({
         message: "An error occurred while deleting the file",
-        type: "error",
-      });
-    }
-  };
-
-  const handleDeleteAllByCategory = async (fileType: "video" | "thumbnail" | "csv") => {
-    if (!allFiles) return;
-    
-    const filesToDelete = allFiles.files.filter((f: any) => f.type === fileType);
-    if (filesToDelete.length === 0) {
-      setShowToast({
-        message: `No ${fileType} files to delete`,
-        type: "info",
-      });
-      return;
-    }
-
-    const categoryName = fileType === "video" ? "videos" : fileType === "thumbnail" ? "thumbnails" : "CSV files";
-    if (
-      !confirm(
-        `Are you sure you want to delete ALL ${filesToDelete.length} ${categoryName}? This action cannot be undone.`
-      )
-    ) {
-      return;
-    }
-
-    try {
-      let successCount = 0;
-      let failCount = 0;
-
-      // Delete files sequentially to avoid overwhelming the server
-      for (const file of filesToDelete) {
-        try {
-          const res = await fetch(
-            `/api/delete-videos?jobId=${file.jobId}&filePath=${encodeURIComponent(
-              file.relativePath
-            )}`,
-            {
-              method: "DELETE",
-            }
-          );
-          if (res.ok) {
-            successCount++;
-          } else {
-            failCount++;
-          }
-        } catch (error) {
-          failCount++;
-        }
-      }
-
-      if (successCount > 0) {
-        setShowToast({
-          message: `Deleted ${successCount} ${categoryName}${failCount > 0 ? ` (${failCount} failed)` : ""}`,
-          type: failCount > 0 ? "info" : "success",
-        });
-        fetchAllFiles(); // Refresh all files view
-      } else {
-        setShowToast({
-          message: `Failed to delete ${categoryName}`,
-          type: "error",
-        });
-      }
-    } catch (error) {
-      setShowToast({
-        message: `An error occurred while deleting ${categoryName}`,
         type: "error",
       });
     }
@@ -646,9 +531,6 @@ export default function Dashboard() {
           type: "success",
         });
         fetchJobFiles(jobId); // Refresh file list
-        if (showAllFiles) {
-          fetchAllFiles(); // Refresh all files view
-        }
       } else {
         setShowToast({
           message: data.error || "Failed to delete files",
@@ -663,23 +545,6 @@ export default function Dashboard() {
     }
   };
 
-  const fetchAllFiles = async () => {
-    try {
-      setLoadingAllFiles(true);
-      const url = selectedChannel 
-        ? `/api/list-all-files?channel=${encodeURIComponent(selectedChannel)}`
-        : "/api/list-all-files";
-      const res = await fetch(url);
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setAllFiles(data);
-      }
-    } catch (error) {
-      console.error("[ERROR] Error fetching all files:", error);
-    } finally {
-      setLoadingAllFiles(false);
-    }
-  };
 
   const fetchAvailableChannels = async () => {
     try {
@@ -702,8 +567,6 @@ export default function Dashboard() {
 
   const handleChannelChange = (channelUserId: string) => {
     setSelectedChannel(channelUserId);
-    // Refresh files for the new channel
-    fetchAllFiles();
   };
 
   const fetchUser = async () => {
@@ -1093,7 +956,6 @@ export default function Dashboard() {
         bulkFilesInputRef.current.value = "";
       }
       setSelectedBulkFiles([]);
-      fetchAllFiles();
     } catch (error: any) {
       console.error("=== BULK UPLOAD EXCEPTION (Client) ===");
       console.error("Error:", error);
@@ -1105,197 +967,6 @@ export default function Dashboard() {
     }
   };
 
-  const handleMetadataUpdate = async (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setMetadataUpdating(true);
-    setMetadataUpdateProgress(null);
-    setMessage({ type: null, text: null });
-
-    if (!selectedMetadataCsv) {
-      setShowToast({ message: "Please select a CSV file.", type: "error" });
-      setMetadataUpdating(false);
-      return;
-    }
-
-    const formData = new FormData();
-    formData.append("csvFile", selectedMetadataCsv);
-
-    try {
-      const res = await fetch("/api/update-metadata", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({ error: "Metadata update failed" }));
-        throw new Error(errorData.error || "Metadata update failed");
-      }
-
-      if (!res.body) {
-        throw new Error("No response body for metadata update");
-      }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      let totalUpdated = 0;
-      let totalFailed = 0;
-      let totalThumbnails = 0;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            try {
-              const data = JSON.parse(line.slice(6));
-
-              switch (data.type) {
-                case "start":
-                  setMetadataUpdateProgress({
-                    total: data.total,
-                    updated: 0,
-                    failed: 0,
-                    thumbnails: 0,
-                    processed: 0,
-                    message: `Starting metadata update for ${data.total} videos...`,
-                  });
-                  break;
-
-                case "videos_fetched":
-                  setMetadataUpdateProgress(prev => ({
-                    ...prev!,
-                    message: `Found ${data.totalVideos} private videos, processing ${data.totalRows} CSV rows`,
-                  }));
-                  break;
-
-                case "batches_created":
-                  setMetadataUpdateProgress(prev => ({
-                    ...prev!,
-                    totalBatches: data.totalBatches,
-                    message: `Created ${data.totalBatches} batches (${data.batchSize} videos per batch)`,
-                  }));
-                  break;
-
-                case "batch_start":
-                  setMetadataUpdateProgress(prev => ({
-                    ...prev!,
-                    currentBatch: data.batchNumber,
-                    message: `Processing batch ${data.batchNumber}/${data.totalBatches} (${data.batchSize} videos)`,
-                  }));
-                  break;
-
-                case "row_start":
-                  setMetadataUpdateProgress(prev => ({
-                    ...prev!,
-                    currentVideo: data.videoName,
-                  }));
-                  break;
-
-                case "update_success":
-                  totalUpdated++;
-                  setMetadataUpdateProgress(prev => ({
-                    ...prev!,
-                    updated: totalUpdated,
-                    processed: (prev?.processed || 0) + 1,
-                  }));
-                  break;
-
-                case "update_failed":
-                  totalFailed++;
-                  setMetadataUpdateProgress(prev => ({
-                    ...prev!,
-                    failed: totalFailed,
-                    processed: (prev?.processed || 0) + 1,
-                  }));
-                  break;
-
-                case "thumbnail_success":
-                  totalThumbnails++;
-                  setMetadataUpdateProgress(prev => ({
-                    ...prev!,
-                    thumbnails: totalThumbnails,
-                  }));
-                  break;
-
-                case "batch_complete":
-                  setMetadataUpdateProgress(prev => ({
-                    ...prev!,
-                    updated: data.totalUpdated,
-                    failed: data.totalFailed,
-                    thumbnails: data.totalThumbnails,
-                    processed: data.processed,
-                    rate: data.rate,
-                    estimatedSeconds: data.estimatedSeconds,
-                    message: `Batch ${data.batchNumber}/${data.totalBatches} complete: ${data.totalUpdated} updated, ${data.totalFailed} failed`,
-                  }));
-                  break;
-
-                case "complete":
-                  totalUpdated = data.totalUpdated;
-                  totalFailed = data.totalFailed;
-                  totalThumbnails = data.totalThumbnails;
-                  setMetadataUpdateProgress(prev => ({
-                    ...prev!,
-                    updated: totalUpdated,
-                    failed: totalFailed,
-                    thumbnails: totalThumbnails,
-                    processed: data.total,
-                    totalTime: data.totalTime,
-                    avgRate: data.avgRate,
-                    failedVideos: data.failedVideos || [],
-                    message: `Complete! ${totalUpdated} updated, ${totalFailed} failed in ${data.totalTime}s (${data.avgRate} videos/min)`,
-                  }));
-                  let finalMessage = `✅ Metadata Update Complete!\n\n`;
-                  finalMessage += `📊 ${totalUpdated} videos updated`;
-                  if (totalThumbnails > 0) {
-                    finalMessage += `\n🖼️ ${totalThumbnails} thumbnails uploaded`;
-                  }
-                  if (totalFailed > 0) {
-                    finalMessage += `\n⚠️ ${totalFailed} videos failed`;
-                  }
-                  finalMessage += `\n⏱️ Completed in ${data.totalTime}s (${data.avgRate} videos/min)`;
-                  setShowToast({
-                    message: finalMessage.trim(),
-                    type: totalFailed > 0 ? "info" : "success",
-                  });
-                  setMessage({
-                    type: totalFailed > 0 ? "info" : "success",
-                    text: `✅ Metadata update complete: ${totalUpdated} updated${totalThumbnails > 0 ? `, ${totalThumbnails} thumbnails` : ""}${totalFailed > 0 ? `, ${totalFailed} failed` : ""}`,
-                  });
-                  break;
-
-                case "error":
-                  throw new Error(data.error);
-              }
-            } catch (parseError) {
-              console.error("Error parsing SSE data for metadata update:", parseError, line);
-            }
-          }
-        }
-      }
-
-      // Reset form
-      if (metadataCsvInputRef.current) {
-        metadataCsvInputRef.current.value = "";
-      }
-      setSelectedMetadataCsv(null);
-    } catch (error: any) {
-      console.error("=== METADATA UPDATE EXCEPTION (Client) ===");
-      console.error("Error:", error);
-      const errorMsg = error?.message || "An error occurred during metadata update.";
-      setShowToast({ message: errorMsg, type: "error" });
-      setMessage({ type: "error", text: errorMsg });
-    } finally {
-      setMetadataUpdating(false);
-    }
-  };
 
   const handleCsvUpload = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -1502,125 +1173,6 @@ export default function Dashboard() {
     }
   };
 
-  const handleZipUpload = async (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setZipUploading(true);
-    setZipUploadProgress({ progress: 0, message: "Starting upload..." });
-
-    const form = e.currentTarget;
-    const formData = new FormData(form);
-    const zipFile = formData.get("zipFile") as File | null;
-
-    if (!zipFile) {
-      setShowToast({ message: "Please select a ZIP file", type: "error" });
-      setZipUploading(false);
-      return;
-    }
-
-    try {
-      const uploadFormData = new FormData();
-      uploadFormData.append("zipFile", zipFile);
-
-      const res = await fetch("/api/upload-zip", {
-        method: "POST",
-        body: uploadFormData,
-      });
-
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({ error: "Upload failed" }));
-        throw new Error(errorData.error || "Upload failed");
-      }
-
-      if (!res.body) {
-        throw new Error("No response body");
-      }
-
-      // Read streaming response (Server-Sent Events)
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            try {
-              const data = JSON.parse(line.slice(6));
-
-              switch (data.type) {
-                case "start":
-                  setZipUploadProgress({
-                    progress: 0,
-                    message: data.message || "Starting...",
-                  });
-                  break;
-
-                case "progress":
-                  setZipUploadProgress({
-                    progress: data.progress || 0,
-                    message: data.message || "Processing...",
-                  });
-                  break;
-
-                case "extracting":
-                  setZipUploadProgress({
-                    progress: data.progress || 0,
-                    message: data.message || "Extracting...",
-                    totalFiles: data.totalFiles,
-                    extractedCount: data.extractedCount,
-                    videoCount: data.videoCount,
-                    thumbnailCount: data.thumbnailCount,
-                  });
-                  break;
-
-                case "success":
-                  setZipUploadProgress({
-                    progress: 100,
-                    message: data.message || "Complete!",
-                    totalFiles: data.totalFiles,
-                    videoCount: data.videoCount,
-                    thumbnailCount: data.thumbnailCount,
-                  });
-                  setShowToast({
-                    message: `✅ ${data.message || "ZIP extracted successfully!"}`,
-                    type: "success",
-                  });
-                  // Refresh all files list
-                  fetchAllFiles();
-                  break;
-
-                case "error":
-                  throw new Error(data.error || "Unknown error");
-
-                case "complete":
-                  break;
-              }
-            } catch (parseError) {
-              console.error("Error parsing SSE data:", parseError, line);
-            }
-          }
-        }
-      }
-    } catch (error: any) {
-      console.error("ZIP upload error:", error);
-      setShowToast({
-        message: error?.message || "Failed to upload ZIP file",
-        type: "error",
-      });
-      setZipUploadProgress(null);
-    } finally {
-      setZipUploading(false);
-      if (form) {
-        form.reset();
-      }
-    }
-  };
 
   const handleDeleteAccount = async () => {
     if (
@@ -1781,18 +1333,6 @@ export default function Dashboard() {
         timeUntilNext={timeUntilNext}
       />
 
-      {/* All Uploaded Files Section - Extracted to AllFilesSection component */}
-      <AllFilesSection
-        allFiles={allFiles}
-        loadingAllFiles={loadingAllFiles}
-        showAllFiles={showAllFiles}
-        setShowAllFiles={setShowAllFiles}
-        fetchAllFiles={fetchAllFiles}
-        setSelectedJobId={setSelectedJobId}
-        fetchJobFiles={fetchJobFiles}
-        handleDeleteFile={handleDeleteFile}
-        handleDeleteAllByCategory={handleDeleteAllByCategory}
-      />
 
       {/* Upload Forms - Extracted to UploadForms component */}
       <UploadForms
@@ -1803,9 +1343,6 @@ export default function Dashboard() {
         setSelectedVideoFile={setSelectedVideoFile}
         fileInputRef={fileInputRef}
         uploading={uploading}
-        handleZipUpload={handleZipUpload}
-        zipUploading={zipUploading}
-        zipUploadProgress={zipUploadProgress}
         showBatchUpload={showBatchUpload}
         toggleBatchUpload={toggleBatchUpload}
         showBatchInstructions={showBatchInstructions}
@@ -1833,16 +1370,6 @@ export default function Dashboard() {
         setUrlAuthHeaders={setUrlAuthHeaders}
         urlTimeout={urlTimeout}
         setUrlTimeout={setUrlTimeout}
-        showMetadataUpdate={showMetadataUpdate}
-        setShowMetadataUpdate={setShowMetadataUpdate}
-        handleMetadataUpdate={handleMetadataUpdate}
-        selectedMetadataCsv={selectedMetadataCsv}
-        setSelectedMetadataCsv={setSelectedMetadataCsv}
-        metadataCsvInputRef={metadataCsvInputRef}
-        metadataUpdating={metadataUpdating}
-        metadataUpdateProgress={metadataUpdateProgress}
-        showFailedVideos={showFailedVideos}
-        setShowFailedVideos={setShowFailedVideos}
         setShowToast={setShowToast}
       />
 
@@ -1861,6 +1388,13 @@ export default function Dashboard() {
         handleDeleteFile={handleDeleteFile}
         handleDeleteAllFiles={handleDeleteAllFiles}
         setShowToast={setShowToast}
+      />
+
+      {/* Upload Summary - Quick overview of settings and immediate uploads */}
+      <UploadSummary
+        queue={queue}
+        nextUploadTime={nextUploadTime}
+        timeUntilNext={timeUntilNext}
       />
 
       <footer className="text-center py-5 text-gray-500">

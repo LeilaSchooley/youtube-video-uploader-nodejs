@@ -3,7 +3,7 @@ import { getSession, setSession } from "@/lib/session";
 import { getOAuthClient } from "@/lib/auth";
 import { google } from "googleapis";
 import { cookies } from "next/headers";
-import { listDriveVideosRecursive, listDriveVideos, downloadDriveFile, renameDriveFile, moveDriveFile, deleteDriveFile, getDriveFileMetadata, getDriveFolderMetadata } from "@/lib/drive";
+import { listDriveVideosRecursive, listDriveVideos, downloadDriveFile, renameDriveFile, moveDriveFile, deleteDriveFile, getDriveFileMetadata, getDriveFolderMetadata, listDriveItems } from "@/lib/drive";
 import { addToBulkQueue } from "@/lib/bulk-queue";
 
 export const dynamic = 'force-dynamic';
@@ -84,24 +84,33 @@ export async function POST(request: NextRequest) {
     const oAuthClient = getOAuthClient();
     oAuthClient.setCredentials(session.tokens);
 
-    // Verify folder exists and get metadata
-    try {
-      const folderMetadata = await getDriveFolderMetadata(driveFolderId, oAuthClient);
-      console.log(`[UPLOAD-DRIVE] Scanning folder: ${folderMetadata.name}`);
-    } catch (error: any) {
-      return NextResponse.json(
-        { error: `Failed to access Drive folder: ${error?.message || "Unknown error"}` },
-        { status: 400 }
-      );
+    // Verify folder exists and get metadata (skip for root folder)
+    let folderName = "My Drive";
+    if (driveFolderId !== "root") {
+      try {
+        const folderMetadata = await getDriveFolderMetadata(driveFolderId, oAuthClient);
+        folderName = folderMetadata.name;
+        console.log(`[UPLOAD-DRIVE] Scanning folder: ${folderName}`);
+      } catch (error: any) {
+        return NextResponse.json(
+          { error: `Failed to access Drive folder: ${error?.message || "Unknown error"}` },
+          { status: 400 }
+        );
+      }
+    } else {
+      console.log(`[UPLOAD-DRIVE] Scanning root folder: My Drive`);
     }
 
     // List videos in folder
     let videos;
     try {
+      // Handle root folder - use 'root' as the folder ID for Drive API
+      const targetFolderId = driveFolderId === "root" ? "root" : driveFolderId;
+      
       if (recursive) {
-        videos = await listDriveVideosRecursive(driveFolderId, oAuthClient);
+        videos = await listDriveVideosRecursive(targetFolderId, oAuthClient);
       } else {
-        videos = await listDriveVideos(driveFolderId, oAuthClient);
+        videos = await listDriveVideos(targetFolderId, oAuthClient);
       }
     } catch (error: any) {
       return NextResponse.json(
@@ -140,7 +149,7 @@ export async function POST(request: NextRequest) {
         message: "Upload queued for processing",
         jobId,
         totalItems: queueItems.length,
-        folderName: (await getDriveFolderMetadata(driveFolderId, oAuthClient)).name,
+        folderName: folderName,
       });
     }
 

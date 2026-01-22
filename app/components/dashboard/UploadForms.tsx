@@ -1,6 +1,9 @@
 "use client";
 
-import { FormEvent, RefObject } from "react";
+import { FormEvent, RefObject, useState, useRef } from "react";
+import DriveBrowser from "./DriveBrowser";
+import SheetsBrowser from "./SheetsBrowser";
+import SheetPreview from "./SheetPreview";
 
 interface UploadFormsProps {
   // Single Upload
@@ -12,17 +15,6 @@ interface UploadFormsProps {
   fileInputRef: RefObject<HTMLInputElement | null>;
   uploading: boolean;
 
-  // ZIP Upload
-  handleZipUpload: (e: FormEvent<HTMLFormElement>) => Promise<void>;
-  zipUploading: boolean;
-  zipUploadProgress: {
-    progress: number;
-    message: string;
-    totalFiles?: number;
-    extractedCount?: number;
-    videoCount?: number;
-    thumbnailCount?: number;
-  } | null;
 
   // Batch/CSV Upload
   showBatchUpload: boolean;
@@ -76,32 +68,6 @@ interface UploadFormsProps {
   urlTimeout: string;
   setUrlTimeout: (timeout: string) => void;
 
-  // Metadata Update
-  showMetadataUpdate: boolean;
-  setShowMetadataUpdate: (show: boolean) => void;
-  handleMetadataUpdate: (e: FormEvent<HTMLFormElement>) => Promise<void>;
-  selectedMetadataCsv: File | null;
-  setSelectedMetadataCsv: (file: File | null) => void;
-  metadataCsvInputRef: RefObject<HTMLInputElement | null>;
-  metadataUpdating: boolean;
-  metadataUpdateProgress: {
-    total: number;
-    updated: number;
-    failed: number;
-    thumbnails: number;
-    currentVideo?: string;
-    message?: string;
-    currentBatch?: number;
-    totalBatches?: number;
-    rate?: number;
-    estimatedSeconds?: number;
-    processed?: number;
-    failedVideos?: Array<{ videoName: string; error: string; index: number }>;
-    totalTime?: number;
-    avgRate?: number;
-  } | null;
-  showFailedVideos: boolean;
-  setShowFailedVideos: (show: boolean) => void;
 
   // Toast
   setShowToast: (toast: { message: string; type: "success" | "error" | "info" }) => void;
@@ -115,9 +81,6 @@ export default function UploadForms({
   setSelectedVideoFile,
   fileInputRef,
   uploading,
-  handleZipUpload,
-  zipUploading,
-  zipUploadProgress,
   showBatchUpload,
   toggleBatchUpload,
   showBatchInstructions,
@@ -145,20 +108,154 @@ export default function UploadForms({
   setUrlAuthHeaders,
   urlTimeout,
   setUrlTimeout,
-  showMetadataUpdate,
-  setShowMetadataUpdate,
-  handleMetadataUpdate,
-  selectedMetadataCsv,
-  setSelectedMetadataCsv,
-  metadataCsvInputRef,
-  metadataUpdating,
-  metadataUpdateProgress,
-  showFailedVideos,
-  setShowFailedVideos,
   setShowToast,
 }: UploadFormsProps) {
+  const [showDriveBrowser, setShowDriveBrowser] = useState(false);
+  const [showSheetsBrowser, setShowSheetsBrowser] = useState(false);
+  const [showSheetPreview, setShowSheetPreview] = useState(false);
+  const [previewData, setPreviewData] = useState<any>(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [availableSheets, setAvailableSheets] = useState<Array<{ title: string; sheetId: number }>>([]);
+  const [loadingSheets, setLoadingSheets] = useState(false);
+  const [spreadsheetTitle, setSpreadsheetTitle] = useState<string>("");
+
+  const handleDriveFolderSelect = (folderId: string, folderName: string) => {
+    const input = document.getElementById('driveFolderId') as HTMLInputElement;
+    if (input) {
+      input.value = folderId;
+    }
+    setShowToast({ message: `Selected folder: ${folderName}`, type: "success" });
+  };
+
+  const handleSheetSelect = async (spreadsheetId: string, spreadsheetName: string) => {
+    const input = document.getElementById('spreadsheetUrl') as HTMLInputElement;
+    if (input) {
+      // Set the spreadsheet ID in the input
+      input.value = spreadsheetId;
+      // Trigger the fetch to load sheets
+      await fetchSheets(spreadsheetId);
+    }
+    setShowToast({ message: `Selected sheet: ${spreadsheetName}`, type: "success" });
+  };
+
+  const handlePreviewSheet = async () => {
+    const spreadsheetUrlInput = document.getElementById('spreadsheetUrl') as HTMLInputElement;
+    const sheetNameSelect = document.getElementById('sheetName') as HTMLSelectElement;
+    const rangeInput = document.getElementById('range') as HTMLInputElement;
+
+    const spreadsheetUrl = spreadsheetUrlInput?.value.trim();
+    const sheetName = sheetNameSelect?.value.trim();
+    const range = rangeInput?.value.trim() || undefined;
+
+    if (!spreadsheetUrl) {
+      setShowToast({ message: "Please enter or select a Google Sheets URL/ID first", type: "error" });
+      return;
+    }
+
+    if (!sheetName) {
+      setShowToast({ message: "Please select a sheet first", type: "error" });
+      return;
+    }
+
+    setLoadingPreview(true);
+    try {
+      const response = await fetch("/api/preview-sheets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          spreadsheetUrl,
+          sheetName,
+          range,
+        }),
+      });
+
+      const data = await response.json();
+      if (response.ok) {
+        setPreviewData(data);
+        setShowSheetPreview(true);
+      } else {
+        setShowToast({
+          message: data.error || "Failed to preview sheet",
+          type: "error",
+        });
+      }
+    } catch (error: any) {
+      setShowToast({
+        message: `Error: ${error.message}`,
+        type: "error",
+      });
+    } finally {
+      setLoadingPreview(false);
+    }
+  };
+
+  const fetchSheets = async (spreadsheetUrl: string) => {
+    if (!spreadsheetUrl.trim()) {
+      setAvailableSheets([]);
+      setSpreadsheetTitle("");
+      return;
+    }
+
+    setLoadingSheets(true);
+    try {
+      const response = await fetch(`/api/sheets-info?spreadsheetUrl=${encodeURIComponent(spreadsheetUrl)}`);
+      const data = await response.json();
+      
+      if (response.ok && data.success) {
+        setAvailableSheets(data.sheets || []);
+        setSpreadsheetTitle(data.title || "");
+        
+        // Auto-select first sheet if available
+        if (data.sheets && data.sheets.length > 0) {
+          const sheetSelect = document.getElementById('sheetName') as HTMLSelectElement;
+          if (sheetSelect) {
+            sheetSelect.value = data.sheets[0].title;
+          }
+        }
+      } else {
+        setAvailableSheets([]);
+        setSpreadsheetTitle("");
+        if (data.error) {
+          setShowToast({ message: data.error, type: "error" });
+        }
+      }
+    } catch (error: any) {
+      console.error("Error fetching sheets:", error);
+      setAvailableSheets([]);
+      setSpreadsheetTitle("");
+    } finally {
+      setLoadingSheets(false);
+    }
+  };
+
+  // Debounce timer ref
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   return (
     <>
+      {showDriveBrowser && (
+        <DriveBrowser
+          onSelectFolder={handleDriveFolderSelect}
+          onClose={() => setShowDriveBrowser(false)}
+        />
+      )}
+
+      {showSheetsBrowser && (
+        <SheetsBrowser
+          onSelectSheet={handleSheetSelect}
+          onClose={() => setShowSheetsBrowser(false)}
+        />
+      )}
+
+      {showSheetPreview && previewData && (
+        <SheetPreview
+          previewData={previewData}
+          onClose={() => {
+            setShowSheetPreview(false);
+            setPreviewData(null);
+          }}
+        />
+      )}
       {/* Single Video Upload */}
       <div className="card animate-fade-in">
         <div className="flex items-center justify-between mb-6">
@@ -306,543 +403,7 @@ export default function UploadForms({
         )}
       </div>
 
-      {/* ZIP Asset Upload */}
-      <div className="card">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-bold text-gray-800 dark:text-white flex items-center gap-2">
-            <span className="text-3xl">📦</span>
-            <span>Upload Assets (ZIP)</span>
-          </h2>
-        </div>
 
-        <div className="mb-4 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-lg">
-          <p className="text-sm text-blue-900 dark:text-blue-100">
-            <strong>💡 Quick Upload:</strong> Upload all your videos and thumbnails as a ZIP
-            file. The system will automatically extract and organize them. Then upload your CSV
-            separately to start streaming to YouTube.
-          </p>
-        </div>
-
-        <form onSubmit={handleZipUpload} className="flex flex-col gap-5">
-          <label htmlFor="zipFile" className="label">
-            Upload ZIP File (Videos + Thumbnails)
-          </label>
-          <input
-            type="file"
-            id="zipFile"
-            name="zipFile"
-            accept=".zip"
-            required
-            disabled={zipUploading}
-            className="input-field"
-          />
-
-          {/* ZIP Upload Progress */}
-          {zipUploadProgress && zipUploading && (
-            <div className="p-5 bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl dark:from-blue-900/30 dark:to-indigo-900/30 dark:border-blue-700">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="relative">
-                  <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-800 flex items-center justify-center">
-                    <div className="animate-spin text-xl">📦</div>
-                  </div>
-                </div>
-                <div className="flex-1">
-                  <div className="font-bold text-blue-900 dark:text-blue-100 text-lg">
-                    {zipUploadProgress.message}
-                  </div>
-                  {zipUploadProgress.totalFiles && (
-                    <div className="text-sm text-blue-700 dark:text-blue-300">
-                      {zipUploadProgress.extractedCount || 0} / {zipUploadProgress.totalFiles}{" "}
-                      files extracted
-                      {zipUploadProgress.videoCount !== undefined && (
-                        <span>
-                          {" "}
-                          • {zipUploadProgress.videoCount} videos,{" "}
-                          {zipUploadProgress.thumbnailCount || 0} thumbnails
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Progress Bar */}
-              <div className="mb-4">
-                <div className="flex justify-between text-sm mb-2">
-                  <span className="text-blue-800 dark:text-blue-200 font-medium">
-                    Progress
-                  </span>
-                  <span className="text-blue-600 dark:text-blue-400 font-bold">
-                    {zipUploadProgress.progress}%
-                  </span>
-                </div>
-                <div className="w-full bg-blue-200 rounded-full h-3 dark:bg-blue-800 overflow-hidden">
-                  <div
-                    className="bg-gradient-to-r from-blue-500 to-indigo-500 h-3 rounded-full transition-all duration-500 ease-out relative"
-                    style={{
-                      width: `${Math.min(100, zipUploadProgress.progress)}%`,
-                    }}
-                  >
-                    <div className="absolute inset-0 bg-white/20 animate-pulse"></div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={zipUploading}
-            className={`btn-primary ${
-              zipUploading ? "opacity-50 cursor-not-allowed" : ""
-            }`}
-          >
-            {zipUploading ? (
-              <span className="flex items-center gap-2">
-                <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                {zipUploadProgress?.message || "Uploading..."}
-              </span>
-            ) : (
-              "Upload ZIP File"
-            )}
-          </button>
-        </form>
-      </div>
-
-      {/* Batch Upload */}
-      <div className="card">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-bold text-gray-800 dark:text-white flex items-center gap-2">
-            <span className="text-3xl">📄</span>
-            <span>Upload CSV & Stream to YouTube</span>
-          </h2>
-          <button
-            type="button"
-            onClick={toggleBatchUpload}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors"
-          >
-            {showBatchUpload ? "Hide" : "Show"}
-          </button>
-        </div>
-        {showBatchUpload && (
-          <>
-            {/* Quick Info Banner */}
-            <div className="mb-5 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border border-blue-200 dark:border-blue-700 rounded-lg">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex-1">
-                  <p className="text-sm text-blue-900 dark:text-blue-100 font-medium">
-                    <strong>🚀 Direct Streaming:</strong> Upload CSV and video files. Videos are
-                    streamed directly to YouTube in batches with real-time progress updates. Keep
-                    your browser open to see live progress.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={toggleBatchInstructions}
-                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-colors whitespace-nowrap flex-shrink-0"
-                >
-                  {showBatchInstructions ? "📖 Hide Instructions" : "📖 Show Instructions"}
-                </button>
-              </div>
-            </div>
-
-            {/* Collapsible Instructions */}
-            {showBatchInstructions && (
-              <div className="mb-5 space-y-3 animate-fade-in">
-                <div className="p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg">
-                  <h3 className="font-semibold mb-3 text-gray-800 dark:text-white flex items-center gap-2">
-                    <span>📋</span>
-                    <span>CSV File Format</span>
-                  </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
-                    <div className="p-3 bg-gray-50 dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-700">
-                      <div className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-2">
-                        Required Columns:
-                      </div>
-                      <ul className="text-sm space-y-1 text-gray-700 dark:text-gray-300">
-                        <li>
-                          •{" "}
-                          <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">
-                            youtube_title
-                          </code>
-                        </li>
-                        <li>
-                          •{" "}
-                          <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">
-                            youtube_description
-                          </code>
-                        </li>
-                        <li>
-                          •{" "}
-                          <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">
-                            video_name
-                          </code>{" "}
-                          or{" "}
-                          <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">
-                            video_url
-                          </code>{" "}
-                          (filename or URL)
-                        </li>
-                        <li>
-                          •{" "}
-                          <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">
-                            path
-                          </code>{" "}
-                          (file path or URL - auto-detected)
-                        </li>
-                      </ul>
-                    </div>
-                    <div className="p-3 bg-gray-50 dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-700">
-                      <div className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-2">
-                        Optional Columns:
-                      </div>
-                      <ul className="text-sm space-y-1 text-gray-700 dark:text-gray-300">
-                        <li>
-                          •{" "}
-                          <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">
-                            thumbnail_name
-                          </code>{" "}
-                          or{" "}
-                          <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">
-                            thumbnail_url
-                          </code>{" "}
-                          (filename or URL)
-                        </li>
-                        <li>
-                          •{" "}
-                          <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">
-                            url_auth_headers
-                          </code>{" "}
-                          (JSON auth headers for URLs)
-                        </li>
-                        <li>
-                          •{" "}
-                          <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">
-                            url_timeout
-                          </code>{" "}
-                          (timeout in milliseconds)
-                        </li>
-                        <li>
-                          •{" "}
-                          <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">
-                            drive_file_id
-                          </code>{" "}
-                          (Google Drive file ID for video)
-                        </li>
-                        <li>
-                          •{" "}
-                          <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">
-                            drive_thumbnail_id
-                          </code>{" "}
-                          (Google Drive file ID for thumbnail)
-                        </li>
-                        <li>
-                          •{" "}
-                          <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">
-                            post_upload_action
-                          </code>{" "}
-                          ("rename", "delete", "move", or "none")
-                        </li>
-                        <li>
-                          •{" "}
-                          <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">
-                            completed_folder_id
-                          </code>{" "}
-                          (Drive folder ID for move action)
-                        </li>
-                        <li>
-                          •{" "}
-                          <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">
-                            scheduleTime
-                          </code>
-                        </li>
-                        <li>
-                          •{" "}
-                          <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">
-                            privacyStatus
-                          </code>
-                        </li>
-                        <li className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-                          Note: <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">path</code>{" "}
-                          can be a file path, URL, or Drive file ID (auto-detected).{" "}
-                          <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">
-                            thumbnail_path
-                          </code>{" "}
-                          works the same way.
-                        </li>
-                      </ul>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-lg">
-                  <div className="flex items-start gap-2 mb-2">
-                    <span className="text-lg">✅</span>
-                    <div className="flex-1">
-                      <strong className="text-green-900 dark:text-green-100">
-                        Multiple Source Types Supported:
-                      </strong>
-                      <p className="text-sm text-green-800 dark:text-green-200 mt-1">
-                        Videos can be from uploaded files, external URLs, or Google Drive file IDs. 
-                        Use <code className="bg-green-100 dark:bg-green-800 px-1 rounded">video_url</code>, 
-                        <code className="bg-green-100 dark:bg-green-800 px-1 rounded">drive_file_id</code>, or 
-                        put URLs/Drive IDs in the <code className="bg-green-100 dark:bg-green-800 px-1 rounded">path</code> column. 
-                        URLs and Drive files stream directly - no download needed!
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-lg">
-                  <div className="flex items-start gap-2 mb-2">
-                    <span className="text-lg">💡</span>
-                    <div className="flex-1">
-                      <strong className="text-blue-900 dark:text-blue-100">How It Works:</strong>
-                      <p className="text-sm text-blue-800 dark:text-blue-200 mt-1">
-                        1. Upload video/thumbnail files OR use URLs/Drive IDs in your CSV. 2. Upload your CSV file below. 
-                        The system auto-detects URLs and Drive IDs in <code className="bg-blue-100 dark:bg-blue-800 px-1 rounded">path</code>, 
-                        <code className="bg-blue-100 dark:bg-blue-800 px-1 rounded">video_url</code>, or 
-                        <code className="bg-blue-100 dark:bg-blue-800 px-1 rounded">drive_file_id</code> columns. 
-                        3. Videos stream directly to YouTube - no disk storage needed!
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="p-4 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-700 rounded-lg">
-                  <div className="flex items-start gap-2">
-                    <span className="text-lg">📝</span>
-                    <div className="flex-1">
-                      <strong className="text-purple-900 dark:text-purple-100">
-                        Description Formatting:
-                      </strong>
-                      <p className="text-sm text-purple-800 dark:text-purple-200 mt-1">
-                        Supports multi-line text (
-                        <code className="bg-purple-100 dark:bg-purple-800 px-1 rounded">\n</code>
-                        ), emojis, links, and hashtags. Ensure CSV fields are properly quoted for
-                        line breaks.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-            <form onSubmit={handleCsvUpload} className="flex flex-col gap-5">
-              <label htmlFor="csvFile" className="label">
-                Upload CSV
-              </label>
-              <div
-                className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-all ${
-                  selectedCsvFile
-                    ? "border-green-500 bg-green-50 dark:bg-green-900/20"
-                    : "border-gray-300 hover:border-red-500"
-                }`}
-                onClick={() => csvFileInputRef.current?.click()}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  const file = e.dataTransfer.files[0];
-                  if (file && (file.name.endsWith(".csv") || file.type === "text/csv")) {
-                    setSelectedCsvFile(file);
-                    if (csvFileInputRef.current) {
-                      const dataTransfer = new DataTransfer();
-                      dataTransfer.items.add(file);
-                      csvFileInputRef.current.files = dataTransfer.files;
-                    }
-                  }
-                }}
-                onDragOver={(e) => e.preventDefault()}
-              >
-                <input
-                  ref={csvFileInputRef}
-                  type="file"
-                  id="csvFile"
-                  name="csvFile"
-                  accept=".csv"
-                  required
-                  className="hidden"
-                  onChange={async (e) => {
-                    const file = e.target.files?.[0];
-                    if (file) {
-                      setSelectedCsvFile(file);
-                      setCsvValidationErrors([]);
-                      const errors = await validateCsv(file);
-                      setCsvValidationErrors(errors);
-                      if (errors.length === 0) {
-                        setShowToast({
-                          message: "CSV validation passed!",
-                          type: "success",
-                        });
-                      } else {
-                        setShowToast({
-                          message: `CSV validation found ${errors.length} error(s)`,
-                          type: "error",
-                        });
-                      }
-                    }
-                  }}
-                />
-                {selectedCsvFile ? (
-                  <div>
-                    <div className="text-4xl mb-2">
-                      {csvValidationErrors.length === 0 ? "✅" : "⚠️"}
-                    </div>
-                    <p
-                      className={`font-semibold mb-1 ${
-                        csvValidationErrors.length === 0
-                          ? "text-green-700 dark:text-green-300"
-                          : "text-yellow-700 dark:text-yellow-300"
-                      }`}
-                    >
-                      {selectedCsvFile.name}
-                    </p>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                      {(selectedCsvFile.size / 1024).toFixed(2)} KB
-                    </p>
-                    {csvValidationErrors.length > 0 && (
-                      <div className="mt-2 p-2 bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-700 rounded text-xs text-yellow-800 dark:text-yellow-200 max-h-32 overflow-y-auto">
-                        <strong>Validation Errors:</strong>
-                        <ul className="list-disc list-inside mt-1 space-y-0.5">
-                          {csvValidationErrors.slice(0, 5).map((error, idx) => (
-                            <li key={idx}>{error}</li>
-                          ))}
-                          {csvValidationErrors.length > 5 && (
-                            <li>... and {csvValidationErrors.length - 5} more</li>
-                          )}
-                        </ul>
-                      </div>
-                    )}
-                    <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
-                      Click to change file
-                    </p>
-                  </div>
-                ) : (
-                  <>
-                    <div className="text-4xl mb-2">📄</div>
-                    <p className="text-gray-600 dark:text-gray-400 mb-1">
-                      Click to upload or drag and drop
-                    </p>
-                    <p className="text-sm text-gray-500 dark:text-gray-500">CSV files only</p>
-                  </>
-                )}
-              </div>
-
-              <div className="p-4 bg-gray-50 border border-gray-300 rounded-lg">
-                <h3 className="font-semibold text-gray-800 mb-4">Upload Scheduling Settings</h3>
-
-                <div className="flex flex-col gap-4">
-                  <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-lg">
-                    <p className="text-sm text-blue-900 dark:text-blue-100">
-                      <strong>📅 Scheduling:</strong> Use the{" "}
-                      <code className="bg-blue-100 dark:bg-blue-800 px-1 rounded">
-                        scheduleTime
-                      </code>{" "}
-                      column in your CSV to set publish dates. Videos will be uploaded immediately
-                      and YouTube will publish them automatically at the scheduled times.
-                    </p>
-                  </div>
-
-                  <div className="p-3 bg-yellow-50 border border-yellow-300 rounded-lg text-sm text-yellow-800">
-                    <strong>Note:</strong> Videos are uploaded immediately but scheduled to publish
-                    on their assigned dates. All videos will be uploaded as private initially
-                    (required for scheduling), then updated to your CSV&apos;s privacyStatus if
-                    possible.
-                  </div>
-                </div>
-              </div>
-
-              {/* Real-time upload progress display */}
-              {uploadProgress && csvUploading && (
-                <div className="mb-4 p-5 bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl dark:from-blue-900/30 dark:to-indigo-900/30 dark:border-blue-700 shadow-sm">
-                  {/* Header */}
-                  <div className="flex items-center gap-3 mb-4">
-                    <div className="relative">
-                      <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-800 flex items-center justify-center">
-                        <div className="animate-spin text-xl">📤</div>
-                      </div>
-                      {uploadProgress.totalFiles > 0 && (
-                        <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-blue-600 text-white text-xs flex items-center justify-center font-bold">
-                          {uploadProgress.currentFile}
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex-1">
-                      <div className="font-bold text-blue-900 dark:text-blue-100 text-lg">
-                        Streaming to YouTube
-                      </div>
-                      <div className="text-sm text-blue-700 dark:text-blue-300">
-                        {uploadProgress.message || "Preparing files..."}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Current file being processed */}
-                  {uploadProgress.currentFileName && (
-                    <div className="mb-4 p-3 bg-white/60 dark:bg-gray-800/60 rounded-lg border border-blue-100 dark:border-blue-800">
-                      <div className="flex items-center gap-2">
-                        <span className="text-blue-500">📁</span>
-                        <span className="text-sm font-medium text-gray-700 dark:text-gray-300 truncate">
-                          {uploadProgress.currentFileName}
-                        </span>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Progress bar */}
-                  {uploadProgress.totalFiles > 0 && (
-                    <div className="mb-4">
-                      <div className="flex justify-between text-sm mb-2">
-                        <span className="text-blue-800 dark:text-blue-200 font-medium">
-                          Processing file {uploadProgress.currentFile} of {uploadProgress.totalFiles}
-                        </span>
-                        <span className="text-blue-600 dark:text-blue-400 font-bold">
-                          {Math.round(
-                            (uploadProgress.currentFile / uploadProgress.totalFiles) * 100
-                          )}
-                          %
-                        </span>
-                      </div>
-                      <div className="w-full bg-blue-200 rounded-full h-3 dark:bg-blue-800 overflow-hidden">
-                        <div
-                          className="bg-gradient-to-r from-blue-500 to-indigo-500 h-3 rounded-full transition-all duration-500 ease-out relative"
-                          style={{
-                            width: `${Math.min(
-                              100,
-                              (uploadProgress.currentFile / uploadProgress.totalFiles) * 100
-                            )}%`,
-                          }}
-                        >
-                          <div className="absolute inset-0 bg-white/20 animate-pulse"></div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              <button
-                type="submit"
-                disabled={csvUploading || !selectedCsvFile}
-                className={`btn-primary ${
-                  csvUploading || !selectedCsvFile ? "opacity-50 cursor-not-allowed" : ""
-                }`}
-              >
-                {csvUploading ? (
-                  <span className="flex items-center gap-2">
-                    <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                    {uploadProgress && uploadProgress.totalFiles > 0
-                      ? `Uploading ${uploadProgress.currentFile} / ${uploadProgress.totalFiles}...`
-                      : "Starting upload..."}
-                  </span>
-                ) : !selectedCsvFile ? (
-                  "Please select a CSV file first"
-                ) : (
-                  "Start Upload to YouTube"
-                )}
-              </button>
-            </form>
-          </>
-        )}
-      </div>
 
       {/* Bulk Upload Section */}
       <div className="card">
@@ -871,144 +432,6 @@ export default function UploadForms({
             </div>
 
             <form onSubmit={handleBulkUpload} className="flex flex-col gap-5">
-              {/* File Upload */}
-              <div>
-                <label htmlFor="bulkFiles" className="label">
-                  📁 Upload Video Files (Optional)
-                </label>
-              <div
-                className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-all ${
-                  selectedBulkFiles.length > 0
-                    ? "border-green-500 bg-green-50 dark:bg-green-900/20"
-                    : "border-gray-300 hover:border-blue-500"
-                }`}
-                onClick={() => bulkFilesInputRef.current?.click()}
-              >
-                <input
-                  ref={bulkFilesInputRef}
-                  type="file"
-                  id="bulkFiles"
-                  name="bulkFiles"
-                  accept="video/*"
-                  multiple
-                  className="hidden"
-                  onChange={(e) => {
-                    const files = Array.from(e.target.files || []);
-                    setSelectedBulkFiles(files);
-                  }}
-                />
-                {selectedBulkFiles.length > 0 ? (
-                  <div>
-                    <div className="text-4xl mb-2">✅</div>
-                    <p className="text-green-700 dark:text-green-300 font-semibold mb-1">
-                      {selectedBulkFiles.length} file(s) selected
-                    </p>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                      {selectedBulkFiles
-                        .map((f) => f.name)
-                        .join(", ")
-                        .substring(0, 100)}
-                      {selectedBulkFiles.length > 0 &&
-                      selectedBulkFiles[0].name.length > 100
-                        ? "..."
-                        : ""}
-                    </p>
-                    <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
-                      Click to change files
-                    </p>
-                  </div>
-                ) : (
-                  <>
-                    <div className="text-4xl mb-2">📹</div>
-                    <p className="text-gray-600 dark:text-gray-400 mb-1">
-                      Click to select videos or drag and drop
-                    </p>
-                    <p className="text-sm text-gray-500 dark:text-gray-500">
-                      Multiple video files (batches of 5)
-                    </p>
-                  </>
-                )}
-              </div>
-              </div>
-
-              {/* URL Upload */}
-              <div>
-                <label htmlFor="bulkUrls" className="label">
-                  🌐 Or Enter Video URLs (One per line)
-                </label>
-                <textarea
-                  id="bulkUrls"
-                  name="bulkUrls"
-                  placeholder="https://cdn.example.com/video1.mp4&#10;https://cdn.example.com/video2.mp4&#10;https://cdn.example.com/video3.mp4"
-                  value={bulkUrls.join("\n")}
-                  onChange={(e) => {
-                    const urls = e.target.value.split("\n").filter(url => url.trim());
-                    setBulkUrls(urls);
-                  }}
-                  rows={5}
-                  className="input-field font-mono text-sm"
-                />
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  Enter one URL per line. Videos stream directly from external servers - no download needed!
-                </p>
-              </div>
-
-              {/* Auth Headers (Optional) */}
-              {(bulkUrls.length > 0) && (
-                <div>
-                  <label htmlFor="urlAuthHeaders" className="label">
-                    🔐 Authentication Headers (Optional)
-                  </label>
-                  <input
-                    type="text"
-                    id="urlAuthHeaders"
-                    name="urlAuthHeaders"
-                    placeholder='{"Authorization":"Bearer token123"}'
-                    value={urlAuthHeaders}
-                    onChange={(e) => setUrlAuthHeaders(e.target.value)}
-                    className="input-field font-mono text-sm"
-                  />
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                    JSON format. Only needed if URLs require authentication.
-                  </p>
-                </div>
-              )}
-
-              {/* Timeout (Optional) */}
-              {(bulkUrls.length > 0) && (
-                <div>
-                  <label htmlFor="urlTimeout" className="label">
-                    ⏱️ Timeout (Optional, milliseconds)
-                  </label>
-                  <input
-                    type="number"
-                    id="urlTimeout"
-                    name="urlTimeout"
-                    placeholder="600000"
-                    value={urlTimeout}
-                    onChange={(e) => setUrlTimeout(e.target.value)}
-                    className="input-field"
-                  />
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                    Default: 10 minutes (600000ms). Increase for large files.
-                  </p>
-                </div>
-              )}
-
-              {/* Divider */}
-              {(selectedBulkFiles.length > 0 || bulkUrls.length > 0) && (
-                <div className="relative my-4">
-                  <div className="absolute inset-0 flex items-center">
-                    <div className="w-full border-t border-gray-300 dark:border-gray-600"></div>
-                  </div>
-                  <div className="relative flex justify-center text-sm">
-                    <span className="px-4 bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400">
-                      OR
-                    </span>
-                  </div>
-                </div>
-              )}
-
               {/* Google Drive Folder Upload */}
               <div className="p-4 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 border border-green-200 dark:border-green-700 rounded-lg">
                 <div className="flex items-start gap-2 mb-3">
@@ -1025,9 +448,16 @@ export default function UploadForms({
                         type="text"
                         id="driveFolderId"
                         name="driveFolderId"
-                        placeholder="Enter Drive folder ID (e.g., 1a2b3c4d5e6f7g8h9i0j1k2l3m4n5o6p)"
+                        placeholder="Enter Drive folder ID or click Browse"
                         className="input-field flex-1 font-mono text-sm"
                       />
+                      <button
+                        type="button"
+                        onClick={() => setShowDriveBrowser(true)}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors"
+                      >
+                        📂 Browse
+                      </button>
                       <button
                         type="button"
                         onClick={async () => {
@@ -1124,7 +554,7 @@ export default function UploadForms({
                       </div>
                     </div>
                     <p className="text-xs text-green-700 dark:text-green-300 mt-2">
-                      💡 Get folder ID from Drive URL: <code className="bg-green-100 dark:bg-green-800 px-1 rounded">drive.google.com/drive/folders/FOLDER_ID</code>
+                      💡 Click <strong>Browse</strong> to select a folder visually, or enter folder ID manually from Drive URL: <code className="bg-green-100 dark:bg-green-800 px-1 rounded">drive.google.com/drive/folders/FOLDER_ID</code>
                     </p>
                   </div>
                 </div>
@@ -1234,338 +664,308 @@ export default function UploadForms({
         )}
       </div>
 
-      {/* Metadata Update Section */}
+
+      {/* Google Sheets Upload */}
       <div className="card">
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
-            <span className="text-3xl">✏️</span>
+            <span className="text-3xl">📊</span>
             <h2 className="text-2xl font-bold text-gray-800 dark:text-white">
-              Update Metadata (Step 2)
+              Upload from Google Sheets
             </h2>
           </div>
-          <button
-            type="button"
-            onClick={() => setShowMetadataUpdate(!showMetadataUpdate)}
-            className="px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-white rounded-lg transition-colors"
-          >
-            {showMetadataUpdate ? "Hide" : "Show"}
-          </button>
         </div>
 
-        {showMetadataUpdate && (
-          <div className="space-y-4">
-            <div className="p-4 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-700 rounded-lg">
-              <p className="text-sm text-purple-900 dark:text-purple-100">
-                <strong>✏️ Update Metadata:</strong> After uploading videos in Step 1, use this
-                to update titles, descriptions, scheduling, and privacy settings. Only{" "}
-                <strong>private videos</strong> will be checked and updated.
-              </p>
-            </div>
+        <div className="space-y-4">
+          <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border border-blue-200 dark:border-blue-700 rounded-lg">
+            <p className="text-sm text-blue-900 dark:text-blue-100">
+              <strong>📊 Google Sheets Integration:</strong> Upload videos directly from a Google Sheet containing all metadata. 
+              The sheet should have columns like youtube_title, youtube_description, video_url, drive_file_id, etc.
+            </p>
+          </div>
 
-            <form onSubmit={handleMetadataUpdate} className="flex flex-col gap-5">
-              <label htmlFor="metadataCsv" className="label">
-                Upload CSV File
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const form = e.currentTarget;
+              const formData = new FormData(form);
+              const spreadsheetUrl = (formData.get("spreadsheetUrl") as string)?.trim();
+              const sheetName = (formData.get("sheetName") as string)?.trim();
+              const range = (formData.get("range") as string)?.trim() || undefined;
+              const videosPerDayStr = (formData.get("videosPerDay") as string)?.trim();
+              const startDate = (formData.get("startDate") as string)?.trim();
+
+              if (!spreadsheetUrl) {
+                setShowToast({ message: "Please enter a Google Sheets URL or ID", type: "error" });
+                return;
+              }
+
+              if (!sheetName) {
+                setShowToast({ message: "Please select a sheet", type: "error" });
+                return;
+              }
+
+              // Validate videosPerDay if provided
+              const videosPerDay = videosPerDayStr ? parseInt(videosPerDayStr, 10) : undefined;
+              if (videosPerDay !== undefined && (isNaN(videosPerDay) || videosPerDay < 0)) {
+                setShowToast({ message: "Videos per day must be a positive number", type: "error" });
+                return;
+              }
+
+              // If videosPerDay is set, startDate is required
+              if (videosPerDay && videosPerDay > 0 && !startDate) {
+                setShowToast({ message: "Start date is required when setting videos per day", type: "error" });
+                return;
+              }
+
+              try {
+                setShowToast({ message: "Processing Google Sheet...", type: "info" });
+                const response = await fetch("/api/upload-sheets", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    spreadsheetUrl,
+                    sheetName,
+                    range,
+                    videosPerDay: videosPerDay && videosPerDay > 0 ? videosPerDay : undefined,
+                    startDate: videosPerDay && videosPerDay > 0 ? startDate : undefined,
+                  }),
+                });
+
+                const data = await response.json();
+                if (response.ok) {
+                  setShowToast({
+                    message: `✅ Upload queued: ${data.totalItems} videos from "${data.spreadsheetTitle}"`,
+                    type: "success",
+                  });
+                  form.reset();
+                  setAvailableSheets([]);
+                  setSpreadsheetTitle("");
+                } else {
+                  setShowToast({
+                    message: data.error || "Failed to process Google Sheet",
+                    type: "error",
+                  });
+                }
+              } catch (error: any) {
+                setShowToast({
+                  message: `Error: ${error.message}`,
+                  type: "error",
+                });
+              }
+            }}
+            className="flex flex-col gap-5"
+          >
+            <div>
+              <label htmlFor="spreadsheetUrl" className="label">
+                📊 Google Sheets URL or ID *
               </label>
-              <div
-                className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-all ${
-                  selectedMetadataCsv
-                    ? "border-green-500 bg-green-50 dark:bg-green-900/20"
-                    : "border-gray-300 hover:border-purple-500"
-                }`}
-                onClick={() => metadataCsvInputRef.current?.click()}
-              >
+              <div className="flex gap-2">
                 <input
-                  ref={metadataCsvInputRef}
-                  type="file"
-                  id="metadataCsv"
-                  name="metadataCsv"
-                  accept=".csv"
-                  className="hidden"
+                  type="text"
+                  id="spreadsheetUrl"
+                  name="spreadsheetUrl"
+                  placeholder="https://docs.google.com/spreadsheets/d/SPREADSHEET_ID/edit"
+                  className="input-field font-mono text-sm flex-1"
+                  required
                   onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) {
-                      setSelectedMetadataCsv(file);
+                    // Debounce the fetch
+                    const url = e.target.value.trim();
+                    
+                    // Clear previous timer
+                    if (debounceTimerRef.current) {
+                      clearTimeout(debounceTimerRef.current);
+                    }
+                    
+                    if (url) {
+                      debounceTimerRef.current = setTimeout(() => {
+                        fetchSheets(url);
+                      }, 800);
+                    } else {
+                      setAvailableSheets([]);
+                      setSpreadsheetTitle("");
                     }
                   }}
                 />
-                {selectedMetadataCsv ? (
-                  <div>
-                    <div className="text-4xl mb-2">✅</div>
-                    <p className="text-green-700 dark:text-green-300 font-semibold mb-1">
-                      {selectedMetadataCsv.name}
-                    </p>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                      {(selectedMetadataCsv.size / 1024).toFixed(2)} KB
-                    </p>
-                    <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
-                      Click to change file
-                    </p>
-                  </div>
+                <button
+                  type="button"
+                  onClick={() => setShowSheetsBrowser(true)}
+                  className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition-colors flex items-center gap-2"
+                >
+                  <span>📂</span>
+                  <span>Browse</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const input = document.getElementById('spreadsheetUrl') as HTMLInputElement;
+                    if (input?.value.trim()) {
+                      fetchSheets(input.value.trim());
+                    }
+                  }}
+                  disabled={loadingSheets}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {loadingSheets ? "⏳" : "🔍"}
+                </button>
+              </div>
+              {spreadsheetTitle && (
+                <p className="text-xs text-green-600 dark:text-green-400 mt-1">
+                  ✓ Found: <strong>{spreadsheetTitle}</strong>
+                </p>
+              )}
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Click <strong>Browse</strong> to select from Drive, or paste the URL/ID and click 🔍
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label htmlFor="sheetName" className="label">
+                  Select Sheet *
+                </label>
+                {availableSheets.length > 0 ? (
+                  <select
+                    id="sheetName"
+                    name="sheetName"
+                    className="input-field text-sm"
+                    required
+                    defaultValue={availableSheets[0]?.title || ""}
+                  >
+                    {availableSheets.map((sheet) => (
+                      <option key={sheet.sheetId} value={sheet.title}>
+                        {sheet.title}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <select
+                    id="sheetName"
+                    name="sheetName"
+                    className="input-field text-sm"
+                    disabled
+                  >
+                    <option value="">Enter spreadsheet URL first</option>
+                  </select>
+                )}
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  {availableSheets.length > 0 
+                    ? `${availableSheets.length} sheet(s) available`
+                    : "Load spreadsheet to see available sheets"}
+                </p>
+              </div>
+
+              <div>
+                <label htmlFor="range" className="label">
+                  Range (Optional)
+                </label>
+                <input
+                  type="text"
+                  id="range"
+                  name="range"
+                  placeholder="A1:Z1000"
+                  className="input-field text-sm font-mono"
+                />
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Leave empty to read entire sheet
+                </p>
+              </div>
+            </div>
+
+            {/* Upload Scheduling */}
+            <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-lg">
+              <h3 className="font-semibold text-blue-900 dark:text-blue-100 mb-3 text-sm flex items-center gap-2">
+                <span>📅</span>
+                <span>Upload Scheduling (Optional)</span>
+              </h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="videosPerDay" className="label text-sm">
+                    Videos Per Day
+                  </label>
+                  <input
+                    type="number"
+                    id="videosPerDay"
+                    name="videosPerDay"
+                    min="0"
+                    placeholder="0 = upload all immediately"
+                    className="input-field text-sm"
+                  />
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    Leave 0 or empty to upload all immediately
+                  </p>
+                </div>
+                <div>
+                  <label htmlFor="startDate" className="label text-sm">
+                    Start Date
+                  </label>
+                  <input
+                    type="date"
+                    id="startDate"
+                    name="startDate"
+                    className="input-field text-sm"
+                  />
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    Required if videos per day is set
+                  </p>
+                </div>
+              </div>
+              <div className="mt-3 p-3 bg-blue-100 dark:bg-blue-900/30 rounded text-xs text-blue-800 dark:text-blue-200">
+                <strong>💡 How it works:</strong> If you set "5 videos per day" starting Jan 1, 
+                videos 1-5 will be scheduled for Jan 1, videos 6-10 for Jan 2, and so on. 
+                Videos are uploaded immediately but scheduled to publish on their assigned dates.
+              </div>
+            </div>
+
+            <div className="p-4 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg">
+              <h3 className="font-semibold text-gray-800 dark:text-white mb-2 text-sm">
+                📋 Required Columns:
+              </h3>
+              <ul className="text-xs text-gray-700 dark:text-gray-300 space-y-1 list-disc list-inside">
+                <li><code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">youtube_title</code></li>
+                <li><code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">youtube_description</code></li>
+                <li><code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">video_url</code> or <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">drive_file_id</code> or <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">path</code></li>
+              </ul>
+              <h3 className="font-semibold text-gray-800 dark:text-white mb-2 mt-3 text-sm">
+                📋 Optional Columns:
+              </h3>
+              <ul className="text-xs text-gray-700 dark:text-gray-300 space-y-1 list-disc list-inside">
+                <li><code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">thumbnail_url</code>, <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">drive_thumbnail_id</code></li>
+                <li><code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">privacyStatus</code> (default: private)</li>
+                <li><code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">scheduleTime</code></li>
+                <li><code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">url_auth_headers</code>, <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">url_timeout</code></li>
+                <li><code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">post_upload_action</code>, <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">completed_folder_id</code></li>
+              </ul>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={handlePreviewSheet}
+                disabled={loadingPreview || !spreadsheetTitle}
+                className={`px-6 py-3 bg-gray-600 hover:bg-gray-700 text-white font-semibold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2`}
+              >
+                {loadingPreview ? (
+                  <>
+                    <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    Loading...
+                  </>
                 ) : (
                   <>
-                    <div className="text-4xl mb-2">📄</div>
-                    <p className="text-gray-600 dark:text-gray-400 mb-1">
-                      Click to upload CSV file
-                    </p>
-                    <p className="text-sm text-gray-500 dark:text-gray-500">CSV files only</p>
+                    <span>👁️</span>
+                    <span>Preview Sheet</span>
                   </>
                 )}
-              </div>
-
-              <div className="p-4 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg">
-                <h3 className="font-semibold mb-3 text-gray-800 dark:text-white">
-                  CSV Format (Required Columns)
-                </h3>
-                <ul className="text-sm space-y-1 text-gray-700 dark:text-gray-300">
-                  <li>
-                    • <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">video_name</code>{" "}
-                    - Filename to match uploaded video
-                  </li>
-                  <li>
-                    • <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">youtube_title</code>{" "}
-                    - New title
-                  </li>
-                  <li>
-                    •{" "}
-                    <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">
-                      youtube_description
-                    </code>{" "}
-                    - New description
-                  </li>
-                  <li>
-                    • <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">scheduleTime</code>{" "}
-                    - Publish date (optional)
-                  </li>
-                  <li>
-                    • <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">privacyStatus</code>{" "}
-                    - public/private/unlisted (optional)
-                  </li>
-                  <li>
-                    • <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">thumbnail_name</code>{" "}
-                    - Thumbnail filename (optional)
-                  </li>
-                </ul>
-              </div>
-
-              {/* Progress Display - Enhanced for Large Batches */}
-              {metadataUpdateProgress &&
-                (metadataUpdating ||
-                  metadataUpdateProgress.processed === metadataUpdateProgress.total) && (
-                  <div className="p-6 bg-gradient-to-br from-purple-50 to-pink-50 border border-purple-200 rounded-xl dark:from-purple-900/30 dark:to-pink-900/30 dark:border-purple-700">
-                    <div className="flex items-center gap-3 mb-4">
-                      <div className="w-12 h-12 rounded-full bg-purple-100 dark:bg-purple-800 flex items-center justify-center">
-                        {metadataUpdating ? (
-                          <div className="animate-spin text-2xl">✏️</div>
-                        ) : (
-                          <div className="text-2xl">✅</div>
-                        )}
-                      </div>
-                      <div className="flex-1">
-                        <div className="font-bold text-purple-900 dark:text-purple-100 text-lg">
-                          {metadataUpdating ? "Updating Metadata" : "Update Complete"}
-                        </div>
-                        <div className="text-sm text-purple-700 dark:text-purple-300">
-                          {metadataUpdateProgress.message || "Preparing..."}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Stats Grid */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-                      <div className="p-3 bg-white/60 dark:bg-gray-800/60 rounded-lg border border-purple-100 dark:border-purple-800">
-                        <div className="text-xs text-purple-600 dark:text-purple-400 mb-1">
-                          Total
-                        </div>
-                        <div className="text-lg font-bold text-purple-900 dark:text-purple-100">
-                          {metadataUpdateProgress.total}
-                        </div>
-                      </div>
-                      <div className="p-3 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
-                        <div className="text-xs text-green-600 dark:text-green-400 mb-1">
-                          Updated
-                        </div>
-                        <div className="text-lg font-bold text-green-700 dark:text-green-300">
-                          {metadataUpdateProgress.updated}
-                        </div>
-                      </div>
-                      <div className="p-3 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800">
-                        <div className="text-xs text-red-600 dark:text-red-400 mb-1">Failed</div>
-                        <div className="text-lg font-bold text-red-700 dark:text-red-300">
-                          {metadataUpdateProgress.failed}
-                        </div>
-                      </div>
-                      <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
-                        <div className="text-xs text-blue-600 dark:text-blue-400 mb-1">
-                          Thumbnails
-                        </div>
-                        <div className="text-lg font-bold text-blue-700 dark:text-blue-300">
-                          {metadataUpdateProgress.thumbnails}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Progress Bar */}
-                    {metadataUpdateProgress.total > 0 && (
-                      <div className="mb-4">
-                        <div className="flex justify-between text-sm mb-2">
-                          <span className="text-purple-800 dark:text-purple-200 font-medium">
-                            {metadataUpdateProgress.currentBatch &&
-                            metadataUpdateProgress.totalBatches ? (
-                              <>
-                                Batch {metadataUpdateProgress.currentBatch} /{" "}
-                                {metadataUpdateProgress.totalBatches} •{" "}
-                              </>
-                            ) : null}
-                            {metadataUpdateProgress.processed ||
-                            (metadataUpdateProgress.updated + metadataUpdateProgress.failed)}{" "}
-                            / {metadataUpdateProgress.total} processed
-                          </span>
-                          <span className="text-purple-600 dark:text-purple-400 font-bold">
-                            {Math.round(
-                              ((metadataUpdateProgress.processed ||
-                                metadataUpdateProgress.updated +
-                                  metadataUpdateProgress.failed) /
-                                metadataUpdateProgress.total) *
-                                100
-                            )}
-                            %
-                          </span>
-                        </div>
-                        <div className="w-full bg-purple-200 rounded-full h-4 dark:bg-purple-800 overflow-hidden">
-                          <div
-                            className="bg-gradient-to-r from-purple-500 to-pink-500 h-4 rounded-full transition-all duration-500 relative"
-                            style={{
-                              width:
-                                metadataUpdateProgress.total > 0
-                                  ? `${Math.min(
-                                      100,
-                                      Math.round(
-                                        ((metadataUpdateProgress.processed ||
-                                          metadataUpdateProgress.updated +
-                                            metadataUpdateProgress.failed) /
-                                          metadataUpdateProgress.total) *
-                                          100
-                                      )
-                                    )}%`
-                                  : "0%",
-                            }}
-                          >
-                            <div className="absolute inset-0 bg-white/20 animate-pulse"></div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Performance Metrics */}
-                    {(metadataUpdateProgress.rate ||
-                      metadataUpdateProgress.estimatedSeconds) && (
-                      <div className="flex gap-4 text-xs text-purple-700 dark:text-purple-300 mb-4">
-                        {metadataUpdateProgress.rate && (
-                          <div className="flex items-center gap-1">
-                            <span>⚡</span>
-                            <span>{metadataUpdateProgress.rate} videos/min</span>
-                          </div>
-                        )}
-                        {metadataUpdateProgress.estimatedSeconds &&
-                        metadataUpdateProgress.estimatedSeconds > 0 ? (
-                          <div className="flex items-center gap-1">
-                            <span>⏱️</span>
-                            <span>
-                              ~{Math.round(metadataUpdateProgress.estimatedSeconds / 60)} min
-                              remaining
-                            </span>
-                          </div>
-                        ) : null}
-                        {metadataUpdateProgress.totalTime ? (
-                          <div className="flex items-center gap-1">
-                            <span>✅</span>
-                            <span>Completed in {metadataUpdateProgress.totalTime}s</span>
-                          </div>
-                        ) : null}
-                      </div>
-                    )}
-
-                    {/* Current Video */}
-                    {metadataUpdateProgress.currentVideo && (
-                      <div className="p-3 bg-white/60 dark:bg-gray-800/60 rounded-lg border border-purple-100 dark:border-purple-800 mb-4">
-                        <div className="flex items-center gap-2">
-                          <span className="text-purple-500">📹</span>
-                          <span className="text-sm font-medium text-gray-700 dark:text-gray-300 truncate">
-                            {metadataUpdateProgress.currentVideo}
-                          </span>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Failed Videos List */}
-                    {metadataUpdateProgress.failedVideos &&
-                    metadataUpdateProgress.failedVideos.length > 0 ? (
-                      <div className="mt-4">
-                        <button
-                          type="button"
-                          onClick={() => setShowFailedVideos(!showFailedVideos)}
-                          className="w-full p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors text-left"
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm font-semibold text-red-700 dark:text-red-300">
-                              ⚠️ {metadataUpdateProgress.failedVideos.length} Failed Video
-                              {metadataUpdateProgress.failedVideos.length !== 1 ? "s" : ""}
-                            </span>
-                            <span className="text-red-600 dark:text-red-400">
-                              {showFailedVideos ? "▼" : "▶"}
-                            </span>
-                          </div>
-                        </button>
-                        {showFailedVideos && (
-                          <div className="mt-2 max-h-64 overflow-y-auto space-y-2">
-                            {metadataUpdateProgress.failedVideos.map((failed, idx) => (
-                              <div
-                                key={idx}
-                                className="p-2 bg-white/60 dark:bg-gray-800/60 rounded border border-red-200 dark:border-red-800 text-xs"
-                              >
-                                <div className="font-medium text-red-700 dark:text-red-300 truncate">
-                                  {failed.videoName || `Row ${failed.index + 1}`}
-                                </div>
-                                <div className="text-red-600 dark:text-red-400 mt-1">
-                                  {failed.error}
-                                </div>
-                              </div>
-                            ))}
-                            {metadataUpdateProgress.failedVideos.length >= 100 && (
-                              <div className="text-xs text-gray-500 dark:text-gray-400 p-2 text-center">
-                                Showing first 100 failures. Check console for full list.
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    ) : null}
-                  </div>
-                )}
-
+              </button>
               <button
                 type="submit"
-                disabled={metadataUpdating || !selectedMetadataCsv}
-                className={`btn-primary ${
-                  metadataUpdating || !selectedMetadataCsv
-                    ? "opacity-50 cursor-not-allowed"
-                    : ""
-                }`}
+                className="btn-primary flex-1"
               >
-                {metadataUpdating ? (
-                  <span className="flex items-center gap-2">
-                    <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                    Updating...
-                  </span>
-                ) : !selectedMetadataCsv ? (
-                  "Please select a CSV file first"
-                ) : (
-                  "Update Metadata"
-                )}
+                Upload from Google Sheets
               </button>
-            </form>
-          </div>
-        )}
+            </div>
+          </form>
+        </div>
       </div>
     </>
   );

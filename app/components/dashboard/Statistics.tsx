@@ -61,36 +61,40 @@ export default function Statistics({ queue, nextUploadTime, timeUntilNext }: Sta
 
   return (
     <>
-      {/* Next Upload Timer */}
+      {/* Next Upload Timer - Enhanced Countdown */}
       {nextUploadTime && timeUntilNext && (
         <div className="mb-8 p-6 bg-gradient-to-r from-blue-500 via-indigo-600 to-purple-600 rounded-2xl shadow-xl text-white relative overflow-hidden animate-fade-in">
           <div className="absolute inset-0 bg-white/10 backdrop-blur-sm"></div>
-          <div className="relative z-10 flex items-center justify-between">
-            <div className="flex items-center gap-5">
-              <div className="text-5xl animate-pulse-slow">⏰</div>
-              <div>
-                <div className="text-sm opacity-90 mb-1 font-medium uppercase tracking-wide">
-                  Next Upload Batch
-                </div>
-                <div className="text-3xl font-bold mb-2">{timeUntilNext}</div>
-                <div className="text-sm opacity-90 mt-1">
-                  {nextUploadTime.toLocaleDateString("en-US", {
-                    weekday: "long",
-                    year: "numeric",
-                    month: "long",
-                    day: "numeric",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
-                </div>
-                <div className="text-xs opacity-75 mt-2 flex items-center gap-2">
-                  <span>🔄</span>
-                  <span>Uploads run every 24 hours</span>
+          <div className="relative z-10">
+            <div className="flex items-center justify-between flex-wrap gap-4">
+              <div className="flex items-center gap-5">
+                <div className="text-5xl animate-pulse-slow">⏰</div>
+                <div>
+                  <div className="text-sm opacity-90 mb-1 font-medium uppercase tracking-wide">
+                    Next Upload Batch
+                  </div>
+                  <div className="text-4xl font-bold mb-2 font-mono tracking-tight">
+                    {timeUntilNext}
+                  </div>
+                  <div className="text-sm opacity-90 mt-1">
+                    {nextUploadTime.toLocaleDateString("en-US", {
+                      weekday: "long",
+                      year: "numeric",
+                      month: "long",
+                      day: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </div>
+                  <div className="text-xs opacity-75 mt-2 flex items-center gap-2">
+                    <span>🔄</span>
+                    <span>Uploads run every 24 hours</span>
+                  </div>
                 </div>
               </div>
-            </div>
-            <div className="text-right hidden sm:block">
-              <div className="text-5xl animate-pulse-slow opacity-80">⏳</div>
+              <div className="text-right hidden sm:block">
+                <div className="text-5xl animate-pulse-slow opacity-80">⏳</div>
+              </div>
             </div>
           </div>
         </div>
