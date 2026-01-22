@@ -91,6 +91,7 @@ export default function Statistics({ queue, nextUploadTime, timeUntilNext }: Sta
                       day: "numeric",
                       hour: "2-digit",
                       minute: "2-digit",
+                      timeZoneName: "short",
                     })}
                   </div>
                   <div className="text-xs opacity-75 mt-2 flex items-center gap-2">

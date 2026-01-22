@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import WorkerStatus from "./WorkerStatus";
 
 interface ProgressItem {
@@ -42,6 +43,8 @@ export default function QueueManagement({
   handleDeleteAllFiles,
   setShowToast,
 }: QueueManagementProps) {
+  const [isVideoDetailsCollapsed, setIsVideoDetailsCollapsed] = useState(false);
+  
   // Format file size
   const formatFileSize = (bytes?: number) => {
     if (!bytes) return "N/A";
@@ -813,10 +816,19 @@ export default function QueueManagement({
             {/* Video List */}
             {progress.length > 0 ? (
               <div>
-                <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
-                  Video Details ({completed} / {totalVideos} completed)
-                </h4>
-                <div className="max-h-96 overflow-y-auto space-y-2 pr-2">
+                <button
+                  onClick={() => setIsVideoDetailsCollapsed(!isVideoDetailsCollapsed)}
+                  className="flex items-center gap-2 w-full text-left mb-3 hover:opacity-80 transition-opacity"
+                >
+                  <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                    Video Details ({completed} / {totalVideos} completed)
+                  </h4>
+                  <span className="text-gray-500 dark:text-gray-400 text-xs">
+                    {isVideoDetailsCollapsed ? "▶" : "▼"}
+                  </span>
+                </button>
+                {!isVideoDetailsCollapsed && (
+                  <div className="max-h-96 overflow-y-auto space-y-2 pr-2">
                   {progress.map((item: any, idx: number) => {
                     if (!item) return null;
                     
@@ -921,7 +933,8 @@ export default function QueueManagement({
                       </div>
                     );
                   })}
-                </div>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="text-center py-8">

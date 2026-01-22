@@ -367,14 +367,13 @@ async function processBulkJob(jobId: string): Promise<void> {
     auth: oAuthClient,
   });
 
-  // Determine which videos to upload TODAY
+  // Determine which videos to upload TODAY (using UTC for consistency)
   const now = new Date();
-  const today = new Date(now);
-  today.setHours(0, 0, 0, 0); // Start of today
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0)); // Start of today in UTC
   
-  // Get job start date
-  const startDate = job.startDate ? new Date(job.startDate) : new Date(job.createdAt);
-  startDate.setHours(0, 0, 0, 0); // Start of start date
+  // Get job start date (convert to UTC)
+  const startDateRaw = job.startDate ? new Date(job.startDate) : new Date(job.createdAt);
+  const startDate = new Date(Date.UTC(startDateRaw.getUTCFullYear(), startDateRaw.getUTCMonth(), startDateRaw.getUTCDate(), 0, 0, 0, 0)); // Start of start date in UTC
   
   // Calculate how many days since job started
   const daysSinceStart = Math.floor((today.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
@@ -611,8 +610,8 @@ async function processBulkJob(jobId: string): Promise<void> {
 function getNextJobToProcess(): { id: string; status: string } | null {
   const queue = getBulkQueue();
   const now = new Date();
-  const today = new Date(now);
-  today.setHours(0, 0, 0, 0);
+  // Use UTC for day calculations (consistent with processBulkJob)
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
   
   for (const job of queue) {
     if (job.status === "pending") {
@@ -621,8 +620,8 @@ function getNextJobToProcess(): { id: string; status: string } | null {
     
     // Check "processing" jobs that might have more batches for today
     if (job.status === "processing" && job.videosPerDay && job.videosPerDay > 0) {
-      const startDate = job.startDate ? new Date(job.startDate) : new Date(job.createdAt);
-      startDate.setHours(0, 0, 0, 0);
+      const startDateRaw = job.startDate ? new Date(job.startDate) : new Date(job.createdAt);
+      const startDate = new Date(Date.UTC(startDateRaw.getUTCFullYear(), startDateRaw.getUTCMonth(), startDateRaw.getUTCDate(), 0, 0, 0, 0));
       
       const daysSinceStart = Math.floor((today.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
       

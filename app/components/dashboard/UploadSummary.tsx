@@ -113,12 +113,12 @@ export default function UploadSummary({
       };
     });
 
-    // Calculate videos scheduled for next upload (today first, then tomorrow)
+    // Calculate videos scheduled for next upload (using UTC for day boundaries to match worker)
     const now = new Date();
-    const today = new Date(now);
-    today.setHours(12, 0, 0, 0); // Noon today
+    // Use UTC midnight for day boundaries (matches worker)
+    const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
     const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1); // Noon tomorrow
+    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
     
     // Helper to get video title
     const getVideoTitle = (job: QueueItem, index: number): string => {
@@ -174,15 +174,15 @@ export default function UploadSummary({
       if (!job.videosPerDay || job.videosPerDay <= 0) return;
       if (nextBatchCount > 0) return; // Already found a batch
       
-      // Use startDate if provided and valid, otherwise use today
+      // Use startDate if provided and valid, otherwise use today (UTC)
       let startDate: Date;
       if (job.startDate && !isNaN(new Date(job.startDate).getTime())) {
-        startDate = new Date(job.startDate);
+        const startDateRaw = new Date(job.startDate);
+        startDate = new Date(Date.UTC(startDateRaw.getUTCFullYear(), startDateRaw.getUTCMonth(), startDateRaw.getUTCDate(), 0, 0, 0, 0));
       } else {
-        // No startDate set - assume job starts TODAY
-        startDate = new Date(now);
+        // No startDate set - assume job starts TODAY (UTC)
+        startDate = new Date(today);
       }
-      startDate.setHours(12, 0, 0, 0); // Noon
       
       const totalVideos = job.items?.length || job.totalVideos || 0;
       
