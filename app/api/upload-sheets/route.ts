@@ -26,6 +26,8 @@ interface SheetRow {
   url_timeout?: string;
   scheduletime?: string;
   scheduleTime?: string;
+  publishAt?: string; // Support publishAt column
+  publishat?: string;
   privacystatus?: string;
   privacyStatus?: string;
   post_upload_action?: string;
@@ -161,6 +163,7 @@ export async function POST(request: NextRequest) {
       mapped.url_auth_headers = normalized.url_auth_headers || row.url_auth_headers;
       mapped.url_timeout = normalized.url_timeout || row.url_timeout;
       mapped.scheduleTime = normalized.scheduletime || normalized.scheduleTime || row.scheduleTime || row.scheduletime;
+      mapped.publishAt = normalized.publishat || normalized.publishAt || row.publishAt || row.publishat; // Support publishAt column
       mapped.privacyStatus = normalized.privacystatus || normalized.privacyStatus || row.privacyStatus || row.privacystatus || "public";
       mapped.post_upload_action = normalized.post_upload_action || normalized.postuploadaction || row.post_upload_action || row.postuploadaction || "none";
       mapped.completed_folder_id = normalized.completed_folder_id || normalized.completedfolderid || row.completed_folder_id || row.completedfolderid;
@@ -241,24 +244,48 @@ export async function POST(request: NextRequest) {
       return undefined;
     };
 
-    // Convert to queue items
-    const queueItems = normalizedData.map((row, index) => {
+    // Convert to queue items and filter invalid ones
+    let matchedCount = 0;
+    let unmatchedCount = 0;
+    const unmatchedNames: Array<{ row: number; video_name?: string; reason: string }> = [];
+    
+    const allQueueItems = normalizedData.map((row, index) => {
       // Match video_name to Drive file if driveFolderId is provided
       let matchedDriveFileId = row.drive_file_id;
       if (driveFolderId && row.video_name && !matchedDriveFileId) {
         matchedDriveFileId = matchDriveFile(row.video_name);
         if (matchedDriveFileId) {
-          console.log(`[UPLOAD-SHEETS] Matched "${row.video_name}" to Drive file ${matchedDriveFileId}`);
+          matchedCount++;
+          if (matchedCount <= 5) { // Log first 5 matches
+            console.log(`[UPLOAD-SHEETS] Matched "${row.video_name}" to Drive file ${matchedDriveFileId}`);
+          }
         } else {
-          console.warn(`[UPLOAD-SHEETS] Could not match "${row.video_name}" to any Drive file`);
+          unmatchedCount++;
+          if (unmatchedCount <= 10) { // Log first 10 unmatched
+            unmatchedNames.push({ row: index + 1, video_name: row.video_name, reason: "No matching Drive file found" });
+            console.warn(`[UPLOAD-SHEETS] Row ${index + 1}: Could not match "${row.video_name}" to any Drive file`);
+          }
         }
+      } else if (!row.video_name && driveFolderId && !row.drive_file_id && !row.video_url) {
+        unmatchedCount++;
+        unmatchedNames.push({ row: index + 1, reason: "Missing video_name, drive_file_id, and video_url" });
+        console.warn(`[UPLOAD-SHEETS] Row ${index + 1}: video_name column is empty and no other video source provided`);
       }
       
       return {
+        originalIndex: index + 1, // Keep track of original row number
         title: row.youtube_title || `Video ${index + 1}`,
         description: row.youtube_description || "",
         privacyStatus: (row.privacyStatus || "public") as "public" | "private" | "unlisted",
         scheduleTime: row.scheduleTime || undefined,
+        // Only include publishDate if it's a valid date string
+        publishDate: (() => {
+          const pubAt = row.publishAt;
+          if (!pubAt || typeof pubAt !== 'string' || !pubAt.trim()) return undefined;
+          const date = new Date(pubAt);
+          if (isNaN(date.getTime())) return undefined; // Invalid date
+          return date.toISOString();
+        })(),
         videoUrl: row.video_url || undefined,
         thumbnailUrl: row.thumbnail_url || undefined,
         driveFileId: matchedDriveFileId || row.drive_file_id || undefined,
@@ -276,15 +303,58 @@ export async function POST(request: NextRequest) {
         madeForKids: (row as any).made_for_kids ?? false, // Default to false (not made for kids)
       };
     });
+    
+    // Filter out invalid items (no video source)
+    const validQueueItems = allQueueItems.filter((item, index) => {
+      const hasVideoSource = item.driveFileId || item.videoUrl;
+      if (!hasVideoSource) {
+        unmatchedNames.push({ 
+          row: item.originalIndex, 
+          video_name: normalizedData[index]?.video_name,
+          reason: "No video source (missing drive_file_id, video_url, or matched video_name)" 
+        });
+        return false;
+      }
+      return true;
+    });
+    
+    const filteredCount = allQueueItems.length - validQueueItems.length;
+    
+    // Log summary
+    console.log(`[UPLOAD-SHEETS] Matching summary: ${matchedCount} matched, ${unmatchedCount} unmatched out of ${normalizedData.length} total rows`);
+    console.log(`[UPLOAD-SHEETS] Filtered ${filteredCount} invalid items (no video source), ${validQueueItems.length} valid items will be queued`);
+    if (unmatchedNames.length > 0) {
+      const sampleUnmatched = unmatchedNames.slice(0, 10);
+      console.log(`[UPLOAD-SHEETS] Sample filtered rows:`, sampleUnmatched.map(u => `Row ${u.row}${u.video_name ? ` ("${u.video_name}")` : ""}: ${u.reason}`).join(", "));
+    }
+    
+    // Use only valid items
+    const queueItems = validQueueItems.map(({ originalIndex, ...item }) => item); // Remove originalIndex before queuing
+
+    // Check if we have any valid items
+    if (queueItems.length === 0) {
+      return NextResponse.json({
+        success: false,
+        error: "No valid items found to upload",
+        totalItems: normalizedData.length,
+        filteredItems: filteredCount,
+        matchedCount,
+        unmatchedCount,
+        message: `All ${normalizedData.length} rows were filtered out because they lack video sources (video_name, drive_file_id, or video_url). Please check your sheet and Drive folder.`,
+      }, { status: 400 });
+    }
 
     // Add to bulk queue
-    // If videosPerDay is set, use today as startDate (will be calculated in worker)
+    // Set startDate to today at noon for consistent scheduling
+    const startDateNoon = new Date();
+    startDateNoon.setHours(12, 0, 0, 0);
+    
     const jobId = addToBulkQueue({
       sessionId,
       userId,
       type: "urls", // Sheets data is treated like URLs/Drive (streaming)
       videosPerDay: videosPerDay ? parseInt(videosPerDay, 10) : undefined,
-      // startDate will be calculated in worker based on today if videosPerDay is set
+      startDate: videosPerDay ? startDateNoon.toISOString() : undefined, // Only set if scheduling
       items: queueItems,
     });
 
@@ -293,8 +363,15 @@ export async function POST(request: NextRequest) {
       message: "Upload queued for processing",
       jobId,
       totalItems: queueItems.length,
+      filteredItems: filteredCount,
+      matchedCount,
+      unmatchedCount,
       spreadsheetTitle: metadata.title,
       sheetName: sheetName || metadata.sheets[0]?.title || "Sheet1",
+      warnings: filteredCount > 0 ? [
+        `${filteredCount} row(s) were filtered out due to missing video sources`,
+        `Only ${queueItems.length} valid items were queued for upload`
+      ] : undefined,
     });
   } catch (error: any) {
     console.error("[UPLOAD-SHEETS] Error:", error);

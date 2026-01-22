@@ -769,7 +769,7 @@ export default function QueueManagement({
             {/* Current Processing Status */}
             {processing > 0 && (() => {
               const currentItem = progress.find((p: any) => 
-                p.status && (
+                p && p.status && (
                   p.status.includes("Uploading") || 
                   p.status.includes("Fetching") ||
                   p.status === "Pending" ||

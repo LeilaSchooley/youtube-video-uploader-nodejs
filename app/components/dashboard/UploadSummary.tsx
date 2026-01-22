@@ -112,92 +112,158 @@ export default function UploadSummary({
       };
     });
 
-    // Calculate videos scheduled for next day
+    // Calculate videos scheduled for next upload (today first, then tomorrow)
     const now = new Date();
-    const tomorrow = new Date(now);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(12, 0, 0, 0); // Noon
+    const today = new Date(now);
+    today.setHours(12, 0, 0, 0); // Noon today
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1); // Noon tomorrow
     
-    const nextDayVideos: Array<{ jobId: string; title: string; index: number }> = [];
-    let nextDayCount = 0;
+    // Helper to get video title
+    const getVideoTitle = (job: QueueItem, index: number): string => {
+      let videoTitle = `Video ${index + 1}`;
+      
+      // Try to get title from job.items (from sheet) first
+      if (job.items && Array.isArray(job.items) && job.items.length > index) {
+        const item = job.items[index];
+        if (item && typeof item === 'object') {
+          const itemTitle = item.title;
+          if (itemTitle && typeof itemTitle === 'string' && itemTitle.trim() && itemTitle.trim() !== `Video ${index + 1}`) {
+            return itemTitle.trim();
+          }
+        }
+      }
+      
+      // Fallback to progress title
+      if (job.progress && job.progress[index] && job.progress[index].title) {
+        const progressTitle = job.progress[index].title;
+        if (progressTitle && typeof progressTitle === 'string' && progressTitle.trim()) {
+          return progressTitle.trim();
+        }
+      }
+      
+      // Also check by index match
+      const progressItem = job.progress?.find((p) => p && p.index === index);
+      if (progressItem && progressItem.title && typeof progressItem.title === 'string' && progressItem.title.trim()) {
+        return progressItem.title.trim();
+      }
+      
+      return videoTitle;
+    };
+    
+    // Helper to check if video is completed
+    const isVideoCompleted = (job: QueueItem, index: number): boolean => {
+      return job.progress?.some(
+        (p) => p && p.index === index && p.status && (
+          p.status.includes("Uploaded") || 
+          p.status.includes("scheduled") || 
+          p.status.includes("Scheduled")
+        )
+      ) || false;
+    };
+    
+    // Find next batch of videos to upload
+    let nextBatchVideos: Array<{ jobId: string; title: string; index: number }> = [];
+    let nextBatchCount = 0;
+    let nextBatchTime: Date | null = null;
+    let isToday = false;
     
     jobsWithScheduling.forEach((job) => {
       if (!job.videosPerDay || job.videosPerDay <= 0) return;
+      if (nextBatchCount > 0) return; // Already found a batch
       
-      // Use startDate if provided, otherwise use today
-      const startDate = job.startDate ? new Date(job.startDate) : new Date();
+      // Use startDate if provided and valid, otherwise use today
+      let startDate: Date;
+      if (job.startDate && !isNaN(new Date(job.startDate).getTime())) {
+        startDate = new Date(job.startDate);
+      } else {
+        // No startDate set - assume job starts TODAY
+        startDate = new Date(now);
+      }
       startDate.setHours(12, 0, 0, 0); // Noon
       
-      // Calculate which day index tomorrow is (0 = startDate, 1 = startDate + 1 day, etc.)
-      const daysDiff = Math.floor((tomorrow.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
-      
-      // If startDate is today or in the past, daysDiff will be 0 or positive
-      // If startDate is in the future, daysDiff will be negative - skip those
-      if (daysDiff < 0) return; // Tomorrow is before start date
-      
-      // Get total videos and completed count
       const totalVideos = job.items?.length || job.totalVideos || 0;
+      
+      // Count completed videos to determine current position
       const completedCount = job.progress?.filter(
-        (p) =>
-          p && p.status && (
-            p.status.includes("Uploaded") ||
-            p.status.includes("scheduled") ||
-            p.status.includes("Scheduled")
-          )
+        (p) => p && p.status && (
+          p.status.includes("Uploaded") ||
+          p.status.includes("scheduled") ||
+          p.status.includes("Scheduled")
+        )
       ).length || 0;
       
-      // Calculate which videos are scheduled for tomorrow
-      // Videos are assigned: dayIndex = Math.floor(videoIndex / videosPerDay)
-      const startIndex = daysDiff * job.videosPerDay;
-      const endIndex = Math.min(startIndex + job.videosPerDay, totalVideos);
+      // Calculate today's day index from start date
+      const todayDiff = Math.floor((today.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
       
-      // Only include videos that haven't been uploaded yet
-      for (let i = startIndex; i < endIndex && i < totalVideos; i++) {
-        // Check if this video is already completed
-        const isCompleted = job.progress?.some(
-          (p) => p && p.index === i && p.status && (p.status.includes("Uploaded") || p.status.includes("scheduled") || p.status.includes("Scheduled"))
-        );
-        
-        if (!isCompleted && i >= completedCount) {
-          // Get video title - prefer items array (from sheet), fallback to progress
-          let videoTitle = `Video ${i + 1}`;
-          
-          // Try to get title from job.items (from sheet) first
-          if (job.items && Array.isArray(job.items) && job.items.length > i) {
-            const item = job.items[i];
-            if (item && typeof item === 'object') {
-              const itemTitle = item.title;
-              if (itemTitle && typeof itemTitle === 'string' && itemTitle.trim() && itemTitle.trim() !== `Video ${i + 1}`) {
-                videoTitle = itemTitle.trim();
-              }
-            }
+      // If start date is in the future, show first batch as "upcoming"
+      if (todayDiff < 0) {
+        // Show first batch scheduled for start date
+        const firstBatchEndIndex = Math.min(job.videosPerDay, totalVideos);
+        for (let i = 0; i < firstBatchEndIndex; i++) {
+          if (!isVideoCompleted(job, i)) {
+            nextBatchVideos.push({
+              jobId: job.id,
+              title: getVideoTitle(job, i),
+              index: i,
+            });
           }
-          
-          // Fallback to progress title if still using default
-          if (videoTitle === `Video ${i + 1}`) {
-            // Check by array index
-            if (job.progress && job.progress[i] && job.progress[i].title) {
-              const progressTitle = job.progress[i].title;
-              if (progressTitle && typeof progressTitle === 'string' && progressTitle.trim()) {
-                videoTitle = progressTitle.trim();
-              }
-            }
-            // Also check by index match
-            if (videoTitle === `Video ${i + 1}`) {
-              const progressItem = job.progress?.find((p) => p && p.index === i);
-              if (progressItem && progressItem.title && typeof progressItem.title === 'string' && progressItem.title.trim()) {
-                videoTitle = progressItem.title.trim();
-              }
-            }
-          }
-          
-          nextDayVideos.push({
+        }
+        if (nextBatchVideos.length > 0) {
+          nextBatchCount = nextBatchVideos.length;
+          nextBatchTime = startDate;
+          isToday = false;
+        }
+        return;
+      }
+      
+      // Check today's batch first
+      const todayStartIndex = todayDiff * job.videosPerDay;
+      const todayEndIndex = Math.min(todayStartIndex + job.videosPerDay, totalVideos);
+      
+      // Find pending videos in today's batch
+      const todayPendingVideos: Array<{ jobId: string; title: string; index: number }> = [];
+      for (let i = todayStartIndex; i < todayEndIndex && i < totalVideos; i++) {
+        if (!isVideoCompleted(job, i)) {
+          todayPendingVideos.push({
             jobId: job.id,
-            title: videoTitle,
+            title: getVideoTitle(job, i),
             index: i,
           });
-          nextDayCount++;
         }
+      }
+      
+      if (todayPendingVideos.length > 0) {
+        // There are still pending videos for today
+        nextBatchVideos = todayPendingVideos;
+        nextBatchCount = todayPendingVideos.length;
+        // If it's past noon, show "now"; if before noon, show noon
+        nextBatchTime = now.getTime() >= today.getTime() ? now : today;
+        isToday = true;
+        return;
+      }
+      
+      // Today's batch is complete, check tomorrow's batch
+      const tomorrowDiff = todayDiff + 1;
+      const tomorrowStartIndex = tomorrowDiff * job.videosPerDay;
+      const tomorrowEndIndex = Math.min(tomorrowStartIndex + job.videosPerDay, totalVideos);
+      
+      if (tomorrowStartIndex >= totalVideos) return; // No more videos
+      
+      for (let i = tomorrowStartIndex; i < tomorrowEndIndex && i < totalVideos; i++) {
+        if (!isVideoCompleted(job, i)) {
+          nextBatchVideos.push({
+            jobId: job.id,
+            title: getVideoTitle(job, i),
+            index: i,
+          });
+        }
+      }
+      
+      if (nextBatchVideos.length > 0) {
+        nextBatchCount = nextBatchVideos.length;
+        nextBatchTime = tomorrow;
+        isToday = false;
       }
     });
 
@@ -207,9 +273,10 @@ export default function UploadSummary({
       schedulingSettings,
       jobsImmediate,
       jobsWithScheduling,
-      nextDayVideos,
-      nextDayCount,
-      nextDayTime: jobsWithScheduling.length > 0 && nextDayCount > 0 ? tomorrow : null,
+      nextDayVideos: nextBatchVideos,
+      nextDayCount: nextBatchCount,
+      nextDayTime: nextBatchTime,
+      isToday,
     };
   }, [queue]);
 
@@ -246,31 +313,31 @@ export default function UploadSummary({
             <span>Next Upload Time</span>
           </h3>
           {summary.nextDayTime && summary.nextDayCount > 0 ? (
-            <div className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+            <div className={`p-4 rounded-lg border ${summary.isToday ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-700' : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700'}`}>
               <div className="flex items-center justify-between mb-3">
-                <div className="text-3xl font-bold text-blue-600 dark:text-blue-400">
-                  {nextDayCountdown || "Calculating..."}
+                <div className={`text-3xl font-bold ${summary.isToday ? 'text-green-600 dark:text-green-400' : 'text-blue-600 dark:text-blue-400'}`}>
+                  {summary.isToday ? (nextDayCountdown === "Uploading now..." ? "⚡ Now" : nextDayCountdown || "Ready") : (nextDayCountdown || "Calculating...")}
                 </div>
-                <div className="text-2xl font-bold text-purple-600 dark:text-purple-400">
+                <div className={`text-2xl font-bold ${summary.isToday ? 'text-green-600 dark:text-green-400' : 'text-purple-600 dark:text-purple-400'}`}>
                   {summary.nextDayCount} video{summary.nextDayCount !== 1 ? "s" : ""}
                 </div>
               </div>
               <div className="text-sm text-gray-600 dark:text-gray-400 mb-3">
-                Scheduled for {summary.nextDayTime.toLocaleDateString("en-US", {
+                {summary.isToday ? "📅 Uploading Today" : `Scheduled for ${summary.nextDayTime.toLocaleDateString("en-US", {
                   weekday: "long",
                   year: "numeric",
                   month: "long",
                   day: "numeric",
                   hour: "2-digit",
                   minute: "2-digit",
-                })}
+                })}`}
               </div>
               
-              {/* List of videos scheduled for next day */}
+              {/* List of videos scheduled for next batch */}
               {summary.nextDayVideos.length > 0 && (
                 <div className="mt-4 pt-3 border-t border-gray-200 dark:border-gray-700">
                   <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2 uppercase tracking-wide">
-                    Videos Uploading Next Day:
+                    {summary.isToday ? "Videos Uploading Today:" : "Videos Uploading Tomorrow:"}
                   </div>
                   <div className="max-h-32 overflow-y-auto space-y-1">
                     {summary.nextDayVideos.slice(0, 10).map((video, idx) => (
