@@ -50,7 +50,23 @@ export default function UploadSummary({
 }: UploadSummaryProps) {
   const [nextDayCountdown, setNextDayCountdown] = useState<string>("");
   
-  const summary = useMemo(() => {
+  const summary = useMemo((): {
+    immediateVideoCount: number;
+    scheduledVideoCount: number;
+    schedulingSettings: Array<{
+      jobId: string;
+      videosPerDay: number;
+      startDate: string | null;
+      totalVideos: number;
+      completedVideos: number;
+    }>;
+    jobsImmediate: QueueItem[];
+    jobsWithScheduling: QueueItem[];
+    nextDayVideos: Array<{ jobId: string; title: string; index: number }>;
+    nextDayCount: number;
+    nextDayTime: Date | null;
+    isToday: boolean;
+  } | null => {
     const activeJobs = queue.filter(
       (job) =>
         job.status !== "completed" &&
@@ -326,14 +342,14 @@ export default function UploadSummary({
                 </div>
               </div>
               <div className="text-sm text-gray-600 dark:text-gray-400 mb-3">
-                {summary.isToday ? "📅 Uploading Today" : `Scheduled for ${summary.nextDayTime.toLocaleDateString("en-US", {
+                {summary.isToday ? "📅 Uploading Today" : summary.nextDayTime ? `Scheduled for ${summary.nextDayTime.toLocaleDateString("en-US", {
                   weekday: "long",
                   year: "numeric",
                   month: "long",
                   day: "numeric",
                   hour: "2-digit",
                   minute: "2-digit",
-                })}`}
+                })}` : "Calculating..."}
               </div>
               
               {/* List of videos scheduled for next batch */}
