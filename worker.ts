@@ -6,7 +6,7 @@
  */
 
 import { getBulkQueue, getNextPendingBulkItem, markBulkAsProcessing, markBulkAsCompleted, markBulkAsFailed, updateBulkProgress } from "./lib/bulk-queue";
-import { getSession } from "./lib/session";
+import { getSession, loadSessions } from "./lib/session";
 import { getOAuthClient } from "./lib/auth";
 import { google } from "googleapis";
 import { fetchFileAsStream, isValidUrl } from "./lib/url-stream";
@@ -113,27 +113,44 @@ async function uploadVideo(
     // Get title and description
     const title = item.title || `Video ${index + 1}`;
     const description = item.description || `Uploaded video ${index + 1}`;
-    const privacyStatus = item.privacyStatus || "private";
+    const privacyStatus = item.privacyStatus || "public";
 
     // Prepare request body
     const requestBody: {
       snippet: { title: string; description: string };
-      status: { privacyStatus: string; publishAt?: string };
+      status: { 
+        privacyStatus: string; 
+        publishAt?: string;
+        selfDeclaredMadeForKids?: boolean;
+      };
     } = {
       snippet: { title, description },
-      status: { privacyStatus },
+      status: { 
+        privacyStatus,
+        selfDeclaredMadeForKids: item.madeForKids ?? false, // Default to false (not made for kids)
+      },
     };
 
     if (item.publishDate) {
       requestBody.status.publishAt = new Date(item.publishDate).toISOString();
     }
 
-    sendProgress(index, "Fetching video...");
+    // Determine video source for status message
+    let sourceInfo = "";
+    if (item.driveFileId) {
+      sourceInfo = "from Google Drive";
+    } else if (item.url) {
+      sourceInfo = "from URL";
+    } else if (item.file) {
+      sourceInfo = `file: ${item.file.name}`;
+    }
+    
+    sendProgress(index, `Fetching video ${sourceInfo}...`);
 
     // Get video stream
     const videoStream = await getVideoStream(task, oAuthClient);
 
-    sendProgress(index, "Uploading to YouTube...");
+    sendProgress(index, `Uploading "${title}" to YouTube...`);
 
     const uploadStartTime = Date.now();
     const result = await youtube.videos.insert({
@@ -204,12 +221,24 @@ async function uploadVideo(
 
     return { success: true, videoId };
   } catch (error: any) {
-    const errorMessage =
+    let errorMessage =
       error?.response?.data?.error?.message ||
       error?.message ||
       "Unknown error";
 
-    console.error(`[WORKER] Upload failed for video ${index}:`, errorMessage);
+    // Improve error messages for common cases
+    if (errorMessage.includes("File not found") || errorMessage.includes("404")) {
+      errorMessage = `Video file not found or inaccessible`;
+    } else if (errorMessage.includes("Failed to download Drive file")) {
+      errorMessage = `Drive file not found or access denied`;
+    } else if (errorMessage.includes("No valid video source found")) {
+      errorMessage = `No video source available (missing drive_file_id, video_url, or file)`;
+    } else if (errorMessage.includes("timeout") || errorMessage.includes("ETIMEDOUT")) {
+      errorMessage = `Upload timeout - video may be too large or connection too slow`;
+    }
+
+    console.error(`[WORKER] Upload failed for video ${index + 1} ("${item.title || 'Untitled'}"):`, errorMessage);
+    console.log(`[WORKER] Continuing with remaining videos...`);
     return { success: false, error: errorMessage };
   }
 }
@@ -227,19 +256,27 @@ async function processBatch(
     batch.map((task) => uploadVideo(youtube, task, sendProgress, oAuthClient))
   );
 
+  const batchResults = {
+    success: 0,
+    failed: 0,
+  };
+
   results.forEach((result, i) => {
     const task = batch[i];
     if (result.status === "fulfilled") {
       if (result.value.success) {
+        batchResults.success++;
         sendProgress(
           task.index,
           `Completed: ${result.value.videoId}`,
           result.value.videoId
         );
       } else {
+        batchResults.failed++;
         sendProgress(task.index, `Failed: ${result.value.error}`, undefined, result.value.error);
       }
     } else {
+      batchResults.failed++;
       sendProgress(
         task.index,
         `Failed: ${result.reason?.message || "Unknown error"}`,
@@ -248,6 +285,8 @@ async function processBatch(
       );
     }
   });
+
+  console.log(`[WORKER] Batch completed: ${batchResults.success} succeeded, ${batchResults.failed} failed`);
 }
 
 /**
@@ -271,7 +310,16 @@ async function processBulkJob(jobId: string): Promise<void> {
   console.log(`[WORKER] Processing job ${jobId} with ${job.items.length} items`);
 
   // Get session and authenticate
-  const session = getSession(job.sessionId);
+  // Reload sessions from disk in case they were updated (e.g., after logout but session kept for active jobs)
+  loadSessions();
+  let session = getSession(job.sessionId);
+  
+  // If session not found, try reloading and check again
+  if (!session) {
+    loadSessions();
+    session = getSession(job.sessionId);
+  }
+  
   if (!session || !session.authenticated || !session.tokens) {
     markBulkAsFailed(jobId, "Session not authenticated");
     console.error(`[WORKER] Job ${jobId}: Session not authenticated`);
@@ -288,8 +336,9 @@ async function processBulkJob(jobId: string): Promise<void> {
 
   // Calculate scheduled publish dates if videosPerDay is set
   let scheduledDates: Date[] = [];
-  if (job.videosPerDay && job.videosPerDay > 0 && job.startDate) {
-    const startDate = new Date(job.startDate);
+  if (job.videosPerDay && job.videosPerDay > 0) {
+    // Use startDate if provided, otherwise use today
+    const startDate = job.startDate ? new Date(job.startDate) : new Date();
     startDate.setHours(12, 0, 0, 0); // Set to noon for consistency
     
     for (let i = 0; i < job.items.length; i++) {
@@ -304,13 +353,17 @@ async function processBulkJob(jobId: string): Promise<void> {
   const tasks: UploadTask[] = job.items.map((item, index) => {
     const taskItem = { ...item };
     
-    // If videosPerDay is set and we have a scheduled date, use it
-    // Otherwise, use the publishDate from the item if it exists
-    if (job.videosPerDay && job.videosPerDay > 0 && scheduledDates[index]) {
+    // Priority: Use publishDate from item if it exists (respects sheet's scheduleTime/publishAt)
+    // Otherwise, if videosPerDay is set, use calculated scheduled date
+    if (item.publishDate) {
+      // Item already has a publishDate from the sheet - use it as-is
+      // Don't override it
+    } else if (job.videosPerDay && job.videosPerDay > 0 && scheduledDates[index]) {
+      // No publishDate in item, but videosPerDay is set - use calculated date
       taskItem.publishDate = scheduledDates[index].toISOString();
-      // Set privacy to private for scheduled videos (YouTube requirement)
+      // Set privacy to private for scheduled videos (YouTube requirement - scheduled videos must be private)
       if (!taskItem.privacyStatus) {
-        taskItem.privacyStatus = "private";
+        taskItem.privacyStatus = "private"; // Scheduled videos must be private per YouTube API
       }
     }
     
@@ -333,17 +386,73 @@ async function processBulkJob(jobId: string): Promise<void> {
     error?: string
   ) => {
     const currentProgress = [...(job.progress || [])];
-    currentProgress[index] = { index, status, videoId, error };
+    const item = job.items[index];
+    const title = item?.title || `Video ${index + 1}`;
+    // Include title in status for better visibility
+    const statusWithTitle = status.includes(title) ? status : `${title}: ${status}`;
+    currentProgress[index] = { index, status: statusWithTitle, videoId, error, title };
     updateBulkProgress(jobId, currentProgress);
   };
 
   try {
+    // Validate that all items have a video source before processing
+    const itemsWithoutSource = job.items.filter(
+      (item) => !item.driveFileId && !item.url && !item.file
+    );
+    
+    if (itemsWithoutSource.length > 0) {
+      const errorMsg = `${itemsWithoutSource.length} item(s) missing video source (need video_url, drive_file_id, or video file)`;
+      markBulkAsFailed(jobId, errorMsg);
+      console.error(`[WORKER] Job ${jobId} failed: ${errorMsg}`);
+      
+      // Mark all items without sources as failed
+      itemsWithoutSource.forEach((item, idx) => {
+        const itemIndex = job.items.indexOf(item);
+        if (itemIndex !== -1) {
+          sendProgress(itemIndex, `Failed: Missing video source`, undefined, "No video source found");
+        }
+      });
+      return;
+    }
+
     for (let i = 0; i < batches.length; i++) {
       const batch = batches[i];
       console.log(
         `[WORKER] Processing batch ${i + 1}/${batches.length} (${batch.length} items)`
       );
       await processBatch(youtube, batch, sendProgress, oAuthClient);
+    }
+
+    // Check final status and provide summary
+    const finalJob = getBulkQueueItem(jobId);
+    if (finalJob) {
+      const totalItems = finalJob.items.length;
+      const progressItems = finalJob.progress || [];
+      const successfulItems = progressItems.filter(
+        (p) => p.videoId && !p.error
+      ).length;
+      const failedItems = progressItems.filter((p) => p.error).length;
+      
+      console.log(`[WORKER] Job ${jobId} summary: ${successfulItems}/${totalItems} succeeded, ${failedItems} failed`);
+      
+      if (successfulItems === 0 && failedItems > 0) {
+        // All items failed
+        markBulkAsFailed(jobId, `All ${failedItems} item(s) failed to upload`);
+        console.error(`[WORKER] Job ${jobId} failed: All items failed`);
+        return;
+      }
+      
+      if (successfulItems === 0 && progressItems.length === 0) {
+        // No progress was made at all
+        markBulkAsFailed(jobId, "No items were processed");
+        console.error(`[WORKER] Job ${jobId} failed: No items processed`);
+        return;
+      }
+
+      // Job completed (may have some failures, but at least one succeeded)
+      if (failedItems > 0) {
+        console.warn(`[WORKER] Job ${jobId} completed with ${failedItems} failure(s) - check individual items for details`);
+      }
     }
 
     markBulkAsCompleted(jobId);

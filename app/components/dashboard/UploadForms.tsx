@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, RefObject, useState, useRef } from "react";
+import { FormEvent, RefObject, useState, useRef, useEffect } from "react";
 import DriveBrowser from "./DriveBrowser";
 import SheetsBrowser from "./SheetsBrowser";
 import SheetPreview from "./SheetPreview";
@@ -71,6 +71,11 @@ interface UploadFormsProps {
 
   // Toast
   setShowToast: (toast: { message: string; type: "success" | "error" | "info" }) => void;
+  
+  // Queue management callbacks
+  setSelectedJobId?: (jobId: string | null) => void;
+  fetchJobStatus?: (jobId: string) => Promise<void>;
+  fetchQueue?: () => Promise<void>;
 }
 
 export default function UploadForms({
@@ -109,6 +114,9 @@ export default function UploadForms({
   urlTimeout,
   setUrlTimeout,
   setShowToast,
+  setSelectedJobId,
+  fetchJobStatus,
+  fetchQueue,
 }: UploadFormsProps) {
   const [showDriveBrowser, setShowDriveBrowser] = useState(false);
   const [showSheetsBrowser, setShowSheetsBrowser] = useState(false);
@@ -118,20 +126,115 @@ export default function UploadForms({
   const [availableSheets, setAvailableSheets] = useState<Array<{ title: string; sheetId: number }>>([]);
   const [loadingSheets, setLoadingSheets] = useState(false);
   const [spreadsheetTitle, setSpreadsheetTitle] = useState<string>("");
+  const [selectedDriveFolderId, setSelectedDriveFolderId] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("sheetsDriveFolderId") || "";
+    }
+    return "";
+  });
+  const [selectedDriveFolderName, setSelectedDriveFolderName] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("sheetsDriveFolderName") || "";
+    }
+    return "";
+  });
+  const [driveUploadFolderId, setDriveUploadFolderId] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("driveUploadFolderId") || "";
+    }
+    return "";
+  });
+  const [driveUploadFolderName, setDriveUploadFolderName] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("driveUploadFolderName") || "";
+    }
+    return "";
+  });
+  const [driveBrowserContext, setDriveBrowserContext] = useState<"drive" | "sheets">("drive");
+  const [videosPerDay, setVideosPerDay] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("videosPerDay") || "";
+    }
+    return "";
+  });
 
   const handleDriveFolderSelect = (folderId: string, folderName: string) => {
     const input = document.getElementById('driveFolderId') as HTMLInputElement;
     if (input) {
       input.value = folderId;
     }
+    setDriveUploadFolderId(folderId);
+    setDriveUploadFolderName(folderName);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("driveUploadFolderId", folderId);
+      localStorage.setItem("driveUploadFolderName", folderName);
+    }
     setShowToast({ message: `Selected folder: ${folderName}`, type: "success" });
   };
+
+  const handleSheetsDriveFolderSelect = (folderId: string, folderName: string) => {
+    setSelectedDriveFolderId(folderId);
+    setSelectedDriveFolderName(folderName);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("sheetsDriveFolderId", folderId);
+      localStorage.setItem("sheetsDriveFolderName", folderName);
+    }
+    setShowToast({ message: `Selected Drive folder for matching: ${folderName}`, type: "success" });
+  };
+
+  // Load saved values from localStorage on mount
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const savedSpreadsheetUrl = localStorage.getItem("sheetsSpreadsheetUrl");
+      const savedSheetsDriveFolderId = localStorage.getItem("sheetsDriveFolderId");
+      const savedSheetsDriveFolderName = localStorage.getItem("sheetsDriveFolderName");
+      const savedDriveUploadFolderId = localStorage.getItem("driveUploadFolderId");
+      const savedDriveUploadFolderName = localStorage.getItem("driveUploadFolderName");
+      
+      if (savedSpreadsheetUrl) {
+        const input = document.getElementById('spreadsheetUrl') as HTMLInputElement;
+        if (input && !input.value) {
+          input.value = savedSpreadsheetUrl;
+          // Trigger fetch to load sheets
+          fetchSheets(savedSpreadsheetUrl);
+        }
+      }
+      
+      if (savedSheetsDriveFolderId && savedSheetsDriveFolderName) {
+        setSelectedDriveFolderId(savedSheetsDriveFolderId);
+        setSelectedDriveFolderName(savedSheetsDriveFolderName);
+      }
+      
+      if (savedDriveUploadFolderId && savedDriveUploadFolderName) {
+        setDriveUploadFolderId(savedDriveUploadFolderId);
+        setDriveUploadFolderName(savedDriveUploadFolderName);
+        const input = document.getElementById('driveFolderId') as HTMLInputElement;
+        if (input && !input.value) {
+          input.value = savedDriveUploadFolderId;
+        }
+      }
+      
+      const savedVideosPerDay = localStorage.getItem("videosPerDay");
+      if (savedVideosPerDay) {
+        setVideosPerDay(savedVideosPerDay);
+        const videosPerDayInput = document.getElementById('videosPerDay') as HTMLInputElement;
+        if (videosPerDayInput && !videosPerDayInput.value) {
+          videosPerDayInput.value = savedVideosPerDay;
+        }
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleSheetSelect = async (spreadsheetId: string, spreadsheetName: string) => {
     const input = document.getElementById('spreadsheetUrl') as HTMLInputElement;
     if (input) {
       // Set the spreadsheet ID in the input
       input.value = spreadsheetId;
+      // Save to localStorage
+      if (typeof window !== "undefined") {
+        localStorage.setItem("sheetsSpreadsheetUrl", spreadsheetId);
+      }
       // Trigger the fetch to load sheets
       await fetchSheets(spreadsheetId);
     }
@@ -235,7 +338,14 @@ export default function UploadForms({
     <>
       {showDriveBrowser && (
         <DriveBrowser
-          onSelectFolder={handleDriveFolderSelect}
+          onSelectFolder={(folderId, folderName) => {
+            if (driveBrowserContext === "sheets") {
+              handleSheetsDriveFolderSelect(folderId, folderName);
+            } else {
+              handleDriveFolderSelect(folderId, folderName);
+            }
+            setShowDriveBrowser(false);
+          }}
           onClose={() => setShowDriveBrowser(false)}
         />
       )}
@@ -449,15 +559,48 @@ export default function UploadForms({
                         id="driveFolderId"
                         name="driveFolderId"
                         placeholder="Enter Drive folder ID or click Browse"
+                        value={driveUploadFolderId}
+                        onChange={(e) => {
+                          setDriveUploadFolderId(e.target.value);
+                          if (typeof window !== "undefined") {
+                            if (e.target.value) {
+                              localStorage.setItem("driveUploadFolderId", e.target.value);
+                            } else {
+                              localStorage.removeItem("driveUploadFolderId");
+                              localStorage.removeItem("driveUploadFolderName");
+                            }
+                          }
+                        }}
                         className="input-field flex-1 font-mono text-sm"
                       />
                       <button
                         type="button"
-                        onClick={() => setShowDriveBrowser(true)}
+                        onClick={() => {
+                          setDriveBrowserContext("drive");
+                          setShowDriveBrowser(true);
+                        }}
                         className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors"
                       >
                         📂 Browse
                       </button>
+                      {driveUploadFolderId && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDriveUploadFolderId("");
+                            setDriveUploadFolderName("");
+                            const input = document.getElementById('driveFolderId') as HTMLInputElement;
+                            if (input) input.value = "";
+                            if (typeof window !== "undefined") {
+                              localStorage.removeItem("driveUploadFolderId");
+                              localStorage.removeItem("driveUploadFolderName");
+                            }
+                          }}
+                          className="px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white font-semibold rounded-lg transition-colors"
+                        >
+                          ✕ Clear
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={async () => {
@@ -475,14 +618,20 @@ export default function UploadForms({
                                 recursive: (document.getElementById('driveRecursive') as HTMLInputElement)?.checked || false,
                                 postUploadAction: (document.getElementById('drivePostAction') as HTMLSelectElement)?.value || 'none',
                                 completedFolderId: (document.getElementById('driveCompletedFolder') as HTMLInputElement)?.value?.trim() || undefined,
-                                privacyStatus: (document.getElementById('drivePrivacy') as HTMLSelectElement)?.value || 'private',
+                                privacyStatus: (document.getElementById('drivePrivacy') as HTMLSelectElement)?.value || 'public',
                                 useWorker: true,
                               }),
                             });
                             const data = await response.json();
                             if (response.ok) {
                               setShowToast({ message: `Upload queued: ${data.totalItems} videos from "${data.folderName}"`, type: "success" });
+                              setDriveUploadFolderId("");
+                              setDriveUploadFolderName("");
                               (document.getElementById('driveFolderId') as HTMLInputElement).value = '';
+                              if (typeof window !== "undefined") {
+                                localStorage.removeItem("driveUploadFolderId");
+                                localStorage.removeItem("driveUploadFolderName");
+                              }
                             } else {
                               setShowToast({ message: data.error || "Failed to queue Drive upload", type: "error" });
                             }
@@ -533,7 +682,7 @@ export default function UploadForms({
                           <select
                             id="drivePrivacy"
                             className="input-field text-sm py-1"
-                            defaultValue="private"
+                            defaultValue="public"
                           >
                             <option value="private">Private</option>
                             <option value="unlisted">Unlisted</option>
@@ -676,13 +825,13 @@ export default function UploadForms({
           </div>
         </div>
 
-        <div className="space-y-4">
+          <div className="space-y-4">
           <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border border-blue-200 dark:border-blue-700 rounded-lg">
             <p className="text-sm text-blue-900 dark:text-blue-100">
               <strong>📊 Google Sheets Integration:</strong> Upload videos directly from a Google Sheet containing all metadata. 
               The sheet should have columns like youtube_title, youtube_description, video_url, drive_file_id, etc.
-            </p>
-          </div>
+              </p>
+            </div>
 
           <form
             onSubmit={async (e) => {
@@ -692,8 +841,8 @@ export default function UploadForms({
               const spreadsheetUrl = (formData.get("spreadsheetUrl") as string)?.trim();
               const sheetName = (formData.get("sheetName") as string)?.trim();
               const range = (formData.get("range") as string)?.trim() || undefined;
-              const videosPerDayStr = (formData.get("videosPerDay") as string)?.trim();
-              const startDate = (formData.get("startDate") as string)?.trim();
+              // Use state value if available, otherwise fall back to form data
+              const videosPerDayStr = videosPerDay || (formData.get("videosPerDay") as string)?.trim();
 
               if (!spreadsheetUrl) {
                 setShowToast({ message: "Please enter a Google Sheets URL or ID", type: "error" });
@@ -706,15 +855,9 @@ export default function UploadForms({
               }
 
               // Validate videosPerDay if provided
-              const videosPerDay = videosPerDayStr ? parseInt(videosPerDayStr, 10) : undefined;
-              if (videosPerDay !== undefined && (isNaN(videosPerDay) || videosPerDay < 0)) {
+              const videosPerDayNum = videosPerDayStr ? parseInt(videosPerDayStr, 10) : undefined;
+              if (videosPerDayNum !== undefined && (isNaN(videosPerDayNum) || videosPerDayNum < 0)) {
                 setShowToast({ message: "Videos per day must be a positive number", type: "error" });
-                return;
-              }
-
-              // If videosPerDay is set, startDate is required
-              if (videosPerDay && videosPerDay > 0 && !startDate) {
-                setShowToast({ message: "Start date is required when setting videos per day", type: "error" });
                 return;
               }
 
@@ -727,8 +870,9 @@ export default function UploadForms({
                     spreadsheetUrl,
                     sheetName,
                     range,
-                    videosPerDay: videosPerDay && videosPerDay > 0 ? videosPerDay : undefined,
-                    startDate: videosPerDay && videosPerDay > 0 ? startDate : undefined,
+                    driveFolderId: selectedDriveFolderId || undefined,
+                    videosPerDay: videosPerDayNum && videosPerDayNum > 0 ? videosPerDayNum : undefined,
+                    // startDate is no longer required - will use today if videosPerDay is set
                   }),
                 });
 
@@ -738,6 +882,39 @@ export default function UploadForms({
                     message: `✅ Upload queued: ${data.totalItems} videos from "${data.spreadsheetTitle}"`,
                     type: "success",
                   });
+                  
+                  // Automatically select the job and show progress
+                  if (data.jobId && setSelectedJobId) {
+                    setSelectedJobId(data.jobId);
+                    // Fetch job status to show progress
+                    if (fetchJobStatus) {
+                      fetchJobStatus(data.jobId);
+                    }
+                    // Refresh queue
+                    if (fetchQueue) {
+                      fetchQueue();
+                    }
+                    // Auto-refresh job status every 2 seconds while processing
+                    const statusInterval = setInterval(async () => {
+                      if (fetchJobStatus) {
+                        await fetchJobStatus(data.jobId);
+                      }
+                      // Check if job is still processing
+                      try {
+                        const statusRes = await fetch(`/api/bulk-status?jobId=${data.jobId}`);
+                        const statusData = await statusRes.json();
+                        if (statusData.status === "completed" || statusData.status === "failed" || statusData.status === "cancelled") {
+                          clearInterval(statusInterval);
+                        }
+                      } catch (e) {
+                        // Ignore errors
+                      }
+                    }, 2000);
+                    
+                    // Clear interval after 10 minutes (safety)
+                    setTimeout(() => clearInterval(statusInterval), 10 * 60 * 1000);
+                  }
+                  
                   form.reset();
                   setAvailableSheets([]);
                   setSpreadsheetTitle("");
@@ -771,6 +948,15 @@ export default function UploadForms({
                   onChange={(e) => {
                     // Debounce the fetch
                     const url = e.target.value.trim();
+                    
+                    // Save to localStorage
+                    if (typeof window !== "undefined") {
+                      if (url) {
+                        localStorage.setItem("sheetsSpreadsheetUrl", url);
+                      } else {
+                        localStorage.removeItem("sheetsSpreadsheetUrl");
+                      }
+                    }
                     
                     // Clear previous timer
                     if (debounceTimerRef.current) {
@@ -808,7 +994,7 @@ export default function UploadForms({
                 >
                   {loadingSheets ? "⏳" : "🔍"}
                 </button>
-              </div>
+                  </div>
               {spreadsheetTitle && (
                 <p className="text-xs text-green-600 dark:text-green-400 mt-1">
                   ✓ Found: <strong>{spreadsheetTitle}</strong>
@@ -816,8 +1002,61 @@ export default function UploadForms({
               )}
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                 Click <strong>Browse</strong> to select from Drive, or paste the URL/ID and click 🔍
+                    </p>
+                  </div>
+
+            {/* Drive Folder Selection for Video Matching */}
+            <div>
+              <label htmlFor="sheetsDriveFolderId" className="label">
+                📁 Drive Folder (Optional - for matching video_name)
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  id="sheetsDriveFolderId"
+                  name="sheetsDriveFolderId"
+                  placeholder="Select Drive folder containing videos"
+                  value={selectedDriveFolderId}
+                  readOnly
+                  className="input-field flex-1 font-mono text-sm bg-gray-50 dark:bg-gray-800"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDriveBrowserContext("sheets");
+                    setShowDriveBrowser(true);
+                  }}
+                  className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition-colors flex items-center gap-2"
+                >
+                  <span>📂</span>
+                  <span>Browse</span>
+                </button>
+                {selectedDriveFolderId && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedDriveFolderId("");
+                      setSelectedDriveFolderName("");
+                      if (typeof window !== "undefined") {
+                        localStorage.removeItem("sheetsDriveFolderId");
+                        localStorage.removeItem("sheetsDriveFolderName");
+                      }
+                    }}
+                    className="px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white font-semibold rounded-lg transition-colors"
+                  >
+                    ✕ Clear
+                  </button>
+                )}
+              </div>
+              {selectedDriveFolderName && (
+                <p className="text-xs text-green-600 dark:text-green-400 mt-1">
+                  ✓ Selected: <strong>{selectedDriveFolderName}</strong>
+                </p>
+              )}
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Select a Drive folder to automatically match <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">video_name</code> column to files in this folder
               </p>
-            </div>
+              </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -853,7 +1092,7 @@ export default function UploadForms({
                     ? `${availableSheets.length} sheet(s) available`
                     : "Load spreadsheet to see available sheets"}
                 </p>
-              </div>
+                    </div>
 
               <div>
                 <label htmlFor="range" className="label">
@@ -869,8 +1108,8 @@ export default function UploadForms({
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                   Leave empty to read entire sheet
                 </p>
-              </div>
-            </div>
+                      </div>
+                    </div>
 
             {/* Upload Scheduling */}
             <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-lg">
@@ -878,42 +1117,39 @@ export default function UploadForms({
                 <span>📅</span>
                 <span>Upload Scheduling (Optional)</span>
               </h3>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label htmlFor="videosPerDay" className="label text-sm">
-                    Videos Per Day
-                  </label>
-                  <input
-                    type="number"
-                    id="videosPerDay"
-                    name="videosPerDay"
-                    min="0"
-                    placeholder="0 = upload all immediately"
-                    className="input-field text-sm"
-                  />
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                    Leave 0 or empty to upload all immediately
-                  </p>
-                </div>
-                <div>
-                  <label htmlFor="startDate" className="label text-sm">
-                    Start Date
-                  </label>
-                  <input
-                    type="date"
-                    id="startDate"
-                    name="startDate"
-                    className="input-field text-sm"
-                  />
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                    Required if videos per day is set
-                  </p>
-                </div>
+              <div>
+                <label htmlFor="videosPerDay" className="label text-sm">
+                  Videos Per Day
+                </label>
+                <input
+                  type="number"
+                  id="videosPerDay"
+                  name="videosPerDay"
+                  min="0"
+                  placeholder="0 = upload all immediately"
+                  value={videosPerDay}
+                  onChange={(e) => {
+                    setVideosPerDay(e.target.value);
+                    if (typeof window !== "undefined") {
+                      if (e.target.value) {
+                        localStorage.setItem("videosPerDay", e.target.value);
+                      } else {
+                        localStorage.removeItem("videosPerDay");
+                      }
+                    }
+                  }}
+                  className="input-field text-sm"
+                />
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Leave 0 or empty to upload all immediately. If set, videos will upload X per day starting today.
+                </p>
               </div>
               <div className="mt-3 p-3 bg-blue-100 dark:bg-blue-900/30 rounded text-xs text-blue-800 dark:text-blue-200">
-                <strong>💡 How it works:</strong> If you set "5 videos per day" starting Jan 1, 
-                videos 1-5 will be scheduled for Jan 1, videos 6-10 for Jan 2, and so on. 
+                <strong>💡 How it works:</strong> If you set "5 videos per day", 
+                the first 5 videos will upload today, videos 6-10 tomorrow, and so on. 
                 Videos are uploaded immediately but scheduled to publish on their assigned dates.
+                <br />
+                <strong>Note:</strong> If a video has a <code className="bg-blue-200 dark:bg-blue-800 px-1 rounded">scheduleTime</code> or <code className="bg-blue-200 dark:bg-blue-800 px-1 rounded">publishAt</code> date in your sheet, that date will be used instead.
               </div>
             </div>
 
@@ -931,16 +1167,16 @@ export default function UploadForms({
               </h3>
               <ul className="text-xs text-gray-700 dark:text-gray-300 space-y-1 list-disc list-inside">
                 <li><code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">thumbnail_url</code>, <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">drive_thumbnail_id</code></li>
-                <li><code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">privacyStatus</code> (default: private)</li>
+                <li><code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">privacyStatus</code> (default: public)</li>
                 <li><code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">scheduleTime</code></li>
                 <li><code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">url_auth_headers</code>, <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">url_timeout</code></li>
                 <li><code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">post_upload_action</code>, <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">completed_folder_id</code></li>
               </ul>
-            </div>
+                        </div>
 
             <div className="flex gap-3">
-              <button
-                type="button"
+                        <button
+                          type="button"
                 onClick={handlePreviewSheet}
                 disabled={loadingPreview || !spreadsheetTitle}
                 className={`px-6 py-3 bg-gray-600 hover:bg-gray-700 text-white font-semibold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2`}
@@ -964,8 +1200,8 @@ export default function UploadForms({
                 Upload from Google Sheets
               </button>
             </div>
-          </form>
-        </div>
+            </form>
+          </div>
       </div>
     </>
   );

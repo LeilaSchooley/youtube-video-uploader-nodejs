@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { cookies } from "next/headers";
-import { pauseJob, resumeJob, cancelJob, deleteJob, deleteAllCompletedJobs, getQueueItem, getQueue } from "@/lib/queue";
+import { pauseJob, resumeJob, cancelJob, deleteJob, deleteAllCompletedJobs, deleteAllJobs, getQueueItem, getQueue } from "@/lib/queue";
+import { deleteAllBulkJobs, getBulkQueue } from "@/lib/bulk-queue";
 import { deleteUploadDir } from "@/lib/storage";
 
 export const dynamic = "force-dynamic";
@@ -29,7 +30,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { jobId, action } = body;
 
-    // Handle "delete-all" action (doesn't require jobId)
+    // Handle "delete-all" action (doesn't require jobId) - deletes only completed/failed/cancelled
     if (action === "delete-all") {
       const userId = session?.userId;
       
@@ -60,6 +61,61 @@ export async function POST(request: NextRequest) {
         success: true, 
         message: `Deleted ${result.deleted} completed/failed/cancelled job(s)`,
         deleted: result.deleted
+      });
+    }
+
+    // Handle "delete-all-jobs" action - deletes ALL jobs regardless of status
+    if (action === "delete-all-jobs") {
+      const userId = session?.userId;
+      
+      // Get ALL jobs to delete before deletion (for cleanup)
+      const allJobs = getQueue();
+      const allBulkJobs = getBulkQueue();
+      
+      const regularJobsToDelete = allJobs.filter(job => {
+        const belongsToUser = (userId && job.userId === userId) || 
+                             (!job.userId && sessionId && job.sessionId === sessionId);
+        return belongsToUser;
+      });
+      
+      const bulkJobsToDelete = allBulkJobs.filter(job => {
+        const belongsToUser = (userId && job.userId === userId) || 
+                             (!job.userId && sessionId && job.sessionId === sessionId);
+        return belongsToUser;
+      });
+      
+      // Clean up files for regular jobs that will be deleted
+      for (const job of regularJobsToDelete) {
+        try {
+          deleteUploadDir(job.userId, job.id, job.sessionId);
+        } catch (cleanupError) {
+          console.error(`Error cleaning up files for job ${job.id}:`, cleanupError);
+          // Continue with deletion even if cleanup fails
+        }
+      }
+      
+      // Clean up files for bulk jobs that will be deleted
+      for (const job of bulkJobsToDelete) {
+        try {
+          deleteUploadDir(job.userId, job.id, job.sessionId);
+        } catch (cleanupError) {
+          console.error(`Error cleaning up files for bulk job ${job.id}:`, cleanupError);
+          // Continue with deletion even if cleanup fails
+        }
+      }
+      
+      // Delete all jobs from both queues
+      const regularResult = deleteAllJobs(userId, sessionId);
+      const bulkResult = deleteAllBulkJobs(userId, sessionId);
+      
+      const totalDeleted = regularResult.deleted + bulkResult.deleted;
+      
+      return NextResponse.json({ 
+        success: true, 
+        message: `Deleted ${totalDeleted} job(s) (${regularResult.deleted} regular, ${bulkResult.deleted} bulk)`,
+        deleted: totalDeleted,
+        regularDeleted: regularResult.deleted,
+        bulkDeleted: bulkResult.deleted
       });
     }
 

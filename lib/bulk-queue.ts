@@ -31,6 +31,8 @@ export interface BulkUploadItem {
     // Post-upload actions
     postUploadAction?: string; // "rename", "delete", "move", or "none"
     completedFolderId?: string; // Drive folder ID for move action
+    // YouTube settings
+    madeForKids?: boolean; // Self-declared "Made for Kids" status (default: false)
   }>;
   status: "pending" | "processing" | "completed" | "failed" | "paused" | "cancelled";
   progress: Array<{
@@ -38,6 +40,7 @@ export interface BulkUploadItem {
     status: string;
     videoId?: string;
     error?: string;
+    title?: string;
   }>;
   createdAt: string;
   updatedAt: string;
@@ -172,5 +175,30 @@ export function updateBulkProgress(
   progress: Array<{ index: number; status: string; videoId?: string; error?: string }>
 ): void {
   updateBulkQueueItem(id, { progress });
+}
+
+export function deleteAllBulkJobs(userId?: string, sessionId?: string): { deleted: number; errors: string[] } {
+  const queue = readBulkQueue();
+  const errors: string[] = [];
+  let deleted = 0;
+  
+  // Filter jobs belonging to user (if userId/sessionId provided)
+  const jobsToDelete = queue.filter(item => {
+    if (userId || sessionId) {
+      const belongsToUser = (userId && item.userId === userId) || 
+                           (!item.userId && sessionId && item.sessionId === sessionId);
+      return belongsToUser;
+    }
+    return true; // Delete all if no filter
+  });
+  
+  // Remove jobs from queue
+  const updatedQueue = queue.filter(item => !jobsToDelete.includes(item));
+  writeBulkQueueImmediate(updatedQueue);
+  deleted = jobsToDelete.length;
+  
+  console.log(`[BULK-QUEUE] Deleted ${deleted} job(s)`);
+  
+  return { deleted, errors };
 }
 

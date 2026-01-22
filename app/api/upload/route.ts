@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData();
     const title = formData.get("title") as string;
     const description = formData.get("description") as string;
-    const privacyStatus = formData.get("privacyStatus") as string;
+    const privacyStatus = (formData.get("privacyStatus") as string) || "public";
     const publishDate = formData.get("publishDate") as string | null;
     const videoFile = formData.get("video") as File | null;
 
@@ -67,10 +67,17 @@ export async function POST(request: NextRequest) {
 
     const requestBody: {
       snippet: { title: string; description: string };
-      status: { privacyStatus: string; publishAt?: string };
+      status: { 
+        privacyStatus: string; 
+        publishAt?: string;
+        selfDeclaredMadeForKids?: boolean;
+      };
     } = {
       snippet: { title, description },
-      status: { privacyStatus },
+      status: { 
+        privacyStatus,
+        selfDeclaredMadeForKids: false, // Default to false (not made for kids)
+      },
     };
 
     if (privacyStatus === "private" && publishDate) {

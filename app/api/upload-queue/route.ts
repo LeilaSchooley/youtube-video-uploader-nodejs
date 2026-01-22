@@ -10,6 +10,10 @@ import fs from "fs";
 import path from "path";
 import { fetchFileAsStream, isValidUrl } from "@/lib/url-stream";
 import { downloadDriveFile, isDriveFileId, getDriveFileMetadata, renameDriveFile, moveDriveFile, deleteDriveFile } from "@/lib/drive";
+import { getQueue } from "@/lib/queue";
+import { getBulkQueue } from "@/lib/bulk-queue";
+import type { QueueItem } from "@/lib/queue";
+import type { BulkUploadItem } from "@/lib/bulk-queue";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 1800; // 30 minutes for large batches
@@ -148,13 +152,20 @@ async function uploadVideo(
 
     const requestBody: {
       snippet: { title: string; description: string };
-      status: { privacyStatus: string; publishAt?: string };
+      status: { 
+        privacyStatus: string; 
+        publishAt?: string;
+        selfDeclaredMadeForKids?: boolean;
+      };
     } = {
       snippet: {
         title: youtube_title,
         description: youtube_description,
       },
-      status: { privacyStatus: uploadPrivacyStatus },
+      status: { 
+        privacyStatus: uploadPrivacyStatus,
+        selfDeclaredMadeForKids: false, // Default to false (not made for kids)
+      },
     };
 
     if (publishDate) {
@@ -922,11 +933,76 @@ export async function POST(request: NextRequest) {
     });
 }
 
-// Keep GET endpoint for queue status (if needed)
+// GET endpoint - Returns combined queue (regular + bulk)
 export async function GET(request: NextRequest) {
-  // Return empty queue since we're not using it anymore
-  return new Response(
-    JSON.stringify({ queue: [] }),
-    { headers: { 'Content-Type': 'application/json' } }
-  );
+  try {
+    const cookieStore = await cookies();
+    const sessionId = cookieStore.get("sessionId")?.value;
+    
+    if (!sessionId) {
+      return new Response(
+        JSON.stringify({ error: "Not authenticated" }),
+        { status: 401, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const session = getSession(sessionId);
+    if (!session || !session.authenticated) {
+      return new Response(
+        JSON.stringify({ error: "Not authenticated" }),
+        { status: 401, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Get both regular queue and bulk queue
+    const regularQueue = getQueue();
+    const bulkQueue = getBulkQueue();
+    
+    // Filter jobs by session/user
+    const userRegularJobs = regularQueue.filter(
+      (job: QueueItem) => job.sessionId === sessionId || job.userId === session.userId
+    );
+    
+    const userBulkJobs = bulkQueue.filter(
+      (job: BulkUploadItem) => job.sessionId === sessionId || job.userId === session.userId
+    );
+    
+    // Combine and normalize both queues
+    const combinedQueue = [
+      ...userRegularJobs.map((job: QueueItem) => ({
+        id: job.id,
+        status: job.status,
+        progress: job.progress,
+        totalVideos: job.totalVideos || job.progress?.length || 0,
+        createdAt: job.createdAt,
+        updatedAt: job.updatedAt,
+        error: undefined, // Regular queue items don't have error field
+        videosPerDay: job.videosPerDay,
+        startDate: job.startDate,
+        notes: job.notes,
+      })),
+      ...userBulkJobs.map((job: BulkUploadItem) => ({
+        id: job.id,
+        status: job.status,
+        progress: job.progress,
+        totalVideos: job.items.length,
+        createdAt: job.createdAt,
+        updatedAt: job.updatedAt,
+        error: job.error,
+        videosPerDay: job.videosPerDay,
+        startDate: job.startDate,
+      })),
+    ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    return new Response(
+      JSON.stringify({ queue: combinedQueue }),
+      { headers: { 'Content-Type': 'application/json' } }
+    );
+  } catch (error: any) {
+    console.error("[UPLOAD-QUEUE] GET Error:", error);
+    return new Response(
+      JSON.stringify({ error: error?.message || "Error fetching queue" }),
+      { status: 500, headers: { 'Content-Type': 'application/json' } }
+    );
+  }
 }

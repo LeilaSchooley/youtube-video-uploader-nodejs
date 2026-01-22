@@ -25,6 +25,7 @@ import Statistics from "@/app/components/dashboard/Statistics";
 import UploadForms from "@/app/components/dashboard/UploadForms";
 import QueueManagement from "@/app/components/dashboard/QueueManagement";
 import UploadSummary from "@/app/components/dashboard/UploadSummary";
+import Tabs from "@/app/components/dashboard/Tabs";
 import type { User } from "@/app/components/dashboard/types";
 
 // User interface moved to types.ts
@@ -98,6 +99,7 @@ export default function Dashboard() {
   const [showBatchUpload, setShowBatchUpload] = useState<boolean>(true); // Expanded by default
   const [showBulkUpload, setShowBulkUpload] = useState<boolean>(false);
   const [bulkUploading, setBulkUploading] = useState<boolean>(false);
+  const [activeTab, setActiveTab] = useState<string>("upload");
   const [bulkUploadProgress, setBulkUploadProgress] = useState<{
     total: number;
     totalBatches: number;
@@ -219,36 +221,40 @@ export default function Dashboard() {
     // Check all scheduled jobs
     for (const job of queue) {
       if (
+        job.videosPerDay &&
         job.videosPerDay > 0 &&
         job.status !== "failed" &&
         job.status !== "completed" &&
         job.status !== "cancelled"
       ) {
-        // Use job creation time as the start time for upload batches
-        const jobStartTime = new Date(job.createdAt);
+        // Use startDate from job if provided, otherwise use today
+        const startDate = job.startDate ? new Date(job.startDate) : new Date();
+        startDate.setHours(12, 0, 0, 0); // Set to noon for consistency
         
         // Count how many videos have been completed
         const completedCount =
           job.progress?.filter(
             (p: ProgressItem) =>
-          p.status.includes("Uploaded") || 
-          p.status.includes("scheduled") ||
-          p.status.includes("Scheduled")
-        ).length || 0;
+              p.status && (
+                p.status.includes("Uploaded") || 
+                p.status.includes("scheduled") ||
+                p.status.includes("Scheduled")
+              )
+          ).length || 0;
         
-        const totalVideos = job.totalVideos || job.progress?.length || 0;
+        const totalVideos = job.items?.length || job.totalVideos || 0;
         
         // If there are still videos to upload
         if (completedCount < totalVideos) {
-          // Calculate which batch we're on (0-indexed)
-          const currentBatch = Math.floor(completedCount / job.videosPerDay);
+          // Calculate which day we're on (0-indexed)
+          // dayIndex = Math.floor(videoIndex / videosPerDay)
+          const currentDayIndex = Math.floor(completedCount / job.videosPerDay);
           
           // Calculate when the next batch should start uploading
-          // Next batch starts 24 hours after the job was created, then every 24 hours after that
-          const nextBatchStartTime = new Date(jobStartTime);
-          nextBatchStartTime.setTime(
-            jobStartTime.getTime() + (currentBatch + 1) * 24 * 60 * 60 * 1000
-          );
+          // Next batch is on startDate + (currentDayIndex + 1) days at noon
+          const nextBatchStartTime = new Date(startDate);
+          nextBatchStartTime.setDate(startDate.getDate() + currentDayIndex + 1);
+          nextBatchStartTime.setHours(12, 0, 0, 0);
           
           // Only consider future times
           if (nextBatchStartTime > now) {
@@ -386,13 +392,18 @@ export default function Dashboard() {
 
   const handleQueueAction = async (
     jobId: string,
-    action: "pause" | "resume" | "cancel" | "delete"
+    action: "pause" | "resume" | "cancel" | "delete" | "delete-all-jobs"
   ) => {
     try {
+      // For delete-all-jobs, don't send jobId
+      const body = action === "delete-all-jobs" 
+        ? JSON.stringify({ action })
+        : JSON.stringify({ jobId, action });
+      
       const res = await fetch("/api/queue-manage", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobId, action }),
+        body,
       });
       const data = await res.json();
       if (res.ok) {
@@ -636,62 +647,92 @@ export default function Dashboard() {
   const fetchJobStatus = async (jobId: string) => {
     try {
       const timestamp = Date.now();
+      // Determine if this is a bulk job (starts with "bulk-") or regular queue job
+      const isBulkJob = jobId.startsWith("bulk-");
+      const endpoint = isBulkJob ? "/api/bulk-status" : "/api/queue-status";
+      
       // Add cache-busting to ensure fresh data
       const res = await fetch(
-        `/api/queue-status?jobId=${jobId}&t=${timestamp}`
+        `${endpoint}?jobId=${jobId}&t=${timestamp}`
       );
       const data = await res.json();
-      if (res.ok && data.job) {
-        const prevStatus = jobStatus?.status;
-        const prevProgressCount = jobStatus?.progress?.length || 0;
-        const prevCompletedCount =
-          jobStatus?.progress?.filter(
-            (p: ProgressItem) =>
-          p.status.includes("Uploaded") || p.status.includes("Scheduled")
-        ).length || 0;
+      
+      if (res.ok) {
+        // Handle both bulk-status and queue-status response formats
+        const job = data.job || data; // queue-status returns {job: {...}}, bulk-status returns {...}
+        const jobData = job || data;
         
-        setJobStatus(data.job);
+        if (jobData) {
+          const prevStatus = jobStatus?.status;
+          const prevProgressCount = jobStatus?.progress?.length || 0;
+          const prevCompletedCount =
+            jobStatus?.progress?.filter(
+              (p: ProgressItem) =>
+            p.status.includes("Uploaded") || p.status.includes("Scheduled")
+          ).length || 0;
+          
+          // Normalize bulk job data to match queue job format
+          const normalizedJob = isBulkJob ? {
+            id: jobData.jobId || jobData.id,
+            status: jobData.status,
+            progress: jobData.progress || [],
+            totalVideos: jobData.totalItems || jobData.progress?.length || 0,
+            createdAt: jobData.createdAt,
+            updatedAt: jobData.updatedAt,
+            error: jobData.error,
+          } : jobData;
+          
+          setJobStatus(normalizedJob);
+          
+          // Debug logging for progress changes
+          const newProgressCount = normalizedJob.progress?.length || 0;
+          const newCompletedCount =
+            normalizedJob.progress?.filter(
+              (p: ProgressItem) =>
+                p.status && (
+                  p.status.includes("Uploaded") ||
+                  p.status.includes("Scheduled") ||
+                  p.status.includes("scheduled")
+                )
+            ).length || 0;
         
-        // Debug logging for progress changes
-        const newProgressCount = data.job.progress?.length || 0;
-        const newCompletedCount =
-          data.job.progress?.filter(
-            (p: ProgressItem) =>
-              p.status.includes("Uploaded") ||
-              p.status.includes("Scheduled") ||
-              p.status.includes("scheduled")
-        ).length || 0;
-        
-        // Only log meaningful changes
-        if (
-          data.job.status !== prevStatus ||
-          newProgressCount !== prevProgressCount ||
-          newCompletedCount !== prevCompletedCount
-        ) {
-          const statusChange =
-            prevStatus && prevStatus !== data.job.status
-              ? `Status: ${prevStatus}→${data.job.status}`
-              : "";
-          const progressChange =
+          // Only log meaningful changes
+          if (
+            normalizedJob.status !== prevStatus ||
+            newProgressCount !== prevProgressCount ||
             newCompletedCount !== prevCompletedCount
-              ? `Completed: ${prevCompletedCount}→${newCompletedCount}`
-              : "";
-          const logMsg = `Job ${jobId.substring(
-            0,
-            20
-          )}... ${statusChange} ${progressChange}`.trim();
-          if (logMsg.length > 20) {
-            // Only log if there's actual content
-            console.log(`[DEBUG] ${logMsg}`);
-            addDebugLog(
-              logMsg,
-              newCompletedCount > prevCompletedCount
-                ? "success"
-                : data.job.status === "processing"
-                ? "info"
-                : "info"
-            );
+          ) {
+            const statusChange =
+              prevStatus && prevStatus !== normalizedJob.status
+                ? `Status: ${prevStatus}→${normalizedJob.status}`
+                : "";
+            const progressChange =
+              newCompletedCount !== prevCompletedCount
+                ? `Completed: ${prevCompletedCount}→${newCompletedCount}`
+                : "";
+            const logMsg = `Job ${jobId.substring(
+              0,
+              20
+            )}... ${statusChange} ${progressChange}`.trim();
+            if (logMsg.length > 20) {
+              // Only log if there's actual content
+              console.log(`[DEBUG] ${logMsg}`);
+              addDebugLog(
+                logMsg,
+                newCompletedCount > prevCompletedCount
+                  ? "success"
+                  : normalizedJob.status === "processing"
+                  ? "info"
+                  : "info"
+              );
+            }
           }
+        }
+      } else {
+        // If job not found, clear the status
+        if (res.status === 404) {
+          console.log(`[DEBUG] Job ${jobId} not found, clearing status`);
+          setJobStatus(null);
         }
       }
     } catch (error) {
@@ -1326,76 +1367,147 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Statistics Dashboard - Extracted to Statistics component (includes Next Upload Timer) */}
-      <Statistics 
-        queue={queue}
-        nextUploadTime={nextUploadTime}
-        timeUntilNext={timeUntilNext}
-      />
+      {/* Tabbed Interface */}
+      <Tabs
+        tabs={[
+          {
+            id: "upload",
+            label: "Upload Videos",
+            icon: "📤",
+          },
+          {
+            id: "queue",
+            label: "Queue & Progress",
+            icon: "📊",
+            badge: queue.filter(j => j.status === "processing" || j.status === "pending").length,
+          },
+          {
+            id: "statistics",
+            label: "Statistics",
+            icon: "📈",
+          },
+        ]}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+      >
+        {activeTab === "upload" && (
+          <div className="space-y-6">
+            {/* Upload Summary - Quick overview */}
+            <UploadSummary
+              queue={queue}
+              nextUploadTime={nextUploadTime}
+              timeUntilNext={timeUntilNext}
+            />
 
+            {/* Upload Forms - Extracted to UploadForms component */}
+            <UploadForms
+              showSingleUpload={showSingleUpload}
+              toggleSingleUpload={toggleSingleUpload}
+              handleSingleUpload={handleSingleUpload}
+              selectedVideoFile={selectedVideoFile}
+              setSelectedVideoFile={setSelectedVideoFile}
+              fileInputRef={fileInputRef}
+              uploading={uploading}
+              showBatchUpload={showBatchUpload}
+              toggleBatchUpload={toggleBatchUpload}
+              showBatchInstructions={showBatchInstructions}
+              toggleBatchInstructions={toggleBatchInstructions}
+              handleCsvUpload={handleCsvUpload}
+              selectedCsvFile={selectedCsvFile}
+              setSelectedCsvFile={setSelectedCsvFile}
+              csvFileInputRef={csvFileInputRef}
+              csvUploading={csvUploading}
+              validateCsv={validateCsv}
+              csvValidationErrors={csvValidationErrors}
+              setCsvValidationErrors={setCsvValidationErrors}
+              uploadProgress={uploadProgress}
+              showBulkUpload={showBulkUpload}
+              setShowBulkUpload={setShowBulkUpload}
+              handleBulkUpload={handleBulkUpload}
+              selectedBulkFiles={selectedBulkFiles}
+              setSelectedBulkFiles={setSelectedBulkFiles}
+              bulkFilesInputRef={bulkFilesInputRef}
+              bulkUploading={bulkUploading}
+              bulkUploadProgress={bulkUploadProgress}
+              bulkUrls={bulkUrls}
+              setBulkUrls={setBulkUrls}
+              urlAuthHeaders={urlAuthHeaders}
+              setUrlAuthHeaders={setUrlAuthHeaders}
+              urlTimeout={urlTimeout}
+              setUrlTimeout={setUrlTimeout}
+              setShowToast={setShowToast}
+              setSelectedJobId={setSelectedJobId}
+              fetchJobStatus={fetchJobStatus}
+              fetchQueue={fetchQueue}
+            />
+          </div>
+        )}
 
-      {/* Upload Forms - Extracted to UploadForms component */}
-      <UploadForms
-        showSingleUpload={showSingleUpload}
-        toggleSingleUpload={toggleSingleUpload}
-        handleSingleUpload={handleSingleUpload}
-        selectedVideoFile={selectedVideoFile}
-        setSelectedVideoFile={setSelectedVideoFile}
-        fileInputRef={fileInputRef}
-        uploading={uploading}
-        showBatchUpload={showBatchUpload}
-        toggleBatchUpload={toggleBatchUpload}
-        showBatchInstructions={showBatchInstructions}
-        toggleBatchInstructions={toggleBatchInstructions}
-        handleCsvUpload={handleCsvUpload}
-        selectedCsvFile={selectedCsvFile}
-        setSelectedCsvFile={setSelectedCsvFile}
-        csvFileInputRef={csvFileInputRef}
-        csvUploading={csvUploading}
-        validateCsv={validateCsv}
-        csvValidationErrors={csvValidationErrors}
-        setCsvValidationErrors={setCsvValidationErrors}
-        uploadProgress={uploadProgress}
-        showBulkUpload={showBulkUpload}
-        setShowBulkUpload={setShowBulkUpload}
-        handleBulkUpload={handleBulkUpload}
-        selectedBulkFiles={selectedBulkFiles}
-        setSelectedBulkFiles={setSelectedBulkFiles}
-        bulkFilesInputRef={bulkFilesInputRef}
-        bulkUploading={bulkUploading}
-        bulkUploadProgress={bulkUploadProgress}
-        bulkUrls={bulkUrls}
-        setBulkUrls={setBulkUrls}
-        urlAuthHeaders={urlAuthHeaders}
-        setUrlAuthHeaders={setUrlAuthHeaders}
-        urlTimeout={urlTimeout}
-        setUrlTimeout={setUrlTimeout}
-        setShowToast={setShowToast}
-      />
+        {activeTab === "queue" && (
+          <div className="space-y-6">
+            {/* Quick Stats Banner */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+              <div className="bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl p-4 text-white shadow-lg">
+                <div className="text-sm opacity-90 mb-1">Total Jobs</div>
+                <div className="text-3xl font-bold">{queue.length}</div>
+              </div>
+              <div className="bg-gradient-to-br from-yellow-500 to-orange-600 rounded-xl p-4 text-white shadow-lg">
+                <div className="text-sm opacity-90 mb-1">Processing</div>
+                <div className="text-3xl font-bold">
+                  {queue.filter(j => j.status === "processing" || j.status === "pending").length}
+                </div>
+              </div>
+              <div className="bg-gradient-to-br from-green-500 to-emerald-600 rounded-xl p-4 text-white shadow-lg">
+                <div className="text-sm opacity-90 mb-1">Completed</div>
+                <div className="text-3xl font-bold">
+                  {queue.filter(j => j.status === "completed").length}
+                </div>
+              </div>
+              <div className="bg-gradient-to-br from-red-500 to-pink-600 rounded-xl p-4 text-white shadow-lg">
+                <div className="text-sm opacity-90 mb-1">Failed</div>
+                <div className="text-3xl font-bold">
+                  {queue.filter(j => j.status === "failed").length}
+                </div>
+              </div>
+            </div>
 
-      {/* Queue Management - Extracted to QueueManagement component */}
-      <QueueManagement
-        queue={queue}
-        searchQuery={searchQuery}
-        selectedJobId={selectedJobId}
-        setSelectedJobId={setSelectedJobId}
-        fetchJobStatus={fetchJobStatus}
-        fetchQueue={fetchQueue}
-        handleQueueAction={handleQueueAction}
-        jobStatus={jobStatus}
-        jobFiles={jobFiles}
-        loadingFiles={loadingFiles}
-        handleDeleteFile={handleDeleteFile}
-        handleDeleteAllFiles={handleDeleteAllFiles}
-        setShowToast={setShowToast}
-      />
+            {/* Queue Management - Extracted to QueueManagement component */}
+            <QueueManagement
+              queue={queue}
+              searchQuery={searchQuery}
+              selectedJobId={selectedJobId}
+              setSelectedJobId={setSelectedJobId}
+              fetchJobStatus={fetchJobStatus}
+              fetchQueue={fetchQueue}
+              handleQueueAction={handleQueueAction}
+              jobStatus={jobStatus}
+              jobFiles={jobFiles}
+              loadingFiles={loadingFiles}
+              handleDeleteFile={handleDeleteFile}
+              handleDeleteAllFiles={handleDeleteAllFiles}
+              setShowToast={setShowToast}
+            />
+          </div>
+        )}
 
-      {/* Upload Summary - Quick overview of settings and immediate uploads */}
-      <UploadSummary
-        queue={queue}
-        nextUploadTime={nextUploadTime}
-        timeUntilNext={timeUntilNext}
-      />
+        {activeTab === "statistics" && (
+          <div className="space-y-6">
+            {/* Statistics Dashboard - Extracted to Statistics component (includes Next Upload Timer) */}
+            <Statistics 
+              queue={queue}
+              nextUploadTime={nextUploadTime}
+              timeUntilNext={timeUntilNext}
+            />
+
+            {/* Upload Summary - Quick overview */}
+            <UploadSummary
+              queue={queue}
+              nextUploadTime={nextUploadTime}
+              timeUntilNext={timeUntilNext}
+            />
+          </div>
+        )}
+      </Tabs>
 
       <footer className="text-center py-5 text-gray-500">
           &copy; 2025 ZonDiscounts.{" "}

@@ -175,7 +175,7 @@ async function updateVideoMetadata(
     if (row.privacyStatus || row.scheduleTime) {
       updates.status = {};
       
-      const finalPrivacyStatus = row.privacyStatus || "private";
+      const finalPrivacyStatus = row.privacyStatus || "public";
       if (["public", "private", "unlisted"].includes(finalPrivacyStatus)) {
         updates.status.privacyStatus = finalPrivacyStatus;
       }

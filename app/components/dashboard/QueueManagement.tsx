@@ -1,5 +1,7 @@
 "use client";
 
+import WorkerStatus from "./WorkerStatus";
+
 interface ProgressItem {
   index: number;
   status: string;
@@ -16,7 +18,7 @@ interface QueueManagementProps {
   setSelectedJobId: (jobId: string | null) => void;
   fetchJobStatus: (jobId: string) => Promise<void>;
   fetchQueue: () => Promise<void>;
-  handleQueueAction: (jobId: string, action: "pause" | "resume" | "cancel" | "delete") => Promise<void>;
+  handleQueueAction: (jobId: string, action: "pause" | "resume" | "cancel" | "delete" | "delete-all-jobs") => Promise<void>;
   jobStatus: any;
   jobFiles: any;
   loadingFiles: boolean;
@@ -75,6 +77,31 @@ export default function QueueManagement({
 
   return (
     <>
+      {/* Worker Status Indicator */}
+      <WorkerStatus queue={queue} />
+
+      {/* Delete All Jobs Button */}
+      {queue.length > 0 && (
+        <div className="mb-4 flex justify-end">
+          <button
+            onClick={async () => {
+              if (
+                confirm(
+                  "⚠️ WARNING: This will delete ALL jobs (pending, processing, completed, failed, cancelled).\n\nThis action cannot be undone. Are you sure?"
+                )
+              ) {
+                await handleQueueAction("", "delete-all-jobs");
+                setSelectedJobId(null);
+              }
+            }}
+            className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg transition-colors flex items-center gap-2"
+          >
+            <span>🗑️</span>
+            <span>Delete All Jobs</span>
+          </button>
+        </div>
+      )}
+
       {/* Historical Jobs - Only show if there are jobs */}
       {queue.length > 0 && (
         <div className="card">
@@ -100,12 +127,14 @@ export default function QueueManagement({
                 const jobProgress = job.progress || [];
                 const completedCount = jobProgress.filter(
                   (p: any) =>
-                    p.status.includes("Uploaded") ||
-                    p.status.includes("Scheduled") ||
-                    p.status.includes("Already uploaded")
+                    p && p.status && (
+                      p.status.includes("Uploaded") ||
+                      p.status.includes("Scheduled") ||
+                      p.status.includes("Already uploaded")
+                    )
                 ).length;
                 const failedCount = jobProgress.filter((p: any) =>
-                  p.status.includes("Failed")
+                  p && p.status && p.status.includes("Failed")
                 ).length;
                 const totalVideos = job.totalVideos || jobProgress.length || 0;
                 const progressPercent =
@@ -234,6 +263,7 @@ export default function QueueManagement({
                             job.progress &&
                             job.progress.length > 0 &&
                             job.progress[0] &&
+                            job.progress[0].status &&
                             (job.progress[0].status.includes("Uploading") ||
                               job.progress[0].status === "Pending") && (
                               <div className="mt-2 p-2 bg-green-100 dark:bg-green-900/30 border border-green-300 dark:border-green-700 rounded-lg">
@@ -350,26 +380,32 @@ export default function QueueManagement({
         const totalVideos = jobStatus.totalVideos || progress.length || 0;
         const completed = progress.filter(
           (p: ProgressItem) =>
-            p.status.includes("Uploaded") ||
-            p.status.includes("Scheduled") ||
-            p.status.includes("scheduled") ||
-            p.status.includes("Already uploaded")
+            p && p.status && (
+              p.status.includes("Uploaded") ||
+              p.status.includes("Scheduled") ||
+              p.status.includes("scheduled") ||
+              p.status.includes("Already uploaded")
+            )
         ).length;
         const failed = progress.filter(
           (p: ProgressItem) =>
-            p.status.includes("Failed") ||
-            p.status.includes("Missing") ||
-            p.status.includes("Invalid") ||
-            p.status.includes("not found") ||
-            p.status.includes("Cannot access") ||
-            p.status.includes("error")
+            p && p.status && (
+              p.status.includes("Failed") ||
+              p.status.includes("Missing") ||
+              p.status.includes("Invalid") ||
+              p.status.includes("not found") ||
+              p.status.includes("Cannot access") ||
+              p.status.includes("error")
+            )
         ).length;
         const processing = progress.filter(
           (p: ProgressItem) =>
-            p.status.includes("Uploading") ||
-            p.status === "Pending" ||
-            p.status.includes("thumbnail") ||
-            p.status.includes("Checking")
+            p && p.status && (
+              p.status.includes("Uploading") ||
+              p.status === "Pending" ||
+              p.status.includes("thumbnail") ||
+              p.status.includes("Checking")
+            )
         ).length;
         const pending = totalVideos - completed - failed - processing;
         const progressPercentage =
@@ -532,26 +568,40 @@ export default function QueueManagement({
               </div>
             </div>
 
-            {/* First Video Upload Message */}
-            {progress.length > 0 &&
-              progress[0] &&
-              (progress[0].status.includes("Uploading") || progress[0].status === "Pending") &&
-              completed === 0 && (
-                <div className="mb-6 p-4 bg-gradient-to-r from-green-500 to-emerald-600 rounded-xl shadow-lg text-white animate-fade-in">
-                  <div className="flex items-center gap-3">
-                    <div className="text-3xl animate-pulse-slow">⚡</div>
-                    <div>
-                      <div className="font-bold text-lg mb-1">
-                        Uploading First Video Now!
-                      </div>
-                      <div className="text-sm opacity-90">
-                        The first video is being uploaded immediately. Progress will update in
-                        real-time.
+            {/* Current Processing Status */}
+            {processing > 0 && (() => {
+              const currentItem = progress.find((p: any) => 
+                p.status && (
+                  p.status.includes("Uploading") || 
+                  p.status.includes("Fetching") ||
+                  p.status === "Pending" ||
+                  p.status.includes("thumbnail")
+                )
+              );
+              
+              if (currentItem) {
+                const title = currentItem.title || `Video ${currentItem.index + 1}`;
+                return (
+                  <div className="mb-6 p-4 bg-gradient-to-r from-blue-500 to-indigo-600 rounded-xl shadow-lg text-white animate-fade-in">
+                    <div className="flex items-center gap-3">
+                      <div className="text-3xl animate-pulse-slow">⚡</div>
+                      <div className="flex-1">
+                        <div className="font-bold text-lg mb-1">
+                          Currently Processing
+                        </div>
+                        <div className="text-sm opacity-90 font-medium mb-1">
+                          {title}
+                        </div>
+                        <div className="text-xs opacity-75">
+                          {currentItem.status}
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              )}
+                );
+              }
+              return null;
+            })()}
 
             {/* Video List */}
             {progress.length > 0 ? (
@@ -561,23 +611,31 @@ export default function QueueManagement({
                 </h4>
                 <div className="max-h-96 overflow-y-auto space-y-2 pr-2">
                   {progress.map((item: any, idx: number) => {
+                    if (!item) return null;
+                    
                     const isSuccess =
-                      item.status.includes("Uploaded") ||
-                      item.status.includes("Scheduled") ||
-                      item.status.includes("scheduled") ||
-                      item.status.includes("Already uploaded");
+                      item.status && (
+                        item.status.includes("Uploaded") ||
+                        item.status.includes("Scheduled") ||
+                        item.status.includes("scheduled") ||
+                        item.status.includes("Already uploaded")
+                      );
                     const isFailed =
-                      item.status.includes("Failed") ||
-                      item.status.includes("Missing") ||
-                      item.status.includes("Invalid") ||
-                      item.status.includes("not found") ||
-                      item.status.includes("Cannot access") ||
-                      item.status.includes("error");
+                      item.status && (
+                        item.status.includes("Failed") ||
+                        item.status.includes("Missing") ||
+                        item.status.includes("Invalid") ||
+                        item.status.includes("not found") ||
+                        item.status.includes("Cannot access") ||
+                        item.status.includes("error")
+                      );
                     const isProcessing =
-                      item.status.includes("Uploading") ||
-                      item.status === "Pending" ||
-                      item.status.includes("thumbnail") ||
-                      item.status.includes("Checking");
+                      item.status && (
+                        item.status.includes("Uploading") ||
+                        item.status === "Pending" ||
+                        item.status.includes("thumbnail") ||
+                        item.status.includes("Checking")
+                      );
 
                     return (
                       <div
@@ -600,7 +658,7 @@ export default function QueueManagement({
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className="font-medium text-gray-800 dark:text-white">
-                                Video {item.index + 1}
+                                {item.title || `Video ${item.index + 1}`}
                               </span>
                               {item.videoId && (
                                 <a
@@ -614,6 +672,11 @@ export default function QueueManagement({
                                 </a>
                               )}
                             </div>
+                            {item.title && (
+                              <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                                Row {item.index + 1}
+                              </div>
+                            )}
                             <div className="flex flex-wrap gap-2 mt-1 text-xs text-gray-600 dark:text-gray-400">
                               {item.fileSize && (
                                 <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-700 rounded">

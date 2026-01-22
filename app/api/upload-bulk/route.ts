@@ -65,7 +65,7 @@ async function uploadSingleVideo(
 
     const requestBody = {
       snippet: { title, description },
-      status: { privacyStatus: "private" as const },
+      status: { privacyStatus: "public" as const },
     };
 
     // Convert File to stream

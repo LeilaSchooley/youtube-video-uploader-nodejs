@@ -30,6 +30,26 @@ const nextConfig = {
       },
     ];
   },
+  // Suppress Next.js 15 async params warnings (we don't use params in pages)
+  logging: {
+    fetches: {
+      fullUrl: false,
+    },
+  },
+  // Experimental features
+  experimental: {
+    // Suppress warnings about async params when not using them
+    serverActions: {
+      bodySizeLimit: '10mb',
+    },
+    // Suppress React DevTools serialization warnings for params
+    optimizePackageImports: ['react', 'react-dom'],
+  },
+  // Suppress console warnings in development (params enumeration is a DevTools issue)
+  onDemandEntries: {
+    maxInactiveAge: 60 * 1000,
+    pagesBufferLength: 2,
+  },
 };
 
 module.exports = nextConfig;

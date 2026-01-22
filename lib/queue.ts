@@ -251,3 +251,28 @@ export function deleteAllCompletedJobs(userId?: string, sessionId?: string): { d
   return { deleted, errors };
 }
 
+export function deleteAllJobs(userId?: string, sessionId?: string): { deleted: number; errors: string[] } {
+  const queue = readQueue();
+  const errors: string[] = [];
+  let deleted = 0;
+  
+  // Filter jobs belonging to user (if userId/sessionId provided)
+  const jobsToDelete = queue.filter(item => {
+    if (userId || sessionId) {
+      const belongsToUser = (userId && item.userId === userId) || 
+                           (!item.userId && sessionId && item.sessionId === sessionId);
+      return belongsToUser;
+    }
+    return true; // Delete all if no filter
+  });
+  
+  // Remove jobs from queue
+  const updatedQueue = queue.filter(item => !jobsToDelete.includes(item));
+  writeQueue(updatedQueue);
+  deleted = jobsToDelete.length;
+  
+  console.log(`[QUEUE] Deleted ${deleted} job(s) (all statuses)`);
+  
+  return { deleted, errors };
+}
+

@@ -5,6 +5,7 @@ import { google } from "googleapis";
 import { cookies } from "next/headers";
 import { readSheetData, extractSpreadsheetId, getSpreadsheetMetadata } from "@/lib/sheets";
 import { addToBulkQueue } from "@/lib/bulk-queue";
+import { listDriveVideos } from "@/lib/drive";
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -31,6 +32,9 @@ interface SheetRow {
   postuploadaction?: string;
   completed_folder_id?: string;
   completedfolderid?: string;
+  made_for_kids?: string; // "true", "false", "yes", "no", "1", "0"
+  madeforkids?: string;
+  selfDeclaredMadeForKids?: string;
 }
 
 /**
@@ -67,8 +71,9 @@ export async function POST(request: NextRequest) {
       spreadsheetUrl,
       sheetName,
       range,
+      driveFolderId,
       videosPerDay,
-      startDate,
+      // startDate is no longer required - will use today if videosPerDay is set
     } = body;
 
     if (!spreadsheetUrl) {
@@ -156,7 +161,7 @@ export async function POST(request: NextRequest) {
       mapped.url_auth_headers = normalized.url_auth_headers || row.url_auth_headers;
       mapped.url_timeout = normalized.url_timeout || row.url_timeout;
       mapped.scheduleTime = normalized.scheduletime || normalized.scheduleTime || row.scheduleTime || row.scheduletime;
-      mapped.privacyStatus = normalized.privacystatus || normalized.privacyStatus || row.privacyStatus || row.privacystatus || "private";
+      mapped.privacyStatus = normalized.privacystatus || normalized.privacyStatus || row.privacyStatus || row.privacystatus || "public";
       mapped.post_upload_action = normalized.post_upload_action || normalized.postuploadaction || row.post_upload_action || row.postuploadaction || "none";
       mapped.completed_folder_id = normalized.completed_folder_id || normalized.completedfolderid || row.completed_folder_id || row.completedfolderid;
 
@@ -176,35 +181,110 @@ export async function POST(request: NextRequest) {
       setSession(sessionId, session);
     }
 
-    // Convert to queue items
-    const queueItems = normalizedData.map((row, index) => ({
-      title: row.youtube_title || `Video ${index + 1}`,
-      description: row.youtube_description || "",
-      privacyStatus: (row.privacyStatus || "private") as "public" | "private" | "unlisted",
-      scheduleTime: row.scheduleTime || undefined,
-      videoUrl: row.video_url || undefined,
-      thumbnailUrl: row.thumbnail_url || undefined,
-      driveFileId: row.drive_file_id || undefined,
-      driveThumbnailId: row.drive_thumbnail_id || undefined,
-      authHeaders: row.url_auth_headers ? (() => {
-        try {
-          return JSON.parse(row.url_auth_headers);
-        } catch {
-          return undefined;
+    // If driveFolderId is provided, match video_name to Drive files
+    let driveFilesMap: Map<string, string> = new Map();
+    if (driveFolderId) {
+      try {
+        const driveVideos = await listDriveVideos(driveFolderId, oAuthClient);
+        
+        // Create a map of filename (without extension) -> file ID
+        // Also create a map with full filename -> file ID for exact matches
+        driveVideos.forEach(file => {
+          const nameWithoutExt = file.name.replace(/\.[^/.]+$/, "").toLowerCase();
+          const fullName = file.name.toLowerCase();
+          
+          // Store both mappings (prefer exact match)
+          if (!driveFilesMap.has(fullName)) {
+            driveFilesMap.set(fullName, file.id);
+          }
+          if (!driveFilesMap.has(nameWithoutExt)) {
+            driveFilesMap.set(nameWithoutExt, file.id);
+          }
+        });
+        
+        console.log(`[UPLOAD-SHEETS] Found ${driveVideos.length} videos in Drive folder, matched ${driveFilesMap.size} filename mappings`);
+      } catch (error: any) {
+        console.error(`[UPLOAD-SHEETS] Error listing Drive folder:`, error);
+        return NextResponse.json(
+          { error: `Failed to access Drive folder: ${error?.message || "Unknown error"}` },
+          { status: 400 }
+        );
+      }
+    }
+
+    // Helper function to match video_name to Drive file
+    const matchDriveFile = (videoName: string | undefined): string | undefined => {
+      if (!videoName || !driveFolderId || driveFilesMap.size === 0) {
+        return undefined;
+      }
+      
+      const normalizedName = videoName.toLowerCase().trim();
+      const nameWithoutExt = normalizedName.replace(/\.[^/.]+$/, "");
+      
+      // Try exact match first (with extension)
+      if (driveFilesMap.has(normalizedName)) {
+        return driveFilesMap.get(normalizedName);
+      }
+      
+      // Try match without extension
+      if (driveFilesMap.has(nameWithoutExt)) {
+        return driveFilesMap.get(nameWithoutExt);
+      }
+      
+      // Try partial match (filename contains video_name or vice versa)
+      for (const [driveFileName, fileId] of driveFilesMap.entries()) {
+        if (driveFileName.includes(normalizedName) || normalizedName.includes(driveFileName)) {
+          return fileId;
         }
-      })() : undefined,
-      timeout: row.url_timeout ? parseInt(row.url_timeout, 10) : undefined,
-      postUploadAction: row.post_upload_action || "none",
-      completedFolderId: row.completed_folder_id || undefined,
-    }));
+      }
+      
+      return undefined;
+    };
+
+    // Convert to queue items
+    const queueItems = normalizedData.map((row, index) => {
+      // Match video_name to Drive file if driveFolderId is provided
+      let matchedDriveFileId = row.drive_file_id;
+      if (driveFolderId && row.video_name && !matchedDriveFileId) {
+        matchedDriveFileId = matchDriveFile(row.video_name);
+        if (matchedDriveFileId) {
+          console.log(`[UPLOAD-SHEETS] Matched "${row.video_name}" to Drive file ${matchedDriveFileId}`);
+        } else {
+          console.warn(`[UPLOAD-SHEETS] Could not match "${row.video_name}" to any Drive file`);
+        }
+      }
+      
+      return {
+        title: row.youtube_title || `Video ${index + 1}`,
+        description: row.youtube_description || "",
+        privacyStatus: (row.privacyStatus || "public") as "public" | "private" | "unlisted",
+        scheduleTime: row.scheduleTime || undefined,
+        videoUrl: row.video_url || undefined,
+        thumbnailUrl: row.thumbnail_url || undefined,
+        driveFileId: matchedDriveFileId || row.drive_file_id || undefined,
+        driveThumbnailId: row.drive_thumbnail_id || undefined,
+        authHeaders: row.url_auth_headers ? (() => {
+          try {
+            return JSON.parse(row.url_auth_headers);
+          } catch {
+            return undefined;
+          }
+        })() : undefined,
+        timeout: row.url_timeout ? parseInt(row.url_timeout, 10) : undefined,
+        postUploadAction: row.post_upload_action || "none",
+        completedFolderId: row.completed_folder_id || undefined,
+        madeForKids: (row as any).made_for_kids ?? false, // Default to false (not made for kids)
+      };
+    });
 
     // Add to bulk queue
+    // If videosPerDay is set, use today as startDate (will be calculated in worker)
     const jobId = addToBulkQueue({
       sessionId,
       userId,
       type: "urls", // Sheets data is treated like URLs/Drive (streaming)
       videosPerDay: videosPerDay ? parseInt(videosPerDay, 10) : undefined,
-      startDate: startDate || undefined,
+      // startDate will be calculated in worker based on today if videosPerDay is set
       items: queueItems,
     });
 

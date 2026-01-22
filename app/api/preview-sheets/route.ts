@@ -146,7 +146,7 @@ export async function POST(request: NextRequest) {
       mapped.url_auth_headers = normalized.url_auth_headers || row.url_auth_headers;
       mapped.url_timeout = normalized.url_timeout || row.url_timeout;
       mapped.scheduleTime = normalized.scheduletime || normalized.scheduleTime || row.scheduleTime || row.scheduletime;
-      mapped.privacyStatus = normalized.privacystatus || normalized.privacyStatus || row.privacyStatus || row.privacystatus || "private";
+      mapped.privacyStatus = normalized.privacystatus || normalized.privacyStatus || row.privacyStatus || row.privacystatus || "public";
       mapped.post_upload_action = normalized.post_upload_action || normalized.postuploadaction || row.post_upload_action || row.postuploadaction || "none";
       mapped.completed_folder_id = normalized.completed_folder_id || normalized.completedfolderid || row.completed_folder_id || row.completedfolderid;
 

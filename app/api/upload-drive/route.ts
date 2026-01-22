@@ -63,7 +63,7 @@ export async function POST(request: NextRequest) {
       recursive = false,
       postUploadAction = "none",
       completedFolderId,
-      privacyStatus = "private",
+      privacyStatus = "public",
       useWorker = true,
     } = body;
 
