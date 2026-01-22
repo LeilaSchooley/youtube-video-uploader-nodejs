@@ -19,12 +19,13 @@ export default function Statistics({ queue, nextUploadTime, timeUntilNext }: Sta
   
   const completed = allProgress.filter(
     (p) =>
-      p && p.status && (
-        p.status.includes("Uploaded") || 
+      p && (p.videoId || (p.status && (
+        p.status.includes("Uploaded") ||
+        p.status.includes("Completed") ||
         p.status.includes("scheduled") ||
         p.status.includes("Scheduled") ||
         p.status.includes("Already uploaded")
-      )
+      )))
   ).length;
   
   const failed = allProgress.filter(

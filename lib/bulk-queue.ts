@@ -172,9 +172,10 @@ export function markBulkAsFailed(id: string, error: string): void {
 
 export function updateBulkProgress(
   id: string,
-  progress: Array<{ index: number; status: string; videoId?: string; error?: string }>
+  progress: Array<{ index: number; status: string; videoId?: string; error?: string }>,
+  immediate: boolean = false
 ): void {
-  updateBulkQueueItem(id, { progress });
+  updateBulkQueueItem(id, { progress }, immediate);
 }
 
 export function deleteAllBulkJobs(userId?: string, sessionId?: string): { deleted: number; errors: string[] } {

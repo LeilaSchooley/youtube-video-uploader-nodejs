@@ -129,11 +129,12 @@ export default function QueueManagement({
                 const jobProgress = displayJob.progress || [];
                 const completedCount = jobProgress.filter(
                   (p: any) =>
-                    p && p.status && (
+                    p && (p.videoId || (p.status && (
                       p.status.includes("Uploaded") ||
+                      p.status.includes("Completed") ||
                       p.status.includes("Scheduled") ||
                       p.status.includes("Already uploaded")
-                    )
+                    )))
                 ).length;
                 const failedCount = jobProgress.filter((p: any) =>
                   p && p.status && p.status.includes("Failed")
@@ -295,11 +296,12 @@ export default function QueueManagement({
                                     (p: any) => 
                                       p && p.index >= nextBatchStartIndex && 
                                       p.index < batchEndIndex &&
-                                      p.status && (
+                                      (p.videoId || (p.status && (
                                         p.status.includes("Uploaded") ||
+                                        p.status.includes("Completed") ||
                                         p.status.includes("Scheduled") ||
                                         p.status.includes("Already uploaded")
-                                      )
+                                      )))
                                   ).length;
                                   
                                   if (batchCompleted < (batchEndIndex - nextBatchStartIndex)) {
@@ -343,11 +345,12 @@ export default function QueueManagement({
                                     const isCompleted = jobProgress.some(
                                       (p: any) => 
                                         p && p.index === i && 
-                                        p.status && (
+                                        (p.videoId || (p.status && (
                                           p.status.includes("Uploaded") ||
+                                          p.status.includes("Completed") ||
                                           p.status.includes("Scheduled") ||
                                           p.status.includes("Already uploaded")
-                                        )
+                                        )))
                                     );
                                     
                                     if (!isCompleted) {
@@ -391,11 +394,12 @@ export default function QueueManagement({
                                   const isCompleted = jobProgress.some(
                                     (p: any) => 
                                       p && p.index === i && 
-                                      p.status && (
+                                      (p.videoId || (p.status && (
                                         p.status.includes("Uploaded") ||
+                                        p.status.includes("Completed") ||
                                         p.status.includes("Scheduled") ||
                                         p.status.includes("Already uploaded")
-                                      )
+                                      )))
                                   );
                                   
                                   if (!isCompleted) {
@@ -573,17 +577,22 @@ export default function QueueManagement({
         </div>
       )}
 
-      {selectedJobId && jobStatus && (() => {
-        const progress = jobStatus.progress || [];
-        const totalVideos = jobStatus.totalVideos || progress.length || 0;
+      {selectedJobId && (() => {
+        // Use jobStatus if available, otherwise fall back to queue data to prevent flickering
+        const selectedJob = jobStatus || queue.find(j => j.id === selectedJobId);
+        if (!selectedJob) return null;
+        
+        const progress = selectedJob.progress || [];
+        const totalVideos = selectedJob.totalVideos || progress.length || 0;
         const completed = progress.filter(
           (p: ProgressItem) =>
-            p && p.status && (
+            p && (p.videoId || (p.status && (
               p.status.includes("Uploaded") ||
+              p.status.includes("Completed") ||
               p.status.includes("Scheduled") ||
               p.status.includes("scheduled") ||
               p.status.includes("Already uploaded")
-            )
+            )))
         ).length;
         const failed = progress.filter(
           (p: ProgressItem) =>
@@ -617,25 +626,25 @@ export default function QueueManagement({
                   📋 Job Progress
                 </h3>
                 <p className="text-sm text-gray-600 dark:text-gray-400 font-mono">
-                  {jobStatus.id}
+                  {selectedJob.id}
                 </p>
-                {jobStatus.notes && (
+                {selectedJob.notes && (
                   <div className="mt-2 p-2 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 rounded text-sm text-blue-800 dark:text-blue-200">
-                    <strong>📝 Notes:</strong> {jobStatus.notes}
+                    <strong>📝 Notes:</strong> {selectedJob.notes}
                   </div>
                 )}
               </div>
               <div className="flex gap-2">
                 <button
                   onClick={async () => {
-                    const notes = prompt("Add notes for this job:", jobStatus.notes || "");
+                    const notes = prompt("Add notes for this job:", selectedJob.notes || "");
                     if (notes !== null) {
                       try {
                         const res = await fetch("/api/queue-notes", {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
                           body: JSON.stringify({
-                            jobId: jobStatus.id,
+                            jobId: selectedJob.id,
                             notes,
                           }),
                         });
@@ -645,7 +654,7 @@ export default function QueueManagement({
                             message: "Notes updated",
                             type: "success",
                           });
-                          fetchJobStatus(jobStatus.id);
+                          fetchJobStatus(selectedJob.id);
                         } else {
                           setShowToast({
                             message: data.error || "Failed to update notes",
@@ -676,7 +685,7 @@ export default function QueueManagement({
                         const res = await fetch("/api/queue-copy", {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ jobId: jobStatus.id }),
+                          body: JSON.stringify({ jobId: selectedJob.id }),
                         });
                         const data = await res.json();
                         if (res.ok) {
@@ -812,12 +821,13 @@ export default function QueueManagement({
                     if (!item) return null;
                     
                     const isSuccess =
-                      item.status && (
+                      item.videoId || (item.status && (
                         item.status.includes("Uploaded") ||
+                        item.status.includes("Completed") ||
                         item.status.includes("Scheduled") ||
                         item.status.includes("scheduled") ||
                         item.status.includes("Already uploaded")
-                      );
+                      ));
                     const isFailed =
                       item.status && (
                         item.status.includes("Failed") ||
@@ -922,7 +932,7 @@ export default function QueueManagement({
                 <p className="text-sm text-gray-500 dark:text-gray-500 mt-2">
                   The first video will upload immediately once processing begins
                 </p>
-                {jobStatus && jobStatus.status === "processing" && (
+                {selectedJob && selectedJob.status === "processing" && (
                   <div className="mt-4 p-3 bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-700 rounded-lg">
                     <p className="text-sm text-yellow-800 dark:text-yellow-200 font-semibold">
                       ⚡ Processing videos...

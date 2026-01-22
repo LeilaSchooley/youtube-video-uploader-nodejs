@@ -132,9 +132,12 @@ export function useDashboardData() {
         const completedCount =
           job.progress?.filter(
             (p: any) =>
-              p.status.includes("Uploaded") || 
-              p.status.includes("scheduled") ||
-              p.status.includes("Scheduled")
+              p && (p.videoId || (p.status && (
+                p.status.includes("Uploaded") ||
+                p.status.includes("Completed") ||
+                p.status.includes("scheduled") ||
+                p.status.includes("Scheduled")
+              )))
           ).length || 0;
         const totalVideos = job.totalVideos || job.progress?.length || 0;
         
@@ -204,12 +207,13 @@ export function useDashboardData() {
     fetchAvailableChannels();
     fetchQueue();
     
+    // Poll every 3 seconds instead of 1 second to reduce UI flickering
     const pollInterval = setInterval(() => {
       fetchQueue();
       if (selectedJobId) {
         fetchJobStatus(selectedJobId);
       }
-    }, 1000);
+    }, 3000);
     
     return () => clearInterval(pollInterval);
   }, [fetchUser, fetchAvailableChannels, fetchQueue, fetchJobStatus, selectedJobId]);

@@ -102,12 +102,13 @@ export default function UploadSummary({
         totalVideos,
         completedVideos:
           job.progress?.filter(
-            (p) =>
-              p && p.status && (
+            (p: any) =>
+              p && (p.videoId || (p.status && (
                 p.status.includes("Uploaded") ||
+                p.status.includes("Completed") ||
                 p.status.includes("scheduled") ||
                 p.status.includes("Scheduled")
-              )
+              )))
           ).length || 0,
       };
     });
@@ -154,11 +155,12 @@ export default function UploadSummary({
     // Helper to check if video is completed
     const isVideoCompleted = (job: QueueItem, index: number): boolean => {
       return job.progress?.some(
-        (p) => p && p.index === index && p.status && (
-          p.status.includes("Uploaded") || 
+        (p: any) => p && p.index === index && (p.videoId || (p.status && (
+          p.status.includes("Uploaded") ||
+          p.status.includes("Completed") ||
           p.status.includes("scheduled") || 
           p.status.includes("Scheduled")
-        )
+        )))
       ) || false;
     };
     
@@ -186,11 +188,12 @@ export default function UploadSummary({
       
       // Count completed videos to determine current position
       const completedCount = job.progress?.filter(
-        (p) => p && p.status && (
+        (p: any) => p && (p.videoId || (p.status && (
           p.status.includes("Uploaded") ||
+          p.status.includes("Completed") ||
           p.status.includes("scheduled") ||
           p.status.includes("Scheduled")
-        )
+        )))
       ).length || 0;
       
       // Calculate today's day index from start date

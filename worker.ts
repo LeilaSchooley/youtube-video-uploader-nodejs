@@ -55,7 +55,7 @@ async function getVideoStream(task: UploadTask, oAuthClient: ReturnType<typeof g
   // Handle URL-based upload
   if (item.url && isValidUrl(item.url)) {
     return await fetchFileAsStream(item.url, {
-      timeout: item.timeout || 10 * 60 * 1000, // 10 minutes default for URLs
+      timeout: item.timeout || 30 * 60 * 1000, // 30 minutes default for large video URLs
       headers: item.authHeaders || {},
     });
   }
@@ -511,19 +511,24 @@ async function processBulkJob(jobId: string): Promise<void> {
     batches.push(tasks.slice(i, i + BATCH_SIZE));
   }
 
+  // Track progress in memory to avoid race conditions with disk writes
+  let localProgress = [...(job.progress || [])];
+  
   const sendProgress = (
     index: number,
     status: string,
     videoId?: string,
     error?: string
   ) => {
-    const currentProgress = [...(job.progress || [])];
     const item = job.items[index];
     const title = item?.title || `Video ${index + 1}`;
     // Include title in status for better visibility
     const statusWithTitle = status.includes(title) ? status : `${title}: ${status}`;
-    currentProgress[index] = { index, status: statusWithTitle, videoId, error, title };
-    updateBulkProgress(jobId, currentProgress);
+    localProgress[index] = { index, status: statusWithTitle, videoId, error, title };
+    
+    // Write immediately if this is a final status (success or failure)
+    const isFinal = !!(videoId || error);
+    updateBulkProgress(jobId, localProgress, isFinal);
   };
 
   try {
@@ -567,35 +572,31 @@ async function processBulkJob(jobId: string): Promise<void> {
       await processBatch(youtube, batch, sendProgress, oAuthClient);
     }
 
-    // Check progress after today's batch
-    const finalJob = getBulkQueueItem(jobId);
-    if (finalJob) {
-      const totalItems = finalJob.items.length;
-      const progressItems = finalJob.progress || [];
-      const successfulItems = progressItems.filter(
-        (p) => p && p.videoId && !p.error
-      ).length;
-      const failedItems = progressItems.filter((p) => p && p.error).length;
-      const totalProcessed = successfulItems + failedItems;
-      
-      console.log(`[WORKER] Job ${jobId} today's summary: ${tasks.length} attempted, total progress: ${successfulItems}/${totalItems} succeeded, ${failedItems} failed`);
-      
-      // Check if ALL videos are done (either succeeded or failed)
-      if (totalProcessed >= totalItems) {
-        markBulkAsCompleted(jobId);
-        console.log(`[WORKER] Job ${jobId} COMPLETED: ${successfulItems} succeeded, ${failedItems} failed`);
-        return;
-      }
-      
-      // More videos to process on future days
-      if (job.videosPerDay && job.videosPerDay > 0) {
-        const remainingVideos = totalItems - totalProcessed;
-        const remainingDays = Math.ceil(remainingVideos / job.videosPerDay);
-        console.log(`[WORKER] Job ${jobId}: ${remainingVideos} videos remaining, ~${remainingDays} more day(s) to complete`);
-        console.log(`[WORKER] Job ${jobId}: Will continue tomorrow with next batch of ${job.videosPerDay} videos`);
-        // Job stays in "processing" status - worker will check again later
-        return;
-      }
+    // Check progress after today's batch (use in-memory progress for accuracy)
+    const totalItems = job.items.length;
+    const successfulItems = localProgress.filter(
+      (p) => p && p.videoId && !p.error
+    ).length;
+    const failedItems = localProgress.filter((p) => p && p.error).length;
+    const totalProcessed = successfulItems + failedItems;
+    
+    console.log(`[WORKER] Job ${jobId} today's summary: ${tasks.length} attempted, total progress: ${successfulItems}/${totalItems} succeeded, ${failedItems} failed`);
+    
+    // Check if ALL videos are done (either succeeded or failed)
+    if (totalProcessed >= totalItems) {
+      markBulkAsCompleted(jobId);
+      console.log(`[WORKER] Job ${jobId} COMPLETED: ${successfulItems} succeeded, ${failedItems} failed`);
+      return;
+    }
+    
+    // More videos to process on future days
+    if (job.videosPerDay && job.videosPerDay > 0) {
+      const remainingVideos = totalItems - totalProcessed;
+      const remainingDays = Math.ceil(remainingVideos / job.videosPerDay);
+      console.log(`[WORKER] Job ${jobId}: ${remainingVideos} videos remaining, ~${remainingDays} more day(s) to complete`);
+      console.log(`[WORKER] Job ${jobId}: Will continue tomorrow with next batch of ${job.videosPerDay} videos`);
+      // Job stays in "processing" status - worker will check again later
+      return;
     }
   } catch (error: any) {
     const errorMessage = error?.message || "Unknown error";
