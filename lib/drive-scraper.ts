@@ -135,7 +135,7 @@ async function parseDrivePageHtml(html: string, folderId: string): Promise<{
   console.log(`[DRIVE-SCRAPER] Processed ${rowCount} table rows, found ${fileMetadataFromTable.size} video files`);
   
   // Add files from table parsing
-  for (const [fileId, metadata] of fileMetadataFromTable.entries()) {
+  for (const [fileId, metadata] of Array.from(fileMetadataFromTable.entries())) {
     files.push({
       id: fileId,
       name: metadata.name,
