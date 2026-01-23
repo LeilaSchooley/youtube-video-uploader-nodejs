@@ -5,7 +5,7 @@ export default function Privacy() {
     <div className="bg-gray-50 text-gray-800 py-10 px-5">
       <div className="max-w-4xl mx-auto bg-white p-7 rounded-xl shadow-lg">
         <h1 className="text-3xl font-bold mb-4 text-gray-800">Privacy Policy</h1>
-        <p className="mb-6"><strong>Effective date:</strong> 2025-12-29</p>
+        <p className="mb-6"><strong>Effective date:</strong> 2026-01-22</p>
 
         <h3 className="text-xl font-semibold mb-3 mt-6">Google privacy</h3>
         <p className="mb-4">
@@ -45,18 +45,25 @@ export default function Privacy() {
 
         <h2 className="text-2xl font-semibold mb-3 mt-6">How we use your data</h2>
         <ul className="list-disc list-inside mb-4 space-y-2">
-          <li>Upload and manage videos using the YouTube Data API.</li>
-          <li>Authenticate you and maintain your session.</li>
-          <li>Debugging, monitoring, and improving service quality.</li>
+          <li><strong>YouTube operations:</strong> Upload videos, manage video metadata, read channel information, and schedule video publications using the YouTube Data API.</li>
+          <li><strong>Google Drive integration:</strong> Read file names and folder structure to match video files with upload metadata from spreadsheets. We may rename or move files in your Drive based on your preferences (post-upload actions).</li>
+          <li><strong>Google Sheets integration:</strong> Read spreadsheet data to extract video metadata, titles, descriptions, URLs, and scheduling information for bulk upload operations.</li>
+          <li><strong>Authentication:</strong> Authenticate you and maintain your session using OAuth tokens.</li>
+          <li><strong>Service improvement:</strong> Debugging, monitoring, and improving service quality through usage logs and error tracking.</li>
         </ul>
 
         <h2 className="text-2xl font-semibold mb-3 mt-6">Sharing &amp; third parties</h2>
         <p className="mb-4">
           We do not sell your personal data. We may share data with service
           providers (hosting, analytics) who are contractually required to protect
-          your data. Your interactions with YouTube are subject to Google&apos;s
-          policies.
+          your data. Your interactions with YouTube, Google Drive, and Google Sheets
+          are subject to Google&apos;s policies:
         </p>
+        <ul className="list-disc list-inside mb-4 space-y-2 ml-4">
+          <li><a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer" className="text-red-600 hover:underline">Google Privacy Policy</a></li>
+          <li><a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener noreferrer" className="text-red-600 hover:underline">YouTube Terms of Service</a></li>
+          <li><a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener noreferrer" className="text-red-600 hover:underline">Google API Services User Data Policy</a></li>
+        </ul>
 
         <h2 className="text-2xl font-semibold mb-3 mt-6">Cookies &amp; local storage</h2>
         <p className="mb-4">

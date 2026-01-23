@@ -5,7 +5,7 @@ export default function Terms() {
     <div className="bg-gray-50 text-gray-800 py-10 px-5">
       <div className="max-w-4xl mx-auto bg-white p-7 rounded-xl shadow-lg">
         <h1 className="text-3xl font-bold mb-4 text-gray-800">Terms of Service</h1>
-        <p className="mb-6"><strong>Effective date:</strong> 2025-12-29</p>
+        <p className="mb-6"><strong>Effective date:</strong> 2026-01-22</p>
 
         <h2 className="text-2xl font-semibold mb-3 mt-6">1. Acceptance</h2>
         <p className="mb-4">
@@ -22,8 +22,14 @@ export default function Terms() {
         <h2 className="text-2xl font-semibold mb-3 mt-6">2. Service</h2>
         <p className="mb-4">
           We provide a service to upload and manage videos on YouTube using your
-          Google account and the YouTube Data API.
+          Google account. The service integrates with multiple Google APIs:
         </p>
+        <ul className="list-disc list-inside mb-4 space-y-2 ml-4">
+          <li><strong>YouTube Data API:</strong> To upload videos, manage metadata, and read channel information.</li>
+          <li><strong>Google Drive API:</strong> To access video files stored in your Google Drive for bulk uploads.</li>
+          <li><strong>Google Sheets API:</strong> To read spreadsheet data containing video metadata for bulk upload operations.</li>
+          <li><strong>Google OAuth2:</strong> To authenticate your Google account and access the above services.</li>
+        </ul>
 
         <h2 className="text-2xl font-semibold mb-3 mt-6">3. User obligations</h2>
         <ul className="list-disc list-inside mb-4 space-y-2">
@@ -45,10 +51,20 @@ export default function Terms() {
           attempting uploads.
         </p>
 
-        <h2 className="text-2xl font-semibold mb-3 mt-6">4. Third-party APIs</h2>
+        <h2 className="text-2xl font-semibold mb-3 mt-6">4. Third-party APIs &amp; Permissions</h2>
         <p className="mb-4">
-          The service uses Google APIs; your use is subject to Google&apos;s Terms of
-          Service and API policies.
+          The service uses Google APIs and requires the following permissions:
+        </p>
+        <ul className="list-disc list-inside mb-4 space-y-2 ml-4">
+          <li><strong>YouTube:</strong> Upload videos, read channel/video information, and manage video metadata.</li>
+          <li><strong>Google Drive:</strong> Read file names and folder structure to match videos with metadata. Optionally rename, move, or delete files based on your preferences.</li>
+          <li><strong>Google Sheets:</strong> Read spreadsheet data to extract video metadata for bulk uploads.</li>
+          <li><strong>User Information:</strong> Access your name and email address for account identification.</li>
+        </ul>
+        <p className="mb-4">
+          Your use of these APIs is subject to Google&apos;s Terms of Service and API policies,
+          including the <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener noreferrer" className="text-red-600 hover:underline">Google API Services User Data Policy</a>.
+          You can revoke access at any time through your Google Account settings.
         </p>
 
         <h2 className="text-2xl font-semibold mb-3 mt-6">5. Liability</h2>
