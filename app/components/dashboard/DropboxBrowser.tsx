@@ -92,7 +92,7 @@ export default function DropboxBrowser({
   };
 
   const handleSelectFolder = () => {
-    if (currentFolder) {
+    if (currentFolder && onSelectFolder) {
       onSelectFolder(currentFolder.id, currentFolder.name);
       onClose();
     }
