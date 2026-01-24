@@ -44,7 +44,8 @@ if (!CLIENT_ID || !CLIENT_SECRET || !REDIRECT_URL) {
 }
 
 const scopes =
-  "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets.readonly";
+  "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email";
+  // "https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets.readonly"; // Disabled: Drive and Sheets
 
 export function getOAuthClient(): OAuth2Client {
   if (!CLIENT_ID || !CLIENT_SECRET || !REDIRECT_URL) {

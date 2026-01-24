@@ -764,15 +764,15 @@ export default function UploadForms({
             <div className="p-4 bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20 border border-purple-200 dark:border-purple-700 rounded-lg">
               <label className="text-sm font-semibold text-purple-900 dark:text-purple-100 block mb-3">
                 Select Upload Source:
-              </label>
+                </label>
               <div className="flex gap-4 flex-wrap">
                 <label className="flex items-center gap-2 cursor-pointer">
-                  <input
+                <input
                     type="radio"
                     name="uploadSource"
                     value="drive"
                     checked={uploadSource === "drive"}
-                    onChange={(e) => {
+                  onChange={(e) => {
                       setUploadSource("drive");
                       if (typeof window !== "undefined") {
                         localStorage.setItem("folderSource", "drive");
@@ -791,7 +791,7 @@ export default function UploadForms({
                     name="uploadSource"
                     value="dropbox"
                     checked={uploadSource === "dropbox"}
-                    onChange={(e) => {
+                  onChange={(e) => {
                       setUploadSource("dropbox");
                       if (typeof window !== "undefined") {
                         localStorage.setItem("folderSource", "dropbox");
@@ -803,9 +803,9 @@ export default function UploadForms({
                   <span className="text-sm text-purple-800 dark:text-purple-200">
                     📦 Dropbox
                   </span>
-                </label>
-              </div>
-            </div>
+                  </label>
+                </div>
+                </div>
 
             <form onSubmit={handleBulkUpload} className="flex flex-col gap-5">
 
@@ -1485,26 +1485,26 @@ export default function UploadForms({
               )}
 
               {(uploadSource === "drive" || uploadSource === "dropbox") && (
-                <button
-                  type="submit"
-                  disabled={bulkUploading || (selectedBulkFiles.length === 0 && bulkUrls.length === 0)}
-                  className={`btn-primary ${
-                    bulkUploading || (selectedBulkFiles.length === 0 && bulkUrls.length === 0)
-                      ? "opacity-50 cursor-not-allowed"
-                      : ""
-                  }`}
-                >
-                  {bulkUploading ? (
-                    <span className="flex items-center gap-2">
-                      <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                      Queuing...
-                    </span>
-                  ) : (selectedBulkFiles.length === 0 && bulkUrls.length === 0) ? (
-                    "Please select files or enter URLs"
-                  ) : (
-                    `Queue ${selectedBulkFiles.length + bulkUrls.length} Video(s) for Upload`
-                  )}
-                </button>
+              <button
+                type="submit"
+                disabled={bulkUploading || (selectedBulkFiles.length === 0 && bulkUrls.length === 0)}
+                className={`btn-primary ${
+                  bulkUploading || (selectedBulkFiles.length === 0 && bulkUrls.length === 0)
+                    ? "opacity-50 cursor-not-allowed"
+                    : ""
+                }`}
+              >
+                {bulkUploading ? (
+                  <span className="flex items-center gap-2">
+                    <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    Queuing...
+                  </span>
+                ) : (selectedBulkFiles.length === 0 && bulkUrls.length === 0) ? (
+                  "Please select files or enter URLs"
+                ) : (
+                  `Queue ${selectedBulkFiles.length + bulkUrls.length} Video(s) for Upload`
+                )}
+              </button>
               )}
             </form>
 
@@ -1515,11 +1515,11 @@ export default function UploadForms({
                 <h3 className="text-lg font-bold text-gray-800 dark:text-white">
                   Upload Scheduling (Optional)
                 </h3>
-              </div>
+          </div>
               <div>
                 <label htmlFor="videosPerDay" className="label text-sm">
                   Videos Per Day
-                </label>
+              </label>
                 <input
                   type="number"
                   id="videosPerDay"
@@ -1541,8 +1541,8 @@ export default function UploadForms({
                 />
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                   Leave 0 or empty to upload all immediately. If set, videos will upload X per day starting today.
-                </p>
-              </div>
+                    </p>
+                  </div>
               <div className="mt-3 p-3 bg-blue-100 dark:bg-blue-900/30 rounded text-xs text-blue-800 dark:text-blue-200">
                 <strong>💡 How it works:</strong> If you set "5 videos per day", 
                 the first 5 videos will upload today, videos 6-10 tomorrow, and so on. 
@@ -1551,8 +1551,8 @@ export default function UploadForms({
                 <strong>Note:</strong> This setting applies to all upload methods (Sheets, Dropbox, CSV). 
                 If a video has a <code className="bg-blue-200 dark:bg-blue-800 px-1 rounded">scheduleTime</code> or <code className="bg-blue-200 dark:bg-blue-800 px-1 rounded">publishAt</code> date in your sheet/CSV, that date will be used instead.
               </div>
-            </div>
-          </div>
+              </div>
+                      </div>
         )}
       </div>
     </>
