@@ -50,6 +50,18 @@ const nextConfig = {
     maxInactiveAge: 60 * 1000,
     pagesBufferLength: 2,
   },
+  // Webpack configuration for server-side packages
+  webpack: (config, { isServer }) => {
+    if (isServer) {
+      // Externalize server-only packages to avoid bundling issues
+      config.externals = config.externals || [];
+      config.externals.push({
+        'xlsx': 'commonjs xlsx',
+        'dropbox': 'commonjs dropbox',
+      });
+    }
+    return config;
+  },
 };
 
 module.exports = nextConfig;
