@@ -12,6 +12,7 @@ interface SessionData {
     refresh_token?: string | null;
     [key: string]: any;
   };
+  dropboxToken?: string; // Dropbox access token (separate from Google OAuth)
 }
 
 const SESSIONS_FILE = path.join(process.cwd(), "data", "sessions.json");

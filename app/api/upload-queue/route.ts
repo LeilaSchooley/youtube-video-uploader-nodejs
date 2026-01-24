@@ -489,12 +489,57 @@ export async function POST(request: NextRequest) {
     }
 
     const formData = await request.formData();
-    const csvFile = formData.get("csvFile") as File | null;
-  const batchSize = parseInt(formData.get("batchSize") as string || "5", 10); // Default: 5 videos per batch
+    let csvFile = formData.get("csvFile") as File | null;
+    const dropboxCsvPath = formData.get("dropboxCsvPath") as string | null;
+    const csvSource = formData.get("csvSource") as string | null;
+    const batchSize = parseInt(formData.get("batchSize") as string || "5", 10); // Default: 5 videos per batch
+
+    // Handle Dropbox CSV file
+    if (csvSource === "dropbox" && dropboxCsvPath) {
+      try {
+        // Get Dropbox access token from session
+        const dropboxAccessToken = session.dropboxToken;
+        if (!dropboxAccessToken) {
+          return new Response(
+            JSON.stringify({ error: "Dropbox not connected" }),
+            { status: 401, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+
+        // Download file from Dropbox
+        const { downloadDropboxFile } = await import("@/lib/dropbox");
+        const fileStream = await downloadDropboxFile(dropboxCsvPath, dropboxAccessToken);
+        
+        // Convert stream to buffer
+        const chunks: Buffer[] = [];
+        for await (const chunk of fileStream) {
+          chunks.push(Buffer.from(chunk));
+        }
+        const fileBuffer = Buffer.concat(chunks);
+        
+        // Get file name from path
+        const fileName = dropboxCsvPath.split('/').pop() || 'file.csv';
+        
+        // Determine MIME type based on file extension
+        const mimeType = fileName.toLowerCase().endsWith('.xlsx') ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' :
+                         fileName.toLowerCase().endsWith('.xls') ? 'application/vnd.ms-excel' :
+                         'text/csv';
+        
+        // Create File object from buffer
+        const fileBlob = new Blob([fileBuffer], { type: mimeType });
+        csvFile = new File([fileBlob], fileName, { type: mimeType });
+      } catch (error: any) {
+        console.error("[UPLOAD-QUEUE] Error downloading CSV from Dropbox:", error);
+        return new Response(
+          JSON.stringify({ error: `Failed to download CSV from Dropbox: ${error.message}` }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+    }
 
   if (!csvFile) {
     return new Response(
-      JSON.stringify({ error: "No CSV file uploaded" }),
+      JSON.stringify({ error: "No CSV file uploaded or Dropbox file path provided" }),
       { status: 400, headers: { 'Content-Type': 'application/json' } }
     );
   }

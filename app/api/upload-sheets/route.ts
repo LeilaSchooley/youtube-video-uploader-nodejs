@@ -6,6 +6,7 @@ import { cookies } from "next/headers";
 import { readSheetData, extractSpreadsheetId, getSpreadsheetMetadata } from "@/lib/sheets";
 import { addToBulkQueue } from "@/lib/bulk-queue";
 import { listDriveVideos } from "@/lib/drive";
+import { listDropboxVideos } from "@/lib/dropbox";
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -74,6 +75,7 @@ export async function POST(request: NextRequest) {
       sheetName,
       range,
       driveFolderId,
+      dropboxFolderPath,
       videosPerDay,
       // startDate is no longer required - will use today if videosPerDay is set
     } = body;
@@ -215,6 +217,43 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // If dropboxFolderPath is provided, match video_name to Dropbox files
+    let dropboxFilesMap: Map<string, string> = new Map();
+    if (dropboxFolderPath && session.dropboxToken) {
+      try {
+        const dropboxVideos = await listDropboxVideos(dropboxFolderPath, session.dropboxToken);
+        
+        // Create a map of filename (without extension) -> file path
+        // Also create a map with full filename -> file path for exact matches
+        dropboxVideos.forEach(file => {
+          const nameWithoutExt = file.name.replace(/\.[^/.]+$/, "").toLowerCase();
+          const fullName = file.name.toLowerCase();
+          const filePath = file.pathLower || file.id;
+          
+          // Store both mappings (prefer exact match)
+          if (!dropboxFilesMap.has(fullName)) {
+            dropboxFilesMap.set(fullName, filePath);
+          }
+          if (!dropboxFilesMap.has(nameWithoutExt)) {
+            dropboxFilesMap.set(nameWithoutExt, filePath);
+          }
+        });
+        
+        console.log(`[UPLOAD-SHEETS] Found ${dropboxVideos.length} videos in Dropbox folder, matched ${dropboxFilesMap.size} filename mappings`);
+      } catch (error: any) {
+        console.error(`[UPLOAD-SHEETS] Error listing Dropbox folder:`, error);
+        return NextResponse.json(
+          { error: `Failed to access Dropbox folder: ${error?.message || "Unknown error"}` },
+          { status: 400 }
+        );
+      }
+    } else if (dropboxFolderPath && !session.dropboxToken) {
+      return NextResponse.json(
+        { error: "Dropbox folder specified but Dropbox not authenticated. Please connect Dropbox first." },
+        { status: 400 }
+      );
+    }
+
     // Helper function to match video_name to Drive file
     const matchDriveFile = (videoName: string | undefined): string | undefined => {
       if (!videoName || !driveFolderId || driveFilesMap.size === 0) {
@@ -244,8 +283,38 @@ export async function POST(request: NextRequest) {
       return undefined;
     };
 
+    // Helper function to match video_name to Dropbox file
+    const matchDropboxFile = (videoName: string | undefined): string | undefined => {
+      if (!videoName || !dropboxFolderPath || dropboxFilesMap.size === 0) {
+        return undefined;
+      }
+      
+      const normalizedName = videoName.toLowerCase().trim();
+      const nameWithoutExt = normalizedName.replace(/\.[^/.]+$/, "");
+      
+      // Try exact match first (with extension)
+      if (dropboxFilesMap.has(normalizedName)) {
+        return dropboxFilesMap.get(normalizedName);
+      }
+      
+      // Try match without extension
+      if (dropboxFilesMap.has(nameWithoutExt)) {
+        return dropboxFilesMap.get(nameWithoutExt);
+      }
+      
+      // Try partial match (filename contains video_name or vice versa)
+      for (const [dropboxFileName, filePath] of Array.from(dropboxFilesMap.entries())) {
+        if (dropboxFileName.includes(normalizedName) || normalizedName.includes(dropboxFileName)) {
+          return filePath;
+        }
+      }
+      
+      return undefined;
+    };
+
     // Convert to queue items and filter invalid ones
     let matchedCount = 0;
+    let dropboxMatchedCount = 0;
     let unmatchedCount = 0;
     const unmatchedNames: Array<{ row: number; video_name?: string; reason: string }> = [];
     
@@ -266,9 +335,30 @@ export async function POST(request: NextRequest) {
             console.warn(`[UPLOAD-SHEETS] Row ${index + 1}: Could not match "${row.video_name}" to any Drive file`);
           }
         }
-      } else if (!row.video_name && driveFolderId && !row.drive_file_id && !row.video_url) {
+      }
+
+      // Match video_name to Dropbox file if dropboxFolderPath is provided
+      let matchedDropboxFileId: string | undefined = undefined;
+      if (dropboxFolderPath && row.video_name && !matchedDriveFileId && !row.video_url) {
+        matchedDropboxFileId = matchDropboxFile(row.video_name);
+        if (matchedDropboxFileId) {
+          dropboxMatchedCount++;
+          if (dropboxMatchedCount <= 5) { // Log first 5 matches
+            console.log(`[UPLOAD-SHEETS] Matched "${row.video_name}" to Dropbox file ${matchedDropboxFileId}`);
+          }
+        } else {
+          unmatchedCount++;
+          if (unmatchedCount <= 10) { // Log first 10 unmatched
+            unmatchedNames.push({ row: index + 1, video_name: row.video_name, reason: "No matching Dropbox file found" });
+            console.warn(`[UPLOAD-SHEETS] Row ${index + 1}: Could not match "${row.video_name}" to any Dropbox file`);
+          }
+        }
+      }
+
+      // Check for missing video sources
+      if (!row.video_name && !driveFolderId && !dropboxFolderPath && !row.drive_file_id && !row.video_url) {
         unmatchedCount++;
-        unmatchedNames.push({ row: index + 1, reason: "Missing video_name, drive_file_id, and video_url" });
+        unmatchedNames.push({ row: index + 1, reason: "Missing video_name, drive_file_id, dropbox_file_id, and video_url" });
         console.warn(`[UPLOAD-SHEETS] Row ${index + 1}: video_name column is empty and no other video source provided`);
       }
       
@@ -290,6 +380,7 @@ export async function POST(request: NextRequest) {
         thumbnailUrl: row.thumbnail_url || undefined,
         driveFileId: matchedDriveFileId || row.drive_file_id || undefined,
         driveThumbnailId: row.drive_thumbnail_id || undefined,
+        dropboxFileId: matchedDropboxFileId || undefined,
         authHeaders: row.url_auth_headers ? (() => {
           try {
             return JSON.parse(row.url_auth_headers);
@@ -306,12 +397,12 @@ export async function POST(request: NextRequest) {
     
     // Filter out invalid items (no video source)
     const validQueueItems = allQueueItems.filter((item, index) => {
-      const hasVideoSource = item.driveFileId || item.videoUrl;
+      const hasVideoSource = item.driveFileId || item.dropboxFileId || item.videoUrl;
       if (!hasVideoSource) {
         unmatchedNames.push({ 
           row: item.originalIndex, 
           video_name: normalizedData[index]?.video_name,
-          reason: "No video source (missing drive_file_id, video_url, or matched video_name)" 
+          reason: "No video source (missing drive_file_id, dropbox_file_id, video_url, or matched video_name)" 
         });
         return false;
       }
@@ -321,7 +412,7 @@ export async function POST(request: NextRequest) {
     const filteredCount = allQueueItems.length - validQueueItems.length;
     
     // Log summary
-    console.log(`[UPLOAD-SHEETS] Matching summary: ${matchedCount} matched, ${unmatchedCount} unmatched out of ${normalizedData.length} total rows`);
+    console.log(`[UPLOAD-SHEETS] Matching summary: ${matchedCount} Drive matched, ${dropboxMatchedCount} Dropbox matched, ${unmatchedCount} unmatched out of ${normalizedData.length} total rows`);
     console.log(`[UPLOAD-SHEETS] Filtered ${filteredCount} invalid items (no video source), ${validQueueItems.length} valid items will be queued`);
     if (unmatchedNames.length > 0) {
       const sampleUnmatched = unmatchedNames.slice(0, 10);
@@ -340,7 +431,7 @@ export async function POST(request: NextRequest) {
         filteredItems: filteredCount,
         matchedCount,
         unmatchedCount,
-        message: `All ${normalizedData.length} rows were filtered out because they lack video sources (video_name, drive_file_id, or video_url). Please check your sheet and Drive folder.`,
+        message: `All ${normalizedData.length} rows were filtered out because they lack video sources (video_name, drive_file_id, dropbox_file_id, or video_url). Please check your sheet and folder.`,
       }, { status: 400 });
     }
 
@@ -365,6 +456,7 @@ export async function POST(request: NextRequest) {
       totalItems: queueItems.length,
       filteredItems: filteredCount,
       matchedCount,
+      dropboxMatchedCount,
       unmatchedCount,
       spreadsheetTitle: metadata.title,
       sheetName: sheetName || metadata.sheets[0]?.title || "Sheet1",

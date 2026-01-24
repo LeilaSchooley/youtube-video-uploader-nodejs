@@ -19,6 +19,9 @@ export interface BulkUploadItem {
     // For Drive-based uploads
     driveFileId?: string;
     driveThumbnailId?: string;
+    // For Dropbox-based uploads
+    dropboxFileId?: string; // Dropbox file path
+    dropboxThumbnailId?: string; // Dropbox thumbnail path
     authHeaders?: Record<string, string>; // Optional auth headers for URL
     timeout?: number; // Optional timeout override
     // Common metadata
@@ -30,7 +33,7 @@ export interface BulkUploadItem {
     thumbnailPath?: string;
     // Post-upload actions
     postUploadAction?: string; // "rename", "delete", "move", or "none"
-    completedFolderId?: string; // Drive folder ID for move action
+    completedFolderId?: string; // Drive folder ID or Dropbox folder path for move action
     // YouTube settings
     madeForKids?: boolean; // Self-declared "Made for Kids" status (default: false)
   }>;

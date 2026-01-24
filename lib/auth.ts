@@ -65,5 +65,74 @@ export function generateAuthUrl(): string {
   });
 }
 
-export { CLIENT_ID, CLIENT_SECRET, REDIRECT_URL };
+// Dropbox OAuth configuration
+const DROPBOX_APP_KEY = process.env.DROPBOX_APP_KEY;
+const DROPBOX_APP_SECRET = process.env.DROPBOX_APP_SECRET;
+const DROPBOX_REDIRECT_URI = process.env.DROPBOX_REDIRECT_URI || REDIRECT_URL?.replace('/api/auth/callback', '/api/auth/dropbox/callback');
+
+/**
+ * Generate Dropbox OAuth authorization URL
+ * Scopes required for file browsing and downloading:
+ * - files.metadata.read: Read file/folder metadata
+ * - files.content.read: Download files
+ * - files.content.write: For post-upload actions (rename, move, delete)
+ */
+export function generateDropboxAuthUrl(): string {
+  if (!DROPBOX_APP_KEY || !DROPBOX_REDIRECT_URI) {
+    throw new Error("Dropbox OAuth credentials not configured. Please set DROPBOX_APP_KEY and DROPBOX_REDIRECT_URI environment variables.");
+  }
+  
+  // Required scopes for file operations
+  const scopes = [
+    'files.metadata.read',   // List files and folders
+    'files.content.read',    // Download files
+    'files.content.write',   // Rename, move, delete files
+  ].join(' ');
+  
+  const params = new URLSearchParams({
+    client_id: DROPBOX_APP_KEY,
+    redirect_uri: DROPBOX_REDIRECT_URI,
+    response_type: 'code',
+    token_access_type: 'offline', // Request refresh token
+    scope: scopes, // Explicitly request required scopes
+  });
+  
+  return `https://www.dropbox.com/oauth2/authorize?${params.toString()}`;
+}
+
+/**
+ * Exchange Dropbox authorization code for access token
+ */
+export async function exchangeDropboxCode(code: string): Promise<{ access_token: string; refresh_token?: string }> {
+  if (!DROPBOX_APP_KEY || !DROPBOX_APP_SECRET || !DROPBOX_REDIRECT_URI) {
+    throw new Error("Dropbox OAuth credentials not configured.");
+  }
+  
+  const response = await fetch('https://api.dropbox.com/oauth2/token', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams({
+      code,
+      grant_type: 'authorization_code',
+      client_id: DROPBOX_APP_KEY,
+      client_secret: DROPBOX_APP_SECRET,
+      redirect_uri: DROPBOX_REDIRECT_URI,
+    }),
+  });
+  
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Dropbox token exchange failed: ${error}`);
+  }
+  
+  const data = await response.json();
+  return {
+    access_token: data.access_token,
+    refresh_token: data.refresh_token, // Dropbox may not always provide refresh token
+  };
+}
+
+export { CLIENT_ID, CLIENT_SECRET, REDIRECT_URL, DROPBOX_APP_KEY, DROPBOX_APP_SECRET, DROPBOX_REDIRECT_URI };
 

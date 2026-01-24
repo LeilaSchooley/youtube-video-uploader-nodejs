@@ -41,6 +41,7 @@ export async function GET(request: NextRequest) {
       authenticated: true,
       name: response.data.name,
       picture: response.data.picture,
+      hasDropbox: !!session.dropboxToken,
     });
   } catch (error: any) {
     console.error("User info error:", error);

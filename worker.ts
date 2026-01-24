@@ -11,6 +11,7 @@ import { getOAuthClient } from "./lib/auth";
 import { google } from "googleapis";
 import { fetchFileAsStream, isValidUrl } from "./lib/url-stream";
 import { downloadDriveFile, isDriveFileId, renameDriveFile, moveDriveFile, deleteDriveFile, getDriveFileMetadata } from "./lib/drive";
+import { downloadDropboxFile, isDropboxPath, renameDropboxFile, moveDropboxFile, deleteDropboxFile, getDropboxFileMetadata } from "./lib/dropbox";
 import { Readable } from "stream";
 import fs from "fs";
 
@@ -27,6 +28,8 @@ interface UploadTask {
     url?: string;
     driveFileId?: string;
     driveThumbnailId?: string;
+    dropboxFileId?: string;
+    dropboxThumbnailId?: string;
     authHeaders?: Record<string, string>;
     timeout?: number;
     title?: string;
@@ -42,14 +45,26 @@ interface UploadTask {
 }
 
 /**
- * Get video stream from file, URL, or Drive
+ * Get video stream from file, URL, Drive, or Dropbox
  */
-async function getVideoStream(task: UploadTask, oAuthClient: ReturnType<typeof getOAuthClient>): Promise<Readable> {
+async function getVideoStream(
+  task: UploadTask, 
+  oAuthClient: ReturnType<typeof getOAuthClient>,
+  dropboxToken?: string
+): Promise<Readable> {
   const { item } = task;
 
-  // Priority: Drive > URL > File
+  // Priority: Drive > Dropbox > URL > File
   if (item.driveFileId && isDriveFileId(item.driveFileId)) {
     return await downloadDriveFile(item.driveFileId, oAuthClient);
+  }
+
+  // Handle Dropbox files
+  if (item.dropboxFileId && isDropboxPath(item.dropboxFileId)) {
+    if (!dropboxToken) {
+      throw new Error("Dropbox token required but not available");
+    }
+    return await downloadDropboxFile(item.dropboxFileId, dropboxToken);
   }
 
   // Handle URL-based upload
@@ -76,12 +91,30 @@ async function getVideoStream(task: UploadTask, oAuthClient: ReturnType<typeof g
 /**
  * Get thumbnail stream if available
  */
-async function getThumbnailStream(task: UploadTask, oAuthClient: ReturnType<typeof getOAuthClient>): Promise<Readable | null> {
+async function getThumbnailStream(
+  task: UploadTask, 
+  oAuthClient: ReturnType<typeof getOAuthClient>,
+  dropboxToken?: string
+): Promise<Readable | null> {
   const { item } = task;
 
-  // Priority: Drive > URL > File
+  // Priority: Drive > Dropbox > URL > File
   if (item.driveThumbnailId && isDriveFileId(item.driveThumbnailId)) {
     return await downloadDriveFile(item.driveThumbnailId, oAuthClient);
+  }
+
+  // Handle Dropbox thumbnails
+  if (item.dropboxThumbnailId && isDropboxPath(item.dropboxThumbnailId)) {
+    if (!dropboxToken) {
+      console.warn("[WORKER] Dropbox thumbnail requested but token not available");
+      return null;
+    }
+    try {
+      return await downloadDropboxFile(item.dropboxThumbnailId, dropboxToken);
+    } catch (error: any) {
+      console.error(`[WORKER] Failed to download Dropbox thumbnail: ${error?.message}`);
+      return null;
+    }
   }
 
   // Thumbnail URL
@@ -106,7 +139,8 @@ async function uploadVideo(
   youtube: ReturnType<typeof google.youtube>,
   task: UploadTask,
   sendProgress: (index: number, status: string, videoId?: string, error?: string) => void,
-  oAuthClient: ReturnType<typeof getOAuthClient>
+  oAuthClient: ReturnType<typeof getOAuthClient>,
+  dropboxToken?: string
 ): Promise<{ success: boolean; videoId?: string; error?: string }> {
   const { index, item } = task;
 
@@ -167,6 +201,8 @@ async function uploadVideo(
     let sourceInfo = "";
     if (item.driveFileId) {
       sourceInfo = "from Google Drive";
+    } else if (item.dropboxFileId) {
+      sourceInfo = "from Dropbox";
     } else if (item.url) {
       sourceInfo = "from URL";
     } else if (item.file) {
@@ -176,7 +212,7 @@ async function uploadVideo(
     sendProgress(index, `Fetching video ${sourceInfo}...`);
 
     // Get video stream
-    const videoStream = await getVideoStream(task, oAuthClient);
+    const videoStream = await getVideoStream(task, oAuthClient, dropboxToken);
 
     sendProgress(index, `Uploading "${title}" to YouTube...`);
 
@@ -200,7 +236,7 @@ async function uploadVideo(
     sendProgress(index, `Uploaded successfully (${uploadDuration.toFixed(1)}s)`, videoId);
 
     // Upload thumbnail if available
-    const thumbnailStream = await getThumbnailStream(task, oAuthClient);
+    const thumbnailStream = await getThumbnailStream(task, oAuthClient, dropboxToken);
     if (thumbnailStream && videoId) {
       sendProgress(index, "Uploading thumbnail...", videoId);
       try {
@@ -247,6 +283,38 @@ async function uploadVideo(
       }
     }
 
+    // Post-upload actions for Dropbox files
+    if (item.dropboxFileId && videoId && item.postUploadAction && item.postUploadAction !== "none" && dropboxToken) {
+      try {
+        switch (item.postUploadAction.toLowerCase()) {
+          case "rename":
+            const dropboxMetadata = await getDropboxFileMetadata(item.dropboxFileId, dropboxToken);
+            const dropboxExtension = dropboxMetadata.name.split('.').pop() || 'mp4';
+            const dropboxNewName = `${videoId}.${dropboxExtension}`;
+            await renameDropboxFile(item.dropboxFileId, dropboxNewName, dropboxToken);
+            sendProgress(index, `Renamed to ${dropboxNewName}`, videoId);
+            break;
+            
+          case "delete":
+            await deleteDropboxFile(item.dropboxFileId, dropboxToken);
+            sendProgress(index, "Deleted from Dropbox", videoId);
+            break;
+            
+          case "move":
+            if (item.completedFolderId) {
+              await moveDropboxFile(item.dropboxFileId, item.completedFolderId, dropboxToken);
+              sendProgress(index, `Moved to folder`, videoId);
+            } else {
+              console.warn(`[WORKER] Move action requested but no completedFolderId provided`);
+            }
+            break;
+        }
+      } catch (actionError: any) {
+        console.error(`[WORKER] Dropbox post-upload action failed for video ${index}:`, actionError);
+        // Don't fail the upload - action is optional
+      }
+    }
+
     return { success: true, videoId };
   } catch (error: any) {
     let errorMessage =
@@ -259,8 +327,12 @@ async function uploadVideo(
       errorMessage = `Video file not found or inaccessible`;
     } else if (errorMessage.includes("Failed to download Drive file")) {
       errorMessage = `Drive file not found or access denied`;
+    } else if (errorMessage.includes("Failed to download Dropbox file")) {
+      errorMessage = `Dropbox file not found or access denied`;
+    } else if (errorMessage.includes("Dropbox token required")) {
+      errorMessage = `Dropbox authentication required - please reconnect Dropbox`;
     } else if (errorMessage.includes("No valid video source found")) {
-      errorMessage = `No video source available (missing drive_file_id, video_url, or file)`;
+      errorMessage = `No video source available (missing drive_file_id, dropbox_file_id, video_url, or file)`;
     } else if (errorMessage.includes("timeout") || errorMessage.includes("ETIMEDOUT")) {
       errorMessage = `Upload timeout - video may be too large or connection too slow`;
     }
@@ -278,10 +350,11 @@ async function processBatch(
   youtube: ReturnType<typeof google.youtube>,
   batch: UploadTask[],
   sendProgress: (index: number, status: string, videoId?: string, error?: string) => void,
-  oAuthClient: ReturnType<typeof getOAuthClient>
+  oAuthClient: ReturnType<typeof getOAuthClient>,
+  dropboxToken?: string
 ): Promise<void> {
   const results = await Promise.allSettled(
-    batch.map((task) => uploadVideo(youtube, task, sendProgress, oAuthClient))
+    batch.map((task) => uploadVideo(youtube, task, sendProgress, oAuthClient, dropboxToken))
   );
 
   const batchResults = {
@@ -366,6 +439,9 @@ async function processBulkJob(jobId: string): Promise<void> {
     version: "v3",
     auth: oAuthClient,
   });
+
+  // Get Dropbox token if available
+  const dropboxToken = session.dropboxToken;
 
   // Determine which videos to upload TODAY (using UTC for consistency)
   const now = new Date();
@@ -533,7 +609,7 @@ async function processBulkJob(jobId: string): Promise<void> {
   try {
     // Validate TODAY's batch items have video sources
     const tasksWithoutSource = tasks.filter(
-      (task) => !task.item.driveFileId && !task.item.url && !task.item.file
+      (task) => !task.item.driveFileId && !task.item.dropboxFileId && !task.item.url && !task.item.file
     );
     
     if (tasksWithoutSource.length > 0) {
@@ -546,7 +622,7 @@ async function processBulkJob(jobId: string): Promise<void> {
       
       // Remove invalid tasks from today's batch
       const validTasks = tasks.filter(
-        (task) => task.item.driveFileId || task.item.url || task.item.file
+        (task) => task.item.driveFileId || task.item.dropboxFileId || task.item.url || task.item.file
       );
       
       if (validTasks.length === 0) {
@@ -568,7 +644,7 @@ async function processBulkJob(jobId: string): Promise<void> {
       console.log(
         `[WORKER] Uploading batch ${i + 1}/${batches.length} (${batch.length} videos)`
       );
-      await processBatch(youtube, batch, sendProgress, oAuthClient);
+      await processBatch(youtube, batch, sendProgress, oAuthClient, dropboxToken);
     }
 
     // Check progress after today's batch (use in-memory progress for accuracy)
