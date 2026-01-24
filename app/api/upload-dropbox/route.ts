@@ -6,8 +6,10 @@ import { cookies } from "next/headers";
 import { listDropboxVideosRecursive, listDropboxVideos, downloadDropboxFile } from "@/lib/dropbox";
 import { addToBulkQueue } from "@/lib/bulk-queue";
 import { Readable } from "stream";
-import * as XLSX from "xlsx";
 const csvParser = require("csv-parser");
+// Use require for xlsx to avoid TypeScript module resolution issues
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const XLSX = require("xlsx") as typeof import("xlsx");
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
