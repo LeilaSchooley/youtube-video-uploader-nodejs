@@ -70,6 +70,11 @@ export function generateAuthUrl(): string {
 const DROPBOX_APP_KEY = process.env.DROPBOX_APP_KEY;
 const DROPBOX_APP_SECRET = process.env.DROPBOX_APP_SECRET;
 const DROPBOX_REDIRECT_URI = process.env.DROPBOX_REDIRECT_URI || REDIRECT_URL?.replace('/api/auth/callback', '/api/auth/dropbox/callback');
+// Generated Access Token (GAT) - long-lived token that doesn't expire
+// Only used for the owner account (email must match DROPBOX_GAT_OWNER_EMAIL)
+const DROPBOX_GENERATED_ACCESS_TOKEN = process.env.DROPBOX_GENERATED_ACCESS_TOKEN;
+// Owner email - GAT will only be used for this user
+const DROPBOX_GAT_OWNER_EMAIL = process.env.DROPBOX_GAT_OWNER_EMAIL;
 
 /**
  * Generate Dropbox OAuth authorization URL
@@ -135,5 +140,148 @@ export async function exchangeDropboxCode(code: string): Promise<{ access_token:
   };
 }
 
-export { CLIENT_ID, CLIENT_SECRET, REDIRECT_URL, DROPBOX_APP_KEY, DROPBOX_APP_SECRET, DROPBOX_REDIRECT_URI };
+/**
+ * Refresh Dropbox access token using refresh token
+ */
+async function refreshDropboxToken(refreshToken: string): Promise<{ access_token: string; refresh_token?: string }> {
+  if (!DROPBOX_APP_KEY || !DROPBOX_APP_SECRET) {
+    throw new Error("Dropbox OAuth credentials not configured.");
+  }
+  
+  const response = await fetch('https://api.dropbox.com/oauth2/token', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+      client_id: DROPBOX_APP_KEY,
+      client_secret: DROPBOX_APP_SECRET,
+    }),
+  });
+  
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Dropbox token refresh failed: ${error}`);
+  }
+  
+  const data = await response.json();
+  return {
+    access_token: data.access_token,
+    refresh_token: data.refresh_token || refreshToken, // Keep old refresh token if new one not provided
+  };
+}
+
+/**
+ * Get Dropbox access token - checks Generated Access Token (GAT) first, then session token
+ * Automatically refreshes expired tokens using refresh token if available
+ * GAT is a long-lived token that doesn't expire, perfect for automated systems
+ * GAT is only used for the owner account (matching DROPBOX_GAT_OWNER_EMAIL)
+ */
+export async function getDropboxToken(
+  sessionToken?: string | null,
+  sessionRefreshToken?: string | null,
+  sessionId?: string,
+  userEmail?: string | null
+): Promise<string | undefined> {
+  // Priority 1: Use Generated Access Token from environment (never expires)
+  // BUT only if this is the owner's account
+  if (DROPBOX_GENERATED_ACCESS_TOKEN) {
+    // If owner email is configured, check if this user matches
+    if (DROPBOX_GAT_OWNER_EMAIL) {
+      if (userEmail && userEmail.toLowerCase() === DROPBOX_GAT_OWNER_EMAIL.toLowerCase()) {
+        console.log(`[DROPBOX] Using GAT for owner account: ${userEmail}`);
+        return DROPBOX_GENERATED_ACCESS_TOKEN;
+      } else {
+        // Not the owner - don't use GAT, fall through to OAuth token
+        console.log(`[DROPBOX] GAT available but user ${userEmail} is not the owner (${DROPBOX_GAT_OWNER_EMAIL})`);
+      }
+    } else {
+      // No owner email configured - use GAT for everyone (backward compatibility)
+      // WARNING: This means all users share the same Dropbox account
+      console.warn(`[DROPBOX] GAT is set but DROPBOX_GAT_OWNER_EMAIL is not configured. GAT will be used for ALL users.`);
+      return DROPBOX_GENERATED_ACCESS_TOKEN;
+    }
+  }
+  
+  // Priority 2: Use token from session (OAuth flow)
+  // If we have both access token and refresh token, return access token
+  // If it's expired, API calls will fail with 401 and we can refresh then
+  if (sessionToken) {
+    return sessionToken;
+  }
+  
+  // Priority 3: No access token but have refresh token - refresh now
+  if (sessionRefreshToken && sessionId) {
+    try {
+      console.log(`[DROPBOX] Access token missing, attempting to refresh using refresh token...`);
+      const { getSession, setSession } = await import("./session");
+      const tokenData = await refreshDropboxToken(sessionRefreshToken);
+      
+      // Update session with new tokens
+      const session = getSession(sessionId);
+      if (session) {
+        setSession(sessionId, {
+          ...session,
+          dropboxToken: tokenData.access_token,
+          dropboxRefreshToken: tokenData.refresh_token || sessionRefreshToken,
+        });
+        console.log(`[DROPBOX] Successfully refreshed access token`);
+        return tokenData.access_token;
+      }
+    } catch (error: any) {
+      console.error(`[DROPBOX] Failed to refresh token:`, error?.message || error);
+      // Return undefined - user will need to re-authenticate
+    }
+  }
+  
+  return undefined;
+}
+
+/**
+ * Refresh Dropbox token if API call fails with 401
+ * This is called automatically when Dropbox API returns unauthorized
+ */
+export async function refreshDropboxTokenIfNeeded(
+  error: any,
+  sessionId: string,
+  sessionRefreshToken?: string | null
+): Promise<string | undefined> {
+  // Check if error is 401/unauthorized
+  const isUnauthorized = 
+    error?.status === 401 ||
+    error?.statusCode === 401 ||
+    error?.message?.includes('401') ||
+    error?.message?.includes('unauthorized') ||
+    error?.message?.includes('expired');
+  
+  if (!isUnauthorized || !sessionRefreshToken) {
+    return undefined;
+  }
+  
+  try {
+    console.log(`[DROPBOX] Token expired (401 error), refreshing using refresh token...`);
+    const { getSession, setSession } = await import("./session");
+    const tokenData = await refreshDropboxToken(sessionRefreshToken);
+    
+    // Update session with new tokens
+    const session = getSession(sessionId);
+    if (session) {
+      setSession(sessionId, {
+        ...session,
+        dropboxToken: tokenData.access_token,
+        dropboxRefreshToken: tokenData.refresh_token || sessionRefreshToken,
+      });
+      console.log(`[DROPBOX] Successfully refreshed expired token`);
+      return tokenData.access_token;
+    }
+  } catch (refreshError: any) {
+    console.error(`[DROPBOX] Failed to refresh expired token:`, refreshError?.message || refreshError);
+  }
+  
+  return undefined;
+}
+
+export { CLIENT_ID, CLIENT_SECRET, REDIRECT_URL, DROPBOX_APP_KEY, DROPBOX_APP_SECRET, DROPBOX_REDIRECT_URI, DROPBOX_GENERATED_ACCESS_TOKEN, DROPBOX_GAT_OWNER_EMAIL };
 

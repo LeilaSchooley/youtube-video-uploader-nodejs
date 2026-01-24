@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { NextRequest } from "next/server";
-import { getOAuthClient } from "@/lib/auth";
+import { getOAuthClient, getDropboxToken } from "@/lib/auth";
 import { getSession } from "@/lib/session";
 import { google } from "googleapis";
 import { cookies } from "next/headers";
@@ -36,12 +36,22 @@ export async function GET(request: NextRequest) {
     });
 
     const response = await oauth2.userinfo.get();
+    const userEmail = response.data.email || undefined;
+    
+    // Check if Dropbox is available (GAT or session token, auto-refreshes if needed)
+    // GAT is only used if userEmail matches DROPBOX_GAT_OWNER_EMAIL
+    const dropboxToken = await getDropboxToken(
+      session.dropboxToken,
+      session.dropboxRefreshToken,
+      sessionId,
+      userEmail
+    );
     
     return NextResponse.json({
       authenticated: true,
       name: response.data.name,
       picture: response.data.picture,
-      hasDropbox: !!session.dropboxToken,
+      hasDropbox: !!dropboxToken,
     });
   } catch (error: any) {
     console.error("User info error:", error);

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession, setSession } from "@/lib/session";
-import { getOAuthClient } from "@/lib/auth";
+import { getOAuthClient, getDropboxToken } from "@/lib/auth";
 import { google } from "googleapis";
 import { cookies } from "next/headers";
 import { listDropboxVideosRecursive, listDropboxVideos, downloadDropboxFile } from "@/lib/dropbox";
@@ -49,15 +49,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!session.dropboxToken) {
-      return NextResponse.json(
-        { error: "Dropbox not connected. Please connect Dropbox first." },
-        { status: 401 }
-      );
-    }
-
-    // Get userId from session
+    // Get userId/email from session (needed for GAT owner check)
     let userId = session.userId;
+    let userEmail: string | undefined;
     if (!userId) {
       const oAuthClient = getOAuthClient();
       oAuthClient.setCredentials(session.tokens);
@@ -67,8 +61,26 @@ export async function POST(request: NextRequest) {
       });
       const userInfo = await oauth2.userinfo.get();
       userId = (userInfo.data.email || userInfo.data.id || undefined) as string | undefined;
+      userEmail = userInfo.data.email || undefined;
       session.userId = userId;
       setSession(sessionId, session);
+    } else {
+      // userId might be email, try to extract email
+      userEmail = userId.includes('@') ? userId : undefined;
+    }
+
+    // Get Dropbox token - checks GAT from env first (only for owner), then session token, auto-refreshes if needed
+    const dropboxToken = await getDropboxToken(
+      session.dropboxToken,
+      session.dropboxRefreshToken,
+      sessionId,
+      userEmail
+    );
+    if (!dropboxToken) {
+      return NextResponse.json(
+        { error: "Dropbox not connected. Please connect Dropbox first or set DROPBOX_GENERATED_ACCESS_TOKEN in environment variables." },
+        { status: 401 }
+      );
     }
 
     const body = await request.json();
@@ -106,9 +118,9 @@ export async function POST(request: NextRequest) {
     let videos;
     try {
       if (recursive) {
-        videos = await listDropboxVideosRecursive(normalizedPath, session.dropboxToken);
+        videos = await listDropboxVideosRecursive(normalizedPath, dropboxToken);
       } else {
-        videos = await listDropboxVideos(normalizedPath, session.dropboxToken);
+        videos = await listDropboxVideos(normalizedPath, dropboxToken);
       }
     } catch (error: any) {
       return NextResponse.json(
@@ -129,7 +141,7 @@ export async function POST(request: NextRequest) {
     if (dropboxCsvPath) {
       try {
         console.log(`[UPLOAD-DROPBOX] Downloading spreadsheet from: ${dropboxCsvPath}`);
-        const fileStream = await downloadDropboxFile(dropboxCsvPath, session.dropboxToken);
+        const fileStream = await downloadDropboxFile(dropboxCsvPath, dropboxToken);
         
         // Convert stream to buffer
         const chunks: Buffer[] = [];
@@ -220,69 +232,90 @@ export async function POST(request: NextRequest) {
       let unmatchedCount = 0;
       const unmatchedVideos: string[] = [];
       
-      // If CSV is provided, ONLY upload videos that have matches in the CSV
+      // If CSV is provided, ONLY queue videos that match CSV entries (like Google Sheets)
       // If no CSV is provided, upload all videos with default metadata
       const hasCsvMetadata = csvMetadataMap.size > 0;
       
-      const queueItems = videos
-        .map((video) => {
-          const videoName = video.name.toLowerCase();
-          const nameWithoutExt = videoName.replace(/\.[^/.]+$/, "");
-          const csvMetadata = matchCsvMetadata(videoName) || matchCsvMetadata(nameWithoutExt);
+      const allQueueItems = videos.map((video) => {
+        const videoName = video.name.toLowerCase();
+        const nameWithoutExt = videoName.replace(/\.[^/.]+$/, "");
+        const csvMetadata = matchCsvMetadata(videoName) || matchCsvMetadata(nameWithoutExt);
+        
+        if (csvMetadata) {
+          matchedCount++;
+          // Use CSV metadata
+          // Map publishAt/scheduleTime to publishDate (expected by worker)
+          const publishDate = csvMetadata?.publishAt || csvMetadata?.publishat || 
+                             csvMetadata?.scheduleTime || csvMetadata?.scheduletime || 
+                             undefined;
           
-          if (csvMetadata) {
-            matchedCount++;
-            // Use CSV metadata
-            // Map publishAt/scheduleTime to publishDate (expected by worker)
-            const publishDate = csvMetadata?.publishAt || csvMetadata?.publishat || 
-                               csvMetadata?.scheduleTime || csvMetadata?.scheduletime || 
-                               undefined;
-            
-            return {
-              title: csvMetadata?.youtube_title || video.name.replace(/\.[^/.]+$/, ""),
-              description: csvMetadata?.youtube_description || `Uploaded from Dropbox: ${video.name}`,
-              privacyStatus: (csvMetadata?.privacyStatus || csvMetadata?.privacystatus || privacyStatus) as "public" | "private" | "unlisted",
-              dropboxFileId: video.pathLower || video.id,
-              postUploadAction: csvMetadata?.post_upload_action || csvMetadata?.postuploadaction || (postUploadAction !== "none" ? postUploadAction : undefined),
-              completedFolderId: csvMetadata?.completed_folder_id || csvMetadata?.completedfolderid || completedFolderPath || undefined,
-              publishDate: publishDate, // Worker expects publishDate, not scheduleTime
-              thumbnailUrl: csvMetadata?.thumbnail_url || undefined,
-              urlAuthHeaders: csvMetadata?.url_auth_headers || undefined,
-              urlTimeout: csvMetadata?.url_timeout || undefined,
-              madeForKids: csvMetadata?.made_for_kids || csvMetadata?.madeforkids || csvMetadata?.selfDeclaredMadeForKids || undefined,
-            };
-          } else {
-            unmatchedCount++;
-            unmatchedVideos.push(video.name);
-            
-            // If CSV is provided, skip videos without matches
-            if (hasCsvMetadata) {
-              return null; // Will be filtered out
-            }
-            
-            // No CSV provided - upload with defaults
-            return {
-              title: video.name.replace(/\.[^/.]+$/, ""),
-              description: `Uploaded from Dropbox: ${video.name}`,
-              privacyStatus: privacyStatus as "public" | "private" | "unlisted",
-              dropboxFileId: video.pathLower || video.id,
-              postUploadAction: postUploadAction !== "none" ? postUploadAction : undefined,
-              completedFolderId: completedFolderPath || undefined,
-            };
+          return {
+            title: csvMetadata?.youtube_title || video.name.replace(/\.[^/.]+$/, ""),
+            description: csvMetadata?.youtube_description || `Uploaded from Dropbox: ${video.name}`,
+            privacyStatus: (csvMetadata?.privacyStatus || csvMetadata?.privacystatus || privacyStatus) as "public" | "private" | "unlisted",
+            dropboxFileId: video.pathLower || video.id,
+            postUploadAction: csvMetadata?.post_upload_action || csvMetadata?.postuploadaction || (postUploadAction !== "none" ? postUploadAction : undefined),
+            completedFolderId: csvMetadata?.completed_folder_id || csvMetadata?.completedfolderid || completedFolderPath || undefined,
+            publishDate: publishDate, // Worker expects publishDate, not scheduleTime
+            thumbnailUrl: csvMetadata?.thumbnail_url || undefined,
+            urlAuthHeaders: csvMetadata?.url_auth_headers || undefined,
+            urlTimeout: csvMetadata?.url_timeout || undefined,
+            madeForKids: csvMetadata?.made_for_kids || csvMetadata?.madeforkids || csvMetadata?.selfDeclaredMadeForKids || undefined,
+          };
+        } else {
+          unmatchedCount++;
+          unmatchedVideos.push(video.name);
+          
+          // If CSV is provided, skip videos without matches (filter them out)
+          if (hasCsvMetadata) {
+            return null; // Will be filtered out
           }
-        })
-        .filter((item): item is NonNullable<typeof item> => item !== null); // Remove null entries
+          
+          // No CSV provided - upload with defaults (still upload the video)
+          return {
+            title: video.name.replace(/\.[^/.]+$/, ""),
+            description: `Uploaded from Dropbox: ${video.name}`,
+            privacyStatus: privacyStatus as "public" | "private" | "unlisted",
+            dropboxFileId: video.pathLower || video.id,
+            postUploadAction: postUploadAction !== "none" ? postUploadAction : undefined,
+            completedFolderId: completedFolderPath || undefined,
+          };
+        }
+      });
       
-      console.log(`[UPLOAD-DROPBOX] Matched ${matchedCount} videos with CSV metadata`);
-      if (hasCsvMetadata && unmatchedCount > 0) {
-        console.log(`[UPLOAD-DROPBOX] Skipped ${unmatchedCount} videos without CSV matches: ${unmatchedVideos.slice(0, 5).join(', ')}${unmatchedCount > 5 ? '...' : ''}`);
+      // Filter out null entries (videos without CSV matches when CSV is provided)
+      const queueItems = allQueueItems.filter((item): item is NonNullable<typeof item> => item !== null);
+      
+      const filteredCount = allQueueItems.length - queueItems.length;
+      
+      console.log(`[UPLOAD-DROPBOX] Processing ${videos.length} videos from folder`);
+      if (hasCsvMetadata) {
+        console.log(`[UPLOAD-DROPBOX] CSV provided: ${matchedCount} matched CSV entries, ${filteredCount} filtered out (no CSV match)`);
+        if (unmatchedCount > 0) {
+          console.log(`[UPLOAD-DROPBOX] Filtered videos (no CSV match): ${unmatchedVideos.slice(0, 10).join(', ')}${unmatchedCount > 10 ? `... and ${unmatchedCount - 10} more` : ''}`);
+        }
+      } else {
+        console.log(`[UPLOAD-DROPBOX] No CSV provided: ${queueItems.length} videos will be uploaded with default metadata`);
       }
 
       if (queueItems.length === 0) {
-        return NextResponse.json(
-          { error: `No videos matched the CSV entries. Found ${videos.length} videos in folder, but none matched the ${csvMetadataMap.size} video_name entries in the CSV.` },
-          { status: 400 }
-        );
+        if (hasCsvMetadata) {
+          return NextResponse.json(
+            { 
+              error: `No videos matched CSV entries. Found ${videos.length} videos in folder, but none matched the ${csvMetadataMap.size} video_name entries in the CSV.`,
+              totalVideos: videos.length,
+              csvEntries: csvMetadataMap.size,
+              matchedCount: 0,
+              filteredCount: unmatchedCount
+            },
+            { status: 400 }
+          );
+        } else {
+          return NextResponse.json(
+            { error: `No videos found to upload. Found ${videos.length} videos in folder.` },
+            { status: 400 }
+          );
+        }
       }
 
       const jobId = addToBulkQueue({
@@ -297,12 +330,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         success: true,
         message: hasCsvMetadata 
-          ? `Upload queued: ${matchedCount} videos matched CSV entries${unmatchedCount > 0 ? `, ${unmatchedCount} skipped (no CSV match)` : ''}`
-          : "Upload queued for processing",
+          ? `Upload queued: ${queueItems.length} videos matched CSV entries${filteredCount > 0 ? `, ${filteredCount} filtered out (no CSV match)` : ''}`
+          : `Upload queued: ${queueItems.length} videos`,
         jobId,
         totalItems: queueItems.length,
+        totalVideos: videos.length,
         matchedFromCsv: hasCsvMetadata ? matchedCount : undefined,
-        skippedNoMatch: hasCsvMetadata ? unmatchedCount : undefined,
+        filteredCount: hasCsvMetadata ? filteredCount : undefined,
         folderPath: normalizedPath,
       });
     } else {

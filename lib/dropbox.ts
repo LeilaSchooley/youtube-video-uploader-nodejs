@@ -88,12 +88,26 @@ export async function listDropboxVideos(
 
     // Filter for video files
     const videoExtensions = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.flv', '.wmv', '.m4v'];
-    const videoFiles = response.result.entries.filter(entry => {
+    const allEntries: any[] = [...response.result.entries];
+
+    // Handle pagination - Dropbox API returns up to 2000 entries per page
+    let cursor: string | undefined = response.result.has_more ? response.result.cursor : undefined;
+    while (cursor) {
+      const nextResponse = await dbx.filesListFolderContinue({ cursor });
+      if (!nextResponse.result.entries) break;
+      
+      allEntries.push(...nextResponse.result.entries);
+      cursor = nextResponse.result.has_more && nextResponse.result.cursor ? nextResponse.result.cursor : undefined;
+    }
+
+    const videoFiles = allEntries.filter(entry => {
       if (entry['.tag'] !== 'file') return false;
       const file = entry as any;
       const name = file.name?.toLowerCase() || '';
       return videoExtensions.some(ext => name.endsWith(ext));
     });
+
+    console.log(`[DROPBOX] Found ${videoFiles.length} videos in folder (scanned ${allEntries.length} total files)`);
 
     return videoFiles.map((entry: any) => ({
       id: entry.path_lower || entry.path_display || entry.id,

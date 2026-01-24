@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
+import { getDropboxToken, getOAuthClient } from "@/lib/auth";
 import { listDropboxItems } from "@/lib/dropbox";
 import { cookies } from "next/headers";
+import { google } from "googleapis";
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -33,7 +35,13 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    if (!session.dropboxToken) {
+    // Get Dropbox token - checks GAT from env first, then session token, auto-refreshes if needed
+    const dropboxToken = await getDropboxToken(
+      session.dropboxToken,
+      session.dropboxRefreshToken,
+      sessionId
+    );
+    if (!dropboxToken) {
       return NextResponse.json(
         { error: "Dropbox not connected" },
         { status: 401 }
@@ -47,10 +55,10 @@ export async function GET(request: NextRequest) {
     const normalizedPath = folderPath.startsWith('/') ? folderPath : `/${folderPath}`;
 
     // Debug: Log token info (without exposing full token)
-    console.log(`[BROWSE-DROPBOX] Token length: ${session.dropboxToken.length}, starts with: ${session.dropboxToken.substring(0, 10)}...`);
+    console.log(`[BROWSE-DROPBOX] Token length: ${dropboxToken.length}, starts with: ${dropboxToken.substring(0, 10)}...`);
     console.log(`[BROWSE-DROPBOX] Requested path: "${folderPath}", normalized: "${normalizedPath}"`);
 
-    const items = await listDropboxItems(normalizedPath, session.dropboxToken);
+    const items = await listDropboxItems(normalizedPath, dropboxToken);
 
     // Separate folders and files
     const folders = items.filter(item => item.type === 'folder').map(item => ({

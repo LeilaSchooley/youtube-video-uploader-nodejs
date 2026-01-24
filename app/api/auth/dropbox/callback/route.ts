@@ -41,10 +41,12 @@ export async function GET(request: NextRequest) {
   try {
     // Step 1: Exchange code for tokens
     let dropboxToken: string;
+    let dropboxRefreshToken: string | undefined;
     try {
       const tokenData = await exchangeDropboxCode(code);
       dropboxToken = tokenData.access_token;
-      console.log(`[DROPBOX AUTH CALLBACK] Token exchange successful`);
+      dropboxRefreshToken = tokenData.refresh_token;
+      console.log(`[DROPBOX AUTH CALLBACK] Token exchange successful, has refresh_token: ${!!dropboxRefreshToken}`);
     } catch (tokenError: any) {
       console.error("[DROPBOX AUTH CALLBACK] Token exchange failed:", tokenError?.message || tokenError);
       return NextResponse.redirect(new URL(`/?error=dropbox_token_exchange_failed`, baseUrl));
@@ -70,15 +72,16 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(new URL("/?error=dropbox_cookie_failed", baseUrl));
     }
 
-    // Step 3: Update session with Dropbox token
+    // Step 3: Update session with Dropbox token and refresh token
     try {
       const existingSession = getSession(sessionId);
       setSession(sessionId, {
         ...existingSession,
         authenticated: existingSession?.authenticated || false, // Keep Google auth status
         dropboxToken: dropboxToken,
+        dropboxRefreshToken: dropboxRefreshToken, // Store refresh token for automatic renewal
       });
-      console.log("[DROPBOX AUTH CALLBACK] Dropbox token saved to session");
+      console.log("[DROPBOX AUTH CALLBACK] Dropbox token and refresh token saved to session");
     } catch (sessionError: any) {
       console.error("[DROPBOX AUTH CALLBACK] Session save error:", sessionError?.message || sessionError);
       return NextResponse.redirect(new URL("/?error=dropbox_session_failed", baseUrl));

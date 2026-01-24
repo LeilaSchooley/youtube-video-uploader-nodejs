@@ -7,7 +7,7 @@
 
 import { getBulkQueue, getNextPendingBulkItem, markBulkAsProcessing, markBulkAsCompleted, markBulkAsFailed, updateBulkProgress } from "./lib/bulk-queue";
 import { getSession, loadSessions } from "./lib/session";
-import { getOAuthClient } from "./lib/auth";
+import { getOAuthClient, getDropboxToken } from "./lib/auth";
 import { google } from "googleapis";
 import { fetchFileAsStream, isValidUrl } from "./lib/url-stream";
 import { downloadDriveFile, isDriveFileId, renameDriveFile, moveDriveFile, deleteDriveFile, getDriveFileMetadata } from "./lib/drive";
@@ -440,8 +440,32 @@ async function processBulkJob(jobId: string): Promise<void> {
     auth: oAuthClient,
   });
 
-  // Get Dropbox token if available
-  const dropboxToken = session.dropboxToken;
+  // Get user email for GAT owner check
+  let userEmail: string | undefined;
+  if (session.userId && session.userId.includes('@')) {
+    userEmail = session.userId;
+  } else {
+    // Try to get email from Google API
+    try {
+      const oauth2 = google.oauth2({
+        version: "v2",
+        auth: oAuthClient,
+      });
+      const userInfo = await oauth2.userinfo.get();
+      userEmail = userInfo.data.email || undefined;
+    } catch (error) {
+      // If we can't get email, continue without it (GAT won't be used)
+      console.warn(`[WORKER] Could not get user email for GAT check:`, error);
+    }
+  }
+
+  // Get Dropbox token - checks GAT from env first (only for owner), then session token, auto-refreshes if needed
+  const dropboxToken = await getDropboxToken(
+    session.dropboxToken,
+    session.dropboxRefreshToken,
+    job.sessionId,
+    userEmail
+  );
 
   // Determine which videos to upload TODAY (using UTC for consistency)
   const now = new Date();

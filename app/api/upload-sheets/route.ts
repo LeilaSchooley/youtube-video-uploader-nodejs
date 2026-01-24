@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession, setSession } from "@/lib/session";
-import { getOAuthClient } from "@/lib/auth";
+import { getOAuthClient, getDropboxToken } from "@/lib/auth";
 import { google } from "googleapis";
 import { cookies } from "next/headers";
 import { readSheetData, extractSpreadsheetId, getSpreadsheetMetadata } from "@/lib/sheets";
@@ -173,8 +173,9 @@ export async function POST(request: NextRequest) {
       return mapped;
     });
 
-    // Get userId from session
+    // Get userId and email from session
     let userId = session.userId;
+    let userEmail: string | undefined;
     if (!userId) {
       const oauth2 = google.oauth2({
         version: "v2",
@@ -182,9 +183,23 @@ export async function POST(request: NextRequest) {
       });
       const userInfo = await oauth2.userinfo.get();
       userId = (userInfo.data.email || userInfo.data.id || undefined) as string | undefined;
+      userEmail = userInfo.data.email || undefined;
       session.userId = userId;
       setSession(sessionId, session);
+    } else {
+      // userId might be email
+      userEmail = userId.includes('@') ? userId : undefined;
     }
+
+    // Get Dropbox token if needed (checks GAT for owner, or OAuth token)
+    const dropboxToken = dropboxFolderPath 
+      ? await getDropboxToken(
+          session.dropboxToken,
+          session.dropboxRefreshToken,
+          sessionId,
+          userEmail
+        )
+      : undefined;
 
     // If driveFolderId is provided, match video_name to Drive files
     let driveFilesMap: Map<string, string> = new Map();
@@ -219,9 +234,9 @@ export async function POST(request: NextRequest) {
 
     // If dropboxFolderPath is provided, match video_name to Dropbox files
     let dropboxFilesMap: Map<string, string> = new Map();
-    if (dropboxFolderPath && session.dropboxToken) {
+    if (dropboxFolderPath && dropboxToken) {
       try {
-        const dropboxVideos = await listDropboxVideos(dropboxFolderPath, session.dropboxToken);
+        const dropboxVideos = await listDropboxVideos(dropboxFolderPath, dropboxToken);
         
         // Create a map of filename (without extension) -> file path
         // Also create a map with full filename -> file path for exact matches
@@ -247,9 +262,9 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         );
       }
-    } else if (dropboxFolderPath && !session.dropboxToken) {
+    } else if (dropboxFolderPath && !dropboxToken) {
       return NextResponse.json(
-        { error: "Dropbox folder specified but Dropbox not authenticated. Please connect Dropbox first." },
+        { error: "Dropbox folder specified but Dropbox not authenticated. Please connect Dropbox first or set DROPBOX_GENERATED_ACCESS_TOKEN in environment variables." },
         { status: 400 }
       );
     }

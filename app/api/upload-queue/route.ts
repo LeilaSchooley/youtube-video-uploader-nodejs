@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { getSession, setSession } from "@/lib/session";
 import { cookies } from "next/headers";
-import { getOAuthClient } from "@/lib/auth";
+import { getOAuthClient, getDropboxToken } from "@/lib/auth";
 import { google } from "googleapis";
 import { Readable } from "stream";
 import csvParser from "csv-parser";
@@ -473,8 +473,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get userId from session (or fetch if not stored)
+    // Get userId and email from session (or fetch if not stored)
     let userId = session.userId;
+    let userEmail: string | undefined;
     if (!userId) {
       const oAuthClient = getOAuthClient();
       oAuthClient.setCredentials(session.tokens);
@@ -484,8 +485,12 @@ export async function POST(request: NextRequest) {
       });
       const userInfo = await oauth2.userinfo.get();
       userId = (userInfo.data.email || userInfo.data.id || undefined) as string | undefined;
+      userEmail = userInfo.data.email || undefined;
       session.userId = userId;
       setSession(sessionId, session);
+    } else {
+      // userId might be email
+      userEmail = userId.includes('@') ? userId : undefined;
     }
 
     const formData = await request.formData();
@@ -497,11 +502,16 @@ export async function POST(request: NextRequest) {
     // Handle Dropbox CSV file
     if (csvSource === "dropbox" && dropboxCsvPath) {
       try {
-        // Get Dropbox access token from session
-        const dropboxAccessToken = session.dropboxToken;
+        // Get Dropbox access token - checks GAT for owner, or OAuth token
+        const dropboxAccessToken = await getDropboxToken(
+          session.dropboxToken,
+          session.dropboxRefreshToken,
+          sessionId,
+          userEmail
+        );
         if (!dropboxAccessToken) {
           return new Response(
-            JSON.stringify({ error: "Dropbox not connected" }),
+            JSON.stringify({ error: "Dropbox not connected. Please connect Dropbox first or set DROPBOX_GENERATED_ACCESS_TOKEN in environment variables." }),
             { status: 401, headers: { 'Content-Type': 'application/json' } }
           );
         }

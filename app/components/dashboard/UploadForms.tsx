@@ -292,26 +292,45 @@ export default function UploadForms({
     checkDropboxAuth();
   }, []);
 
+  // Reload Dropbox input values from localStorage when auth becomes available
+  // This prevents values from being lost during token refresh/auth state changes
+  useEffect(() => {
+    if (!isHydrated || typeof window === "undefined") return;
+    if (hasDropboxAuth !== true) return; // Only reload when auth is confirmed
+    
+    // Reload values from localStorage to ensure they persist through auth state changes
+    const savedDropboxFolderPath = localStorage.getItem("dropboxUploadFolderPath");
+    if (savedDropboxFolderPath && !dropboxUploadFolderPath) {
+      setDropboxUploadFolderPath(savedDropboxFolderPath);
+    }
+    
+    const savedDropboxCsvFile = localStorage.getItem("selectedDropboxCsvFile");
+    if (savedDropboxCsvFile && !selectedDropboxCsvFile) {
+      setSelectedDropboxCsvFile(savedDropboxCsvFile);
+    }
+  }, [hasDropboxAuth, isHydrated]); // Only run when auth state changes
+
   // Auto-save to localStorage on state changes (after hydration)
   // Skip during initial load to prevent clearing values that were just loaded
+  // Only save, never clear - clearing is done explicitly by user action
   useEffect(() => {
     if (!isHydrated || typeof window === "undefined" || isInitialLoadRef.current) return;
     
-    if (dropboxUploadFolderPath) {
+    // Only save if there's a value - don't clear on empty (might be temporary during re-render)
+    if (dropboxUploadFolderPath && dropboxUploadFolderPath.trim()) {
       localStorage.setItem("dropboxUploadFolderPath", dropboxUploadFolderPath);
-    } else {
-      localStorage.removeItem("dropboxUploadFolderPath");
     }
+    // Note: We don't remove from localStorage here - that's done explicitly by user via clear button
   }, [dropboxUploadFolderPath, isHydrated]); // Include isHydrated but check isInitialLoadRef
 
   useEffect(() => {
     if (!isHydrated || typeof window === "undefined" || isInitialLoadRef.current) return;
     
-    if (selectedDropboxCsvFile) {
+    // Only save if there's a value - don't clear on empty (might be temporary during re-render)
+    if (selectedDropboxCsvFile && selectedDropboxCsvFile.trim()) {
       localStorage.setItem("selectedDropboxCsvFile", selectedDropboxCsvFile);
-    } else {
-      localStorage.removeItem("selectedDropboxCsvFile");
     }
+    // Note: We don't remove from localStorage here - that's done explicitly by user via clear button
   }, [selectedDropboxCsvFile, isHydrated]); // Include isHydrated but check isInitialLoadRef
 
   useEffect(() => {
