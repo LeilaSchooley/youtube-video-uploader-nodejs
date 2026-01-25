@@ -62,9 +62,10 @@ async function fetchAllChannelVideoTitles(
   let totalVideos = 0;
 
   try {
+    let response;
     do {
       pageCount++;
-      const response = await youtube.search.list({
+      response = await youtube.search.list({
         part: ["snippet"],
         channelId: channelId,
         type: ["video"],
