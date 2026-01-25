@@ -285,7 +285,7 @@ export async function POST(request: NextRequest) {
       });
       
       // Filter out null entries (videos without CSV matches when CSV is provided)
-      const queueItems = allQueueItems.filter((item): item is NonNullable<typeof item> => item !== null);
+      let queueItems = allQueueItems.filter((item): item is NonNullable<typeof item> => item !== null);
       
       const filteredCount = allQueueItems.length - queueItems.length;
       
@@ -323,6 +323,8 @@ export async function POST(request: NextRequest) {
       let duplicateCount = 0;
       if (queueItems.length > 0) {
         try {
+          const oAuthClient = getOAuthClient();
+          oAuthClient.setCredentials(session.tokens);
           const youtube = google.youtube({
             version: "v3",
             auth: oAuthClient,
