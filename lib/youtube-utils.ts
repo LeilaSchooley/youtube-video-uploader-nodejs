@@ -1,5 +1,9 @@
 import { google } from "googleapis";
 
+// Environment variable to disable duplicate checking
+const DISABLE_DUPLICATE_CHECK = process.env.DISABLE_DUPLICATE_CHECK === 'true' || 
+                                 process.env.DISABLE_DUPLICATE_CHECK === '1';
+
 // Cache for channel ID and existing video titles
 let channelIdCache: string | null = null;
 let existingTitlesCache: Set<string> | null = null;
@@ -101,6 +105,11 @@ export async function videoAlreadyExists(
   youtube: ReturnType<typeof google.youtube>,
   title: string
 ): Promise<boolean> {
+  // Check if duplicate checking is disabled via environment variable
+  if (DISABLE_DUPLICATE_CHECK) {
+    return false; // Return false (no duplicate found) if disabled
+  }
+  
   try {
     const channelId = await getChannelId(youtube);
     if (!channelId) {
@@ -129,6 +138,12 @@ export async function checkDuplicatesBatch(
   titles: string[]
 ): Promise<Set<string>> {
   const duplicates = new Set<string>();
+  
+  // Check if duplicate checking is disabled via environment variable
+  if (DISABLE_DUPLICATE_CHECK) {
+    console.log(`[YOUTUBE-UTILS] Duplicate check is disabled via DISABLE_DUPLICATE_CHECK environment variable`);
+    return duplicates; // Return empty set (no duplicates found)
+  }
   
   try {
     // Get channel ID (cached)
