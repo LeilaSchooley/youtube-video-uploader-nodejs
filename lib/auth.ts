@@ -80,6 +80,30 @@ const DROPBOX_GAT_WHITELIST_EMAILS = process.env.DROPBOX_GAT_WHITELIST_EMAILS
   ? process.env.DROPBOX_GAT_WHITELIST_EMAILS.split(',').map(e => e.trim().toLowerCase())
   : [];
 
+// Log environment variable status on module load (only once, not on every call)
+if (typeof process !== 'undefined') {
+  const envCheck = {
+    hasDropboxAppKey: !!DROPBOX_APP_KEY,
+    hasDropboxAppSecret: !!DROPBOX_APP_SECRET,
+    hasDropboxRedirectUri: !!DROPBOX_REDIRECT_URI,
+    hasGAT: !!DROPBOX_GENERATED_ACCESS_TOKEN,
+    gatLength: DROPBOX_GENERATED_ACCESS_TOKEN?.length || 0,
+    hasGATOwnerEmail: !!DROPBOX_GAT_OWNER_EMAIL,
+    gatOwnerEmail: DROPBOX_GAT_OWNER_EMAIL || 'NOT SET',
+    hasGATWhitelist: DROPBOX_GAT_WHITELIST_EMAILS.length > 0,
+    gatWhitelistCount: DROPBOX_GAT_WHITELIST_EMAILS.length,
+    gatWhitelistEntries: DROPBOX_GAT_WHITELIST_EMAILS,
+    nodeEnv: process.env.NODE_ENV,
+    // Check if env vars exist in process.env (even if empty)
+    envVarExists: {
+      DROPBOX_GENERATED_ACCESS_TOKEN: 'DROPBOX_GENERATED_ACCESS_TOKEN' in process.env,
+      DROPBOX_GAT_OWNER_EMAIL: 'DROPBOX_GAT_OWNER_EMAIL' in process.env,
+      DROPBOX_GAT_WHITELIST_EMAILS: 'DROPBOX_GAT_WHITELIST_EMAILS' in process.env,
+    }
+  };
+  console.log(`[DROPBOX-GAT] Environment check on module load:`, JSON.stringify(envCheck, null, 2));
+}
+
 /**
  * Generate Dropbox OAuth authorization URL
  * Scopes required for file browsing and downloading:

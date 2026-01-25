@@ -148,6 +148,7 @@ export default function UploadForms({
   const [driveUploadFolderName, setDriveUploadFolderName] = useState<string>("");
   const [driveBrowserContext, setDriveBrowserContext] = useState<"drive" | "sheets">("drive");
   const [videosPerDay, setVideosPerDay] = useState<string>("");
+  const [dropboxUploading, setDropboxUploading] = useState<boolean>(false);
 
   const handleDriveFolderSelect = (folderId: string, folderName: string) => {
     const input = document.getElementById('driveFolderId') as HTMLInputElement;
@@ -1368,11 +1369,16 @@ export default function UploadForms({
                     setShowToast({ message: "Please enter a Dropbox folder path", type: "error" });
                     return;
                   }
+                  if (dropboxUploading) {
+                    return; // Prevent double-click
+                  }
+                  setDropboxUploading(true);
                   try {
                     // Get videosPerDay from state
                     const videosPerDayNum = videosPerDay ? parseInt(videosPerDay, 10) : undefined;
                     if (videosPerDayNum !== undefined && (isNaN(videosPerDayNum) || videosPerDayNum < 0)) {
                       setShowToast({ message: "Videos per day must be a positive number", type: "error" });
+                      setDropboxUploading(false);
                       return;
                     }
                     
@@ -1414,12 +1420,14 @@ export default function UploadForms({
                     }
                   } catch (error: any) {
                     setShowToast({ message: `Error: ${error.message}`, type: "error" });
+                  } finally {
+                    setDropboxUploading(false);
                   }
                 }}
-                disabled={!dropboxUploadFolderPath || hasDropboxAuth !== true}
-                className="btn-primary w-full"
+                disabled={!dropboxUploadFolderPath || hasDropboxAuth !== true || dropboxUploading}
+                className={`btn-primary w-full ${dropboxUploading ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
-                Upload from Dropbox
+                {dropboxUploading ? 'Checking duplicates...' : 'Upload from Dropbox'}
               </button>
               </>
               )}
