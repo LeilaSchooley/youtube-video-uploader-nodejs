@@ -237,7 +237,7 @@ export async function POST(request: NextRequest) {
     let dropboxFilesMap: Map<string, string> = new Map();
     if (dropboxFolderPath && dropboxToken) {
       try {
-        const dropboxVideos = await listDropboxVideos(dropboxFolderPath, dropboxToken);
+        const dropboxVideos = await listDropboxVideos(dropboxFolderPath, dropboxToken, sessionId, session.dropboxRefreshToken);
         
         // Create a map of filename (without extension) -> file path
         // Also create a map with full filename -> file path for exact matches

@@ -294,21 +294,21 @@ async function uploadVideo(
       try {
         switch (item.postUploadAction.toLowerCase()) {
           case "rename":
-            const dropboxMetadata = await getDropboxFileMetadata(item.dropboxFileId, dropboxToken);
+            const dropboxMetadata = await getDropboxFileMetadata(item.dropboxFileId, dropboxToken, sessionId, sessionRefreshToken);
             const dropboxExtension = dropboxMetadata.name.split('.').pop() || 'mp4';
             const dropboxNewName = `${videoId}.${dropboxExtension}`;
-            await renameDropboxFile(item.dropboxFileId, dropboxNewName, dropboxToken);
+            await renameDropboxFile(item.dropboxFileId, dropboxNewName, dropboxToken, sessionId, sessionRefreshToken);
             sendProgress(index, `Renamed to ${dropboxNewName}`, videoId);
             break;
             
           case "delete":
-            await deleteDropboxFile(item.dropboxFileId, dropboxToken);
+            await deleteDropboxFile(item.dropboxFileId, dropboxToken, sessionId, sessionRefreshToken);
             sendProgress(index, "Deleted from Dropbox", videoId);
             break;
             
           case "move":
             if (item.completedFolderId) {
-              await moveDropboxFile(item.dropboxFileId, item.completedFolderId, dropboxToken);
+              await moveDropboxFile(item.dropboxFileId, item.completedFolderId, dropboxToken, sessionId, sessionRefreshToken);
               sendProgress(index, `Moved to folder`, videoId);
             } else {
               console.warn(`[WORKER] Move action requested but no completedFolderId provided`);

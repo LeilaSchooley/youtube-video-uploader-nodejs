@@ -119,9 +119,9 @@ export async function POST(request: NextRequest) {
     let videos;
     try {
       if (recursive) {
-        videos = await listDropboxVideosRecursive(normalizedPath, dropboxToken);
+        videos = await listDropboxVideosRecursive(normalizedPath, dropboxToken, 10, sessionId, session.dropboxRefreshToken);
       } else {
-        videos = await listDropboxVideos(normalizedPath, dropboxToken);
+        videos = await listDropboxVideos(normalizedPath, dropboxToken, sessionId, session.dropboxRefreshToken);
       }
     } catch (error: any) {
       return NextResponse.json(

@@ -1,5 +1,6 @@
 import { Dropbox, DropboxAuth } from "dropbox";
 import { Readable } from "stream";
+import { isGATToken } from "./auth";
 
 // Create a fetch wrapper that adds .buffer() method to Response
 // This allows us to use native fetch (or node-fetch) while providing .buffer()
@@ -53,11 +54,62 @@ export function isDropboxPath(str: string): boolean {
 }
 
 /**
+ * Handle 401 errors for Dropbox API calls
+ * If using GAT, don't try to refresh (GAT doesn't expire)
+ * If using OAuth token, attempt to refresh
+ */
+async function handleDropbox401Error(
+  error: any,
+  accessToken: string,
+  sessionId?: string,
+  sessionRefreshToken?: string | null,
+  operation: string = "operation"
+): Promise<string | null> {
+  const is401 = error?.status === 401 || 
+                error?.statusCode === 401 ||
+                error?.error?.error?.['.tag'] === 'expired_access_token' ||
+                error?.error?.error_summary?.includes('expired_access_token');
+  
+  if (!is401) {
+    return null;
+  }
+  
+  // If using GAT and getting 401, don't try to refresh - GAT doesn't expire
+  // This means the GAT token is invalid, revoked, or doesn't have proper permissions
+  if (isGATToken(accessToken)) {
+    console.error(`[DROPBOX] GAT token returned 401 error during ${operation}. GAT tokens don't expire, so this indicates the token is invalid, revoked, or lacks required permissions.`);
+    console.error(`[DROPBOX] Error details:`, error?.error || error?.message);
+    throw new Error(`Dropbox GAT token is invalid or lacks permissions. Please verify DROPBOX_GENERATED_ACCESS_TOKEN is correct and has the required scopes (files.metadata.read, files.content.read, files.content.write).`);
+  }
+  
+  // Try to refresh OAuth token
+  if (sessionId && sessionRefreshToken) {
+    console.log(`[DROPBOX] Token expired during ${operation} (401), attempting refresh...`);
+    try {
+      const { refreshDropboxTokenIfNeeded } = await import("./auth");
+      const newToken = await refreshDropboxTokenIfNeeded(error, sessionId, sessionRefreshToken);
+      
+      if (newToken) {
+        console.log(`[DROPBOX] Successfully refreshed token, retrying ${operation}...`);
+        return newToken;
+      }
+    } catch (refreshError: any) {
+      console.error(`[DROPBOX] Token refresh failed:`, refreshError?.message || refreshError);
+    }
+  }
+  
+  return null;
+}
+
+/**
  * List video files in a Dropbox folder
+ * Automatically refreshes token if it expires (401 error)
  */
 export async function listDropboxVideos(
   folderPath: string,
-  accessToken: string
+  accessToken: string,
+  sessionId?: string,
+  sessionRefreshToken?: string | null
 ): Promise<Array<{
   id: string; // Dropbox uses path as ID
   name: string;
@@ -118,6 +170,13 @@ export async function listDropboxVideos(
       modifiedTime: entry.server_modified,
     }));
   } catch (error: any) {
+    // Handle 401 errors (GAT check + token refresh)
+    const newToken = await handleDropbox401Error(error, accessToken, sessionId, sessionRefreshToken, "list videos");
+    if (newToken) {
+      // Retry with new token
+      return listDropboxVideos(folderPath, newToken, sessionId, sessionRefreshToken);
+    }
+    
     console.error("[DROPBOX] Error listing videos:", error?.message);
     throw new Error(`Failed to list Dropbox videos: ${error?.message || "Unknown error"}`);
   }
@@ -125,11 +184,14 @@ export async function listDropboxVideos(
 
 /**
  * Recursively list all video files in a Dropbox folder (including subfolders)
+ * Automatically refreshes token if it expires (401 error)
  */
 export async function listDropboxVideosRecursive(
   folderPath: string,
   accessToken: string,
-  maxDepth: number = 10
+  maxDepth: number = 10,
+  sessionId?: string,
+  sessionRefreshToken?: string | null
 ): Promise<Array<{
   id: string;
   name: string;
@@ -139,7 +201,8 @@ export async function listDropboxVideosRecursive(
   modifiedTime?: string;
   folderPath?: string;
 }>> {
-  const dbx = getDropboxClient(accessToken);
+  let dbx = getDropboxClient(accessToken);
+  let currentToken = accessToken;
   const videos: Array<{
     id: string;
     name: string;
@@ -230,6 +293,17 @@ export async function listDropboxVideosRecursive(
         }
       }
     } catch (error: any) {
+      // Handle 401 errors (GAT check + token refresh)
+      const newToken = await handleDropbox401Error(error, currentToken, sessionId, sessionRefreshToken, "recursive scan");
+      if (newToken) {
+        // Update token and client, then retry
+        currentToken = newToken;
+        dbx = getDropboxClient(newToken);
+        // Retry the folder scan
+        await scanFolder(path, folderPath, depth);
+        return;
+      }
+      
       console.error(`[DROPBOX] Error scanning folder ${path}:`, error?.message);
       // Continue with other folders
     }
@@ -292,27 +366,11 @@ export async function downloadDropboxFile(
     
     return stream;
   } catch (error: any) {
-    // Check if it's a 401 error (expired token) and we have refresh token
-    const is401 = error?.status === 401 || 
-                  error?.statusCode === 401 ||
-                  error?.error?.error?.['.tag'] === 'expired_access_token' ||
-                  error?.error?.error_summary?.includes('expired_access_token');
-    
-    if (is401 && sessionId && sessionRefreshToken) {
-      console.log(`[DROPBOX] Token expired during download (401), attempting refresh...`);
-      try {
-        const { refreshDropboxTokenIfNeeded } = await import("./auth");
-        const newToken = await refreshDropboxTokenIfNeeded(error, sessionId, sessionRefreshToken);
-        
-        if (newToken) {
-          // Retry with new token
-          console.log(`[DROPBOX] Retrying download with refreshed token...`);
-          return downloadDropboxFile(filePath, newToken, sessionId, sessionRefreshToken);
-        }
-      } catch (refreshError: any) {
-        console.error(`[DROPBOX] Token refresh failed:`, refreshError?.message || refreshError);
-        // Fall through to throw original error
-      }
+    // Handle 401 errors (GAT check + token refresh)
+    const newToken = await handleDropbox401Error(error, accessToken, sessionId, sessionRefreshToken, "download");
+    if (newToken) {
+      // Retry with new token
+      return downloadDropboxFile(filePath, newToken, sessionId, sessionRefreshToken);
     }
     
     console.error(`[DROPBOX] Error downloading file ${filePath}:`, error?.message);
@@ -326,10 +384,13 @@ export async function downloadDropboxFile(
 
 /**
  * Get file metadata from Dropbox
+ * Automatically refreshes token if it expires (401 error)
  */
 export async function getDropboxFileMetadata(
   filePath: string,
-  accessToken: string
+  accessToken: string,
+  sessionId?: string,
+  sessionRefreshToken?: string | null
 ): Promise<{
   id: string;
   name: string;
@@ -353,6 +414,13 @@ export async function getDropboxFileMetadata(
       modifiedTime: file.server_modified,
     };
   } catch (error: any) {
+    // Handle 401 errors (GAT check + token refresh)
+    const newToken = await handleDropbox401Error(error, accessToken, sessionId, sessionRefreshToken, "get metadata");
+    if (newToken) {
+      // Retry with new token
+      return getDropboxFileMetadata(filePath, newToken, sessionId, sessionRefreshToken);
+    }
+    
     console.error(`[DROPBOX] Error getting metadata for ${filePath}:`, error?.message);
     throw new Error(`Failed to get Dropbox file metadata: ${error?.message || "Unknown error"}`);
   }
@@ -360,11 +428,14 @@ export async function getDropboxFileMetadata(
 
 /**
  * Rename a file in Dropbox (post-upload action)
+ * Automatically refreshes token if it expires (401 error)
  */
 export async function renameDropboxFile(
   filePath: string,
   newName: string,
-  accessToken: string
+  accessToken: string,
+  sessionId?: string,
+  sessionRefreshToken?: string | null
 ): Promise<void> {
   const dbx = getDropboxClient(accessToken);
   
@@ -381,6 +452,13 @@ export async function renameDropboxFile(
     });
     console.log(`[DROPBOX] Renamed file ${filePath} to ${newPath}`);
   } catch (error: any) {
+    // Handle 401 errors (GAT check + token refresh)
+    const newToken = await handleDropbox401Error(error, accessToken, sessionId, sessionRefreshToken, "rename");
+    if (newToken) {
+      // Retry with new token
+      return renameDropboxFile(filePath, newName, newToken, sessionId, sessionRefreshToken);
+    }
+    
     console.error(`[DROPBOX] Error renaming file ${filePath}:`, error?.message);
     throw new Error(`Failed to rename Dropbox file: ${error?.message || "Unknown error"}`);
   }
@@ -388,11 +466,14 @@ export async function renameDropboxFile(
 
 /**
  * Move a file to another folder in Dropbox
+ * Automatically refreshes token if it expires (401 error)
  */
 export async function moveDropboxFile(
   filePath: string,
   targetFolderPath: string,
-  accessToken: string
+  accessToken: string,
+  sessionId?: string,
+  sessionRefreshToken?: string | null
 ): Promise<void> {
   const dbx = getDropboxClient(accessToken);
   
@@ -408,6 +489,13 @@ export async function moveDropboxFile(
     });
     console.log(`[DROPBOX] Moved file ${filePath} to ${targetPath}`);
   } catch (error: any) {
+    // Handle 401 errors (GAT check + token refresh)
+    const newToken = await handleDropbox401Error(error, accessToken, sessionId, sessionRefreshToken, "move");
+    if (newToken) {
+      // Retry with new token
+      return moveDropboxFile(filePath, targetFolderPath, newToken, sessionId, sessionRefreshToken);
+    }
+    
     console.error(`[DROPBOX] Error moving file ${filePath}:`, error?.message);
     throw new Error(`Failed to move Dropbox file: ${error?.message || "Unknown error"}`);
   }
@@ -415,10 +503,13 @@ export async function moveDropboxFile(
 
 /**
  * Delete a file from Dropbox
+ * Automatically refreshes token if it expires (401 error)
  */
 export async function deleteDropboxFile(
   filePath: string,
-  accessToken: string
+  accessToken: string,
+  sessionId?: string,
+  sessionRefreshToken?: string | null
 ): Promise<void> {
   const dbx = getDropboxClient(accessToken);
   
@@ -426,6 +517,13 @@ export async function deleteDropboxFile(
     await dbx.filesDeleteV2({ path: filePath });
     console.log(`[DROPBOX] Deleted file ${filePath}`);
   } catch (error: any) {
+    // Handle 401 errors (GAT check + token refresh)
+    const newToken = await handleDropbox401Error(error, accessToken, sessionId, sessionRefreshToken, "delete");
+    if (newToken) {
+      // Retry with new token
+      return deleteDropboxFile(filePath, newToken, sessionId, sessionRefreshToken);
+    }
+    
     console.error(`[DROPBOX] Error deleting file ${filePath}:`, error?.message);
     throw new Error(`Failed to delete Dropbox file: ${error?.message || "Unknown error"}`);
   }
@@ -433,10 +531,13 @@ export async function deleteDropboxFile(
 
 /**
  * List all items in a Dropbox folder (for folder browser)
+ * Automatically refreshes token if it expires (401 error)
  */
 export async function listDropboxItems(
   folderPath: string,
-  accessToken: string
+  accessToken: string,
+  sessionId?: string,
+  sessionRefreshToken?: string | null
 ): Promise<Array<{
   id: string;
   name: string;
@@ -506,6 +607,13 @@ export async function listDropboxItems(
     console.log(`[DROPBOX] Total items fetched: ${allItems.length}`);
     return allItems;
   } catch (error: any) {
+    // Handle 401 errors (GAT check + token refresh)
+    const newToken = await handleDropbox401Error(error, accessToken, sessionId, sessionRefreshToken, "list items");
+    if (newToken) {
+      // Retry with new token
+      return listDropboxItems(folderPath, newToken, sessionId, sessionRefreshToken);
+    }
+    
     // Log full error details for debugging
     console.error("[DROPBOX] Error listing items:", error?.message);
     console.error("[DROPBOX] Error details:", JSON.stringify({

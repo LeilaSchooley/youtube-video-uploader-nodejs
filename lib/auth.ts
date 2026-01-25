@@ -310,5 +310,13 @@ export async function refreshDropboxTokenIfNeeded(
   return undefined;
 }
 
+/**
+ * Check if a token is the Generated Access Token (GAT)
+ * GAT tokens don't expire, so if they get 401, it means the token is invalid/revoked
+ */
+export function isGATToken(token: string): boolean {
+  return !!DROPBOX_GENERATED_ACCESS_TOKEN && token === DROPBOX_GENERATED_ACCESS_TOKEN;
+}
+
 export { CLIENT_ID, CLIENT_SECRET, REDIRECT_URL, DROPBOX_APP_KEY, DROPBOX_APP_SECRET, DROPBOX_REDIRECT_URI, DROPBOX_GENERATED_ACCESS_TOKEN, DROPBOX_GAT_OWNER_EMAIL, DROPBOX_GAT_WHITELIST_EMAILS };
 

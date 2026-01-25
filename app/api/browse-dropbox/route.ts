@@ -58,7 +58,7 @@ export async function GET(request: NextRequest) {
     console.log(`[BROWSE-DROPBOX] Token length: ${dropboxToken.length}, starts with: ${dropboxToken.substring(0, 10)}...`);
     console.log(`[BROWSE-DROPBOX] Requested path: "${folderPath}", normalized: "${normalizedPath}"`);
 
-    const items = await listDropboxItems(normalizedPath, dropboxToken);
+    const items = await listDropboxItems(normalizedPath, dropboxToken, sessionId, session.dropboxRefreshToken);
 
     // Separate folders and files
     const folders = items.filter(item => item.type === 'folder').map(item => ({
