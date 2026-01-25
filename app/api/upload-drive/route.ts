@@ -5,6 +5,7 @@ import { google } from "googleapis";
 import { cookies } from "next/headers";
 import { listDriveVideosRecursive, listDriveVideos, downloadDriveFile, renameDriveFile, moveDriveFile, deleteDriveFile, getDriveFileMetadata, getDriveFolderMetadata, listDriveItems } from "@/lib/drive";
 import { addToBulkQueue } from "@/lib/bulk-queue";
+import { checkDuplicatesBatch } from "@/lib/youtube-utils";
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -128,7 +129,7 @@ export async function POST(request: NextRequest) {
 
     // If useWorker, queue for background processing
     if (useWorker) {
-      const queueItems = videos.map((video) => ({
+      let queueItems = videos.map((video) => ({
         driveFileId: video.id,
         title: video.name.replace(/\.[^/.]+$/, ""), // Remove extension
         description: `Uploaded from Google Drive: ${video.name}`,
@@ -136,6 +137,53 @@ export async function POST(request: NextRequest) {
         postUploadAction,
         completedFolderId,
       }));
+
+      // Check for duplicates on YouTube channel before queuing
+      let duplicateCount = 0;
+      if (queueItems.length > 0) {
+        try {
+          const youtube = google.youtube({
+            version: "v3",
+            auth: oAuthClient,
+          });
+          
+          const titles = queueItems.map(item => item.title || '').filter(t => t.trim());
+          console.log(`[UPLOAD-DRIVE] Checking ${titles.length} videos for duplicates on YouTube channel...`);
+          
+          const duplicates = await checkDuplicatesBatch(youtube, titles);
+          duplicateCount = duplicates.size;
+          
+          if (duplicateCount > 0) {
+            console.log(`[UPLOAD-DRIVE] Found ${duplicateCount} duplicate video(s) already on channel, filtering them out`);
+            
+            // Filter out duplicates
+            queueItems = queueItems.filter(item => {
+              const title = item.title || '';
+              const isDuplicate = duplicates.has(title.trim());
+              if (isDuplicate) {
+                console.log(`[UPLOAD-DRIVE] Skipping duplicate: "${title.substring(0, 50)}..."`);
+              }
+              return !isDuplicate;
+            });
+          } else {
+            console.log(`[UPLOAD-DRIVE] No duplicates found, all ${queueItems.length} videos are new`);
+          }
+        } catch (error: any) {
+          console.warn(`[UPLOAD-DRIVE] Error checking for duplicates: ${error?.message || error}. Continuing without duplicate check.`);
+          // Continue without duplicate check if it fails
+        }
+      }
+
+      if (queueItems.length === 0) {
+        return NextResponse.json(
+          { 
+            error: `All videos were filtered out. ${duplicateCount > 0 ? `${duplicateCount} duplicate(s) already on channel. ` : ''}No new videos to upload.`,
+            totalVideos: videos.length,
+            duplicateCount,
+          },
+          { status: 400 }
+        );
+      }
 
       const jobId = addToBulkQueue({
         sessionId,
@@ -146,9 +194,10 @@ export async function POST(request: NextRequest) {
 
       return NextResponse.json({
         success: true,
-        message: "Upload queued for processing",
+        message: `Upload queued for processing${duplicateCount > 0 ? ` (${duplicateCount} duplicate(s) skipped)` : ''}`,
         jobId,
         totalItems: queueItems.length,
+        duplicateCount,
         folderName: folderName,
       });
     }

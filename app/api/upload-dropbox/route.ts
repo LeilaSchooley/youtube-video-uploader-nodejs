@@ -6,6 +6,7 @@ import { cookies } from "next/headers";
 import { listDropboxVideosRecursive, listDropboxVideos, downloadDropboxFile } from "@/lib/dropbox";
 import { addToBulkQueue } from "@/lib/bulk-queue";
 import { Readable } from "stream";
+import { checkDuplicatesBatch } from "@/lib/youtube-utils";
 const csvParser = require("csv-parser");
 // Use require for xlsx to avoid TypeScript module resolution issues
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -318,6 +319,54 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // Check for duplicates on YouTube channel before queuing
+      let duplicateCount = 0;
+      if (queueItems.length > 0) {
+        try {
+          const youtube = google.youtube({
+            version: "v3",
+            auth: oAuthClient,
+          });
+          
+          const titles = queueItems.map(item => item.title || '').filter(t => t.trim());
+          console.log(`[UPLOAD-DROPBOX] Checking ${titles.length} videos for duplicates on YouTube channel...`);
+          
+          const duplicates = await checkDuplicatesBatch(youtube, titles);
+          duplicateCount = duplicates.size;
+          
+          if (duplicateCount > 0) {
+            console.log(`[UPLOAD-DROPBOX] Found ${duplicateCount} duplicate video(s) already on channel, filtering them out`);
+            
+            // Filter out duplicates
+            queueItems = queueItems.filter(item => {
+              const title = item.title || '';
+              const isDuplicate = duplicates.has(title.trim());
+              if (isDuplicate) {
+                console.log(`[UPLOAD-DROPBOX] Skipping duplicate: "${title.substring(0, 50)}..."`);
+              }
+              return !isDuplicate;
+            });
+          } else {
+            console.log(`[UPLOAD-DROPBOX] No duplicates found, all ${queueItems.length} videos are new`);
+          }
+        } catch (error: any) {
+          console.warn(`[UPLOAD-DROPBOX] Error checking for duplicates: ${error?.message || error}. Continuing without duplicate check.`);
+          // Continue without duplicate check if it fails
+        }
+      }
+
+      if (queueItems.length === 0) {
+        return NextResponse.json(
+          { 
+            error: `All videos were filtered out. ${duplicateCount > 0 ? `${duplicateCount} duplicate(s) already on channel. ` : ''}No new videos to upload.`,
+            totalVideos: videos.length,
+            duplicateCount,
+            filteredCount: hasCsvMetadata ? unmatchedCount : 0,
+          },
+          { status: 400 }
+        );
+      }
+
       const jobId = addToBulkQueue({
         sessionId,
         userId,
@@ -327,16 +376,25 @@ export async function POST(request: NextRequest) {
         startDate: videosPerDay && videosPerDay > 0 ? new Date().toISOString() : undefined, // Start from today if scheduling
       });
 
+      const warnings: string[] = [];
+      if (hasCsvMetadata && unmatchedCount > 0) {
+        warnings.push(`${unmatchedCount} filtered out (no CSV match)`);
+      }
+      if (duplicateCount > 0) {
+        warnings.push(`${duplicateCount} duplicate(s) skipped (already on channel)`);
+      }
+
       return NextResponse.json({
         success: true,
         message: hasCsvMetadata 
-          ? `Upload queued: ${queueItems.length} videos matched CSV entries${filteredCount > 0 ? `, ${filteredCount} filtered out (no CSV match)` : ''}`
-          : `Upload queued: ${queueItems.length} videos`,
+          ? `Upload queued: ${queueItems.length} videos matched CSV entries${warnings.length > 0 ? `, ${warnings.join(', ')}` : ''}`
+          : `Upload queued: ${queueItems.length} videos${duplicateCount > 0 ? ` (${duplicateCount} duplicate(s) skipped)` : ''}`,
         jobId,
         totalItems: queueItems.length,
         totalVideos: videos.length,
         matchedFromCsv: hasCsvMetadata ? matchedCount : undefined,
-        filteredCount: hasCsvMetadata ? filteredCount : undefined,
+        filteredCount: hasCsvMetadata ? unmatchedCount : undefined,
+        duplicateCount,
         folderPath: normalizedPath,
       });
     } else {

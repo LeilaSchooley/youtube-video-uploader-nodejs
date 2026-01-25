@@ -7,6 +7,7 @@ import { readSheetData, extractSpreadsheetId, getSpreadsheetMetadata } from "@/l
 import { addToBulkQueue } from "@/lib/bulk-queue";
 import { listDriveVideos } from "@/lib/drive";
 import { listDropboxVideos } from "@/lib/dropbox";
+import { checkDuplicatesBatch } from "@/lib/youtube-utils";
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -435,18 +436,57 @@ export async function POST(request: NextRequest) {
     }
     
     // Use only valid items
-    const queueItems = validQueueItems.map(({ originalIndex, ...item }) => item); // Remove originalIndex before queuing
+    let queueItems = validQueueItems.map(({ originalIndex, ...item }) => item); // Remove originalIndex before queuing
 
-    // Check if we have any valid items
+    // Check for duplicates on YouTube channel before queuing
+    let duplicateCount = 0;
+    const duplicateTitles: string[] = [];
+    if (queueItems.length > 0) {
+      try {
+        const youtube = google.youtube({
+          version: "v3",
+          auth: oAuthClient,
+        });
+        
+        const titles = queueItems.map(item => item.title || '').filter(t => t.trim());
+        console.log(`[UPLOAD-SHEETS] Checking ${titles.length} videos for duplicates on YouTube channel...`);
+        
+        const duplicates = await checkDuplicatesBatch(youtube, titles);
+        duplicateCount = duplicates.size;
+        
+        if (duplicateCount > 0) {
+          duplicateTitles.push(...Array.from(duplicates));
+          console.log(`[UPLOAD-SHEETS] Found ${duplicateCount} duplicate video(s) already on channel, filtering them out`);
+          
+          // Filter out duplicates
+          queueItems = queueItems.filter(item => {
+            const title = item.title || '';
+            const isDuplicate = duplicates.has(title.trim());
+            if (isDuplicate) {
+              console.log(`[UPLOAD-SHEETS] Skipping duplicate: "${title.substring(0, 50)}..."`);
+            }
+            return !isDuplicate;
+          });
+        } else {
+          console.log(`[UPLOAD-SHEETS] No duplicates found, all ${queueItems.length} videos are new`);
+        }
+      } catch (error: any) {
+        console.warn(`[UPLOAD-SHEETS] Error checking for duplicates: ${error?.message || error}. Continuing without duplicate check.`);
+        // Continue without duplicate check if it fails
+      }
+    }
+
+    // Check if we have any valid items after duplicate filtering
     if (queueItems.length === 0) {
       return NextResponse.json({
         success: false,
         error: "No valid items found to upload",
         totalItems: normalizedData.length,
         filteredItems: filteredCount,
+        duplicateCount,
         matchedCount,
         unmatchedCount,
-        message: `All ${normalizedData.length} rows were filtered out because they lack video sources (video_name, drive_file_id, dropbox_file_id, or video_url). Please check your sheet and folder.`,
+        message: `All ${normalizedData.length} rows were filtered out. ${filteredCount} lacked video sources, ${duplicateCount} were duplicates already on channel.`,
       }, { status: 400 });
     }
 
@@ -464,21 +504,30 @@ export async function POST(request: NextRequest) {
       items: queueItems,
     });
 
+    const warnings: string[] = [];
+    if (filteredCount > 0) {
+      warnings.push(`${filteredCount} row(s) were filtered out due to missing video sources`);
+    }
+    if (duplicateCount > 0) {
+      warnings.push(`${duplicateCount} video(s) were skipped because they already exist on your YouTube channel`);
+    }
+    if (warnings.length > 0) {
+      warnings.push(`Only ${queueItems.length} valid items were queued for upload`);
+    }
+
     return NextResponse.json({
       success: true,
       message: "Upload queued for processing",
       jobId,
       totalItems: queueItems.length,
       filteredItems: filteredCount,
+      duplicateCount,
       matchedCount,
       dropboxMatchedCount,
       unmatchedCount,
       spreadsheetTitle: metadata.title,
       sheetName: sheetName || metadata.sheets[0]?.title || "Sheet1",
-      warnings: filteredCount > 0 ? [
-        `${filteredCount} row(s) were filtered out due to missing video sources`,
-        `Only ${queueItems.length} valid items were queued for upload`
-      ] : undefined,
+      warnings: warnings.length > 0 ? warnings : undefined,
     });
   } catch (error: any) {
     console.error("[UPLOAD-SHEETS] Error:", error);

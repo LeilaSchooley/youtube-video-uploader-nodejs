@@ -75,6 +75,10 @@ const DROPBOX_REDIRECT_URI = process.env.DROPBOX_REDIRECT_URI || REDIRECT_URL?.r
 const DROPBOX_GENERATED_ACCESS_TOKEN = process.env.DROPBOX_GENERATED_ACCESS_TOKEN;
 // Owner email - GAT will only be used for this user
 const DROPBOX_GAT_OWNER_EMAIL = process.env.DROPBOX_GAT_OWNER_EMAIL;
+// Whitelist emails - comma-separated list of emails that can use GAT (for internal testing)
+const DROPBOX_GAT_WHITELIST_EMAILS = process.env.DROPBOX_GAT_WHITELIST_EMAILS
+  ? process.env.DROPBOX_GAT_WHITELIST_EMAILS.split(',').map(e => e.trim().toLowerCase())
+  : [];
 
 /**
  * Generate Dropbox OAuth authorization URL
@@ -186,22 +190,45 @@ export async function getDropboxToken(
   userEmail?: string | null
 ): Promise<string | undefined> {
   // Priority 1: Use Generated Access Token from environment (never expires)
-  // BUT only if this is the owner's account
+  // BUT only if this is the owner's account or whitelisted email
   if (DROPBOX_GENERATED_ACCESS_TOKEN) {
-    // If owner email is configured, check if this user matches
-    if (DROPBOX_GAT_OWNER_EMAIL) {
-      if (userEmail && userEmail.toLowerCase() === DROPBOX_GAT_OWNER_EMAIL.toLowerCase()) {
+    if (userEmail) {
+      const userEmailLower = userEmail.toLowerCase();
+      
+      // Check if user is the owner
+      if (DROPBOX_GAT_OWNER_EMAIL && userEmailLower === DROPBOX_GAT_OWNER_EMAIL.toLowerCase()) {
         console.log(`[DROPBOX] Using GAT for owner account: ${userEmail}`);
         return DROPBOX_GENERATED_ACCESS_TOKEN;
-      } else {
-        // Not the owner - don't use GAT, fall through to OAuth token
-        console.log(`[DROPBOX] GAT available but user ${userEmail} is not the owner (${DROPBOX_GAT_OWNER_EMAIL})`);
+      }
+      
+      // Check if user is in whitelist (supports partial matching)
+      if (DROPBOX_GAT_WHITELIST_EMAILS.length > 0) {
+        const isWhitelisted = DROPBOX_GAT_WHITELIST_EMAILS.some(whitelistEmail => {
+          // Support both exact match and partial match
+          // Partial match: if whitelist entry is contained in user email or vice versa
+          return userEmailLower === whitelistEmail.toLowerCase() || 
+                 userEmailLower.includes(whitelistEmail.toLowerCase()) ||
+                 whitelistEmail.toLowerCase().includes(userEmailLower);
+        });
+        
+        if (isWhitelisted) {
+          console.log(`[DROPBOX] Using GAT for whitelisted account: ${userEmail}`);
+          return DROPBOX_GENERATED_ACCESS_TOKEN;
+        }
+      }
+      
+      // Not the owner or whitelisted - don't use GAT, fall through to OAuth token
+      if (DROPBOX_GAT_OWNER_EMAIL || DROPBOX_GAT_WHITELIST_EMAILS.length > 0) {
+        console.log(`[DROPBOX] GAT available but user ${userEmail} is not the owner (${DROPBOX_GAT_OWNER_EMAIL || 'N/A'}) or whitelisted`);
       }
     } else {
-      // No owner email configured - use GAT for everyone (backward compatibility)
-      // WARNING: This means all users share the same Dropbox account
-      console.warn(`[DROPBOX] GAT is set but DROPBOX_GAT_OWNER_EMAIL is not configured. GAT will be used for ALL users.`);
-      return DROPBOX_GENERATED_ACCESS_TOKEN;
+      // No user email available - check if we should use GAT anyway
+      if (!DROPBOX_GAT_OWNER_EMAIL && DROPBOX_GAT_WHITELIST_EMAILS.length === 0) {
+        // No owner email or whitelist configured - use GAT for everyone (backward compatibility)
+        // WARNING: This means all users share the same Dropbox account
+        console.warn(`[DROPBOX] GAT is set but DROPBOX_GAT_OWNER_EMAIL and DROPBOX_GAT_WHITELIST_EMAILS are not configured. GAT will be used for ALL users.`);
+        return DROPBOX_GENERATED_ACCESS_TOKEN;
+      }
     }
   }
   
@@ -283,5 +310,5 @@ export async function refreshDropboxTokenIfNeeded(
   return undefined;
 }
 
-export { CLIENT_ID, CLIENT_SECRET, REDIRECT_URL, DROPBOX_APP_KEY, DROPBOX_APP_SECRET, DROPBOX_REDIRECT_URI, DROPBOX_GENERATED_ACCESS_TOKEN, DROPBOX_GAT_OWNER_EMAIL };
+export { CLIENT_ID, CLIENT_SECRET, REDIRECT_URL, DROPBOX_APP_KEY, DROPBOX_APP_SECRET, DROPBOX_REDIRECT_URI, DROPBOX_GENERATED_ACCESS_TOKEN, DROPBOX_GAT_OWNER_EMAIL, DROPBOX_GAT_WHITELIST_EMAILS };
 

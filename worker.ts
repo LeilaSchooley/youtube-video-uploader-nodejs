@@ -50,7 +50,9 @@ interface UploadTask {
 async function getVideoStream(
   task: UploadTask, 
   oAuthClient: ReturnType<typeof getOAuthClient>,
-  dropboxToken?: string
+  dropboxToken?: string,
+  sessionId?: string,
+  sessionRefreshToken?: string | null
 ): Promise<Readable> {
   const { item } = task;
 
@@ -64,7 +66,7 @@ async function getVideoStream(
     if (!dropboxToken) {
       throw new Error("Dropbox token required but not available");
     }
-    return await downloadDropboxFile(item.dropboxFileId, dropboxToken);
+    return await downloadDropboxFile(item.dropboxFileId, dropboxToken, sessionId, sessionRefreshToken);
   }
 
   // Handle URL-based upload
@@ -94,7 +96,9 @@ async function getVideoStream(
 async function getThumbnailStream(
   task: UploadTask, 
   oAuthClient: ReturnType<typeof getOAuthClient>,
-  dropboxToken?: string
+  dropboxToken?: string,
+  sessionId?: string,
+  sessionRefreshToken?: string | null
 ): Promise<Readable | null> {
   const { item } = task;
 
@@ -110,7 +114,7 @@ async function getThumbnailStream(
       return null;
     }
     try {
-      return await downloadDropboxFile(item.dropboxThumbnailId, dropboxToken);
+      return await downloadDropboxFile(item.dropboxThumbnailId, dropboxToken, sessionId, sessionRefreshToken);
     } catch (error: any) {
       console.error(`[WORKER] Failed to download Dropbox thumbnail: ${error?.message}`);
       return null;
@@ -140,7 +144,9 @@ async function uploadVideo(
   task: UploadTask,
   sendProgress: (index: number, status: string, videoId?: string, error?: string) => void,
   oAuthClient: ReturnType<typeof getOAuthClient>,
-  dropboxToken?: string
+  dropboxToken?: string,
+  sessionId?: string,
+  sessionRefreshToken?: string | null
 ): Promise<{ success: boolean; videoId?: string; error?: string }> {
   const { index, item } = task;
 
@@ -212,7 +218,7 @@ async function uploadVideo(
     sendProgress(index, `Fetching video ${sourceInfo}...`);
 
     // Get video stream
-    const videoStream = await getVideoStream(task, oAuthClient, dropboxToken);
+    const videoStream = await getVideoStream(task, oAuthClient, dropboxToken, sessionId, sessionRefreshToken);
 
     sendProgress(index, `Uploading "${title}" to YouTube...`);
 
@@ -236,7 +242,7 @@ async function uploadVideo(
     sendProgress(index, `Uploaded successfully (${uploadDuration.toFixed(1)}s)`, videoId);
 
     // Upload thumbnail if available
-    const thumbnailStream = await getThumbnailStream(task, oAuthClient, dropboxToken);
+    const thumbnailStream = await getThumbnailStream(task, oAuthClient, dropboxToken, sessionId, sessionRefreshToken);
     if (thumbnailStream && videoId) {
       sendProgress(index, "Uploading thumbnail...", videoId);
       try {
@@ -351,10 +357,12 @@ async function processBatch(
   batch: UploadTask[],
   sendProgress: (index: number, status: string, videoId?: string, error?: string) => void,
   oAuthClient: ReturnType<typeof getOAuthClient>,
-  dropboxToken?: string
+  dropboxToken?: string,
+  sessionId?: string,
+  sessionRefreshToken?: string | null
 ): Promise<void> {
   const results = await Promise.allSettled(
-    batch.map((task) => uploadVideo(youtube, task, sendProgress, oAuthClient, dropboxToken))
+    batch.map((task) => uploadVideo(youtube, task, sendProgress, oAuthClient, dropboxToken, sessionId, sessionRefreshToken))
   );
 
   const batchResults = {
@@ -668,7 +676,7 @@ async function processBulkJob(jobId: string): Promise<void> {
       console.log(
         `[WORKER] Uploading batch ${i + 1}/${batches.length} (${batch.length} videos)`
       );
-      await processBatch(youtube, batch, sendProgress, oAuthClient, dropboxToken);
+      await processBatch(youtube, batch, sendProgress, oAuthClient, dropboxToken, job.sessionId, session.dropboxRefreshToken);
     }
 
     // Check progress after today's batch (use in-memory progress for accuracy)

@@ -241,10 +241,13 @@ export async function listDropboxVideosRecursive(
 
 /**
  * Download a file from Dropbox as a stream
+ * Automatically refreshes token if it expires (401 error)
  */
 export async function downloadDropboxFile(
   filePath: string,
-  accessToken: string
+  accessToken: string,
+  sessionId?: string,
+  sessionRefreshToken?: string | null
 ): Promise<Readable> {
   console.log(`[DROPBOX] Downloading file: ${filePath}`);
   console.log(`[DROPBOX] Token available: ${!!accessToken}, Token length: ${accessToken?.length || 0}`);
@@ -289,6 +292,29 @@ export async function downloadDropboxFile(
     
     return stream;
   } catch (error: any) {
+    // Check if it's a 401 error (expired token) and we have refresh token
+    const is401 = error?.status === 401 || 
+                  error?.statusCode === 401 ||
+                  error?.error?.error?.['.tag'] === 'expired_access_token' ||
+                  error?.error?.error_summary?.includes('expired_access_token');
+    
+    if (is401 && sessionId && sessionRefreshToken) {
+      console.log(`[DROPBOX] Token expired during download (401), attempting refresh...`);
+      try {
+        const { refreshDropboxTokenIfNeeded } = await import("./auth");
+        const newToken = await refreshDropboxTokenIfNeeded(error, sessionId, sessionRefreshToken);
+        
+        if (newToken) {
+          // Retry with new token
+          console.log(`[DROPBOX] Retrying download with refreshed token...`);
+          return downloadDropboxFile(filePath, newToken, sessionId, sessionRefreshToken);
+        }
+      } catch (refreshError: any) {
+        console.error(`[DROPBOX] Token refresh failed:`, refreshError?.message || refreshError);
+        // Fall through to throw original error
+      }
+    }
+    
     console.error(`[DROPBOX] Error downloading file ${filePath}:`, error?.message);
     console.error(`[DROPBOX] Error details:`, error?.error || error);
     if (error?.status) {
