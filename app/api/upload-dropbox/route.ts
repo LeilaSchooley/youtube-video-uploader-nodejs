@@ -117,11 +117,18 @@ export async function POST(request: NextRequest) {
 
     // List videos in folder
     let videos;
+    let currentDropboxToken = dropboxToken; // Track token in case it gets refreshed
     try {
       if (recursive) {
         videos = await listDropboxVideosRecursive(normalizedPath, dropboxToken, 10, sessionId, session.dropboxRefreshToken);
       } else {
         videos = await listDropboxVideos(normalizedPath, dropboxToken, sessionId, session.dropboxRefreshToken);
+      }
+      // Re-fetch token in case it was refreshed during listing
+      const refreshedSession = getSession(sessionId);
+      if (refreshedSession?.dropboxToken && refreshedSession.dropboxToken !== dropboxToken) {
+        currentDropboxToken = refreshedSession.dropboxToken;
+        console.log(`[UPLOAD-DROPBOX] Token was refreshed during listing, using updated token`);
       }
     } catch (error: any) {
       return NextResponse.json(
@@ -142,7 +149,7 @@ export async function POST(request: NextRequest) {
     if (dropboxCsvPath) {
       try {
         console.log(`[UPLOAD-DROPBOX] Downloading spreadsheet from: ${dropboxCsvPath}`);
-        const fileStream = await downloadDropboxFile(dropboxCsvPath, dropboxToken);
+        const fileStream = await downloadDropboxFile(dropboxCsvPath, currentDropboxToken, sessionId, session.dropboxRefreshToken);
         
         // Convert stream to buffer
         const chunks: Buffer[] = [];

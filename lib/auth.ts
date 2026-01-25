@@ -192,50 +192,90 @@ export async function getDropboxToken(
   // Priority 1: Use Generated Access Token from environment (never expires)
   // BUT only if this is the owner's account or whitelisted email
   if (DROPBOX_GENERATED_ACCESS_TOKEN) {
+    console.log(`[DROPBOX-GAT] GAT token is available (length: ${DROPBOX_GENERATED_ACCESS_TOKEN.length})`);
+    console.log(`[DROPBOX-GAT] Owner email configured: ${DROPBOX_GAT_OWNER_EMAIL || 'NOT SET'}`);
+    console.log(`[DROPBOX-GAT] Whitelist emails configured: ${DROPBOX_GAT_WHITELIST_EMAILS.length > 0 ? DROPBOX_GAT_WHITELIST_EMAILS.join(', ') : 'NONE'}`);
+    console.log(`[DROPBOX-GAT] User email provided: ${userEmail || 'NOT PROVIDED'}`);
+    
     if (userEmail) {
       const userEmailLower = userEmail.toLowerCase();
+      console.log(`[DROPBOX-GAT] Checking user email (lowercase): "${userEmailLower}"`);
       
       // Check if user is the owner
-      if (DROPBOX_GAT_OWNER_EMAIL && userEmailLower === DROPBOX_GAT_OWNER_EMAIL.toLowerCase()) {
-        console.log(`[DROPBOX] Using GAT for owner account: ${userEmail}`);
-        return DROPBOX_GENERATED_ACCESS_TOKEN;
+      if (DROPBOX_GAT_OWNER_EMAIL) {
+        const ownerEmailLower = DROPBOX_GAT_OWNER_EMAIL.toLowerCase();
+        console.log(`[DROPBOX-GAT] Comparing with owner email (lowercase): "${ownerEmailLower}"`);
+        if (userEmailLower === ownerEmailLower) {
+          console.log(`[DROPBOX-GAT] ✓ MATCH: Using GAT for owner account: ${userEmail}`);
+          return DROPBOX_GENERATED_ACCESS_TOKEN;
+        } else {
+          console.log(`[DROPBOX-GAT] ✗ NO MATCH: User email does not match owner email`);
+        }
+      } else {
+        console.log(`[DROPBOX-GAT] Owner email not configured, skipping owner check`);
       }
       
       // Check if user is in whitelist (supports partial matching)
       if (DROPBOX_GAT_WHITELIST_EMAILS.length > 0) {
+        console.log(`[DROPBOX-GAT] Checking whitelist (${DROPBOX_GAT_WHITELIST_EMAILS.length} entries)...`);
+        let matchedEntry: string | null = null;
         const isWhitelisted = DROPBOX_GAT_WHITELIST_EMAILS.some(whitelistEmail => {
-          // Support both exact match and partial match
-          // Partial match: if whitelist entry is contained in user email or vice versa
-          return userEmailLower === whitelistEmail.toLowerCase() || 
-                 userEmailLower.includes(whitelistEmail.toLowerCase()) ||
-                 whitelistEmail.toLowerCase().includes(userEmailLower);
+          const whitelistEmailLower = whitelistEmail.toLowerCase();
+          const exactMatch = userEmailLower === whitelistEmailLower;
+          const userContainsWhitelist = userEmailLower.includes(whitelistEmailLower);
+          const whitelistContainsUser = whitelistEmailLower.includes(userEmailLower);
+          
+          console.log(`[DROPBOX-GAT]   Comparing with whitelist entry: "${whitelistEmailLower}"`);
+          console.log(`[DROPBOX-GAT]     Exact match: ${exactMatch}`);
+          console.log(`[DROPBOX-GAT]     User contains whitelist: ${userContainsWhitelist} (user: "${userEmailLower}" contains "${whitelistEmailLower}")`);
+          console.log(`[DROPBOX-GAT]     Whitelist contains user: ${whitelistContainsUser} ("${whitelistEmailLower}" contains "${userEmailLower}")`);
+          
+          const matches = exactMatch || userContainsWhitelist || whitelistContainsUser;
+          if (matches) {
+            matchedEntry = whitelistEmail;
+            console.log(`[DROPBOX-GAT]     ✓ MATCH FOUND with entry: "${whitelistEmail}"`);
+          } else {
+            console.log(`[DROPBOX-GAT]     ✗ NO MATCH`);
+          }
+          
+          return matches;
         });
         
-        if (isWhitelisted) {
-          console.log(`[DROPBOX] Using GAT for whitelisted account: ${userEmail}`);
+        if (isWhitelisted && matchedEntry) {
+          console.log(`[DROPBOX-GAT] ✓ Using GAT for whitelisted account: ${userEmail} (matched entry: "${matchedEntry}")`);
           return DROPBOX_GENERATED_ACCESS_TOKEN;
+        } else {
+          console.log(`[DROPBOX-GAT] ✗ User email did not match any whitelist entries`);
         }
+      } else {
+        console.log(`[DROPBOX-GAT] Whitelist is empty, skipping whitelist check`);
       }
       
       // Not the owner or whitelisted - don't use GAT, fall through to OAuth token
       if (DROPBOX_GAT_OWNER_EMAIL || DROPBOX_GAT_WHITELIST_EMAILS.length > 0) {
-        console.log(`[DROPBOX] GAT available but user ${userEmail} is not the owner (${DROPBOX_GAT_OWNER_EMAIL || 'N/A'}) or whitelisted`);
+        console.log(`[DROPBOX-GAT] ✗ GAT available but user ${userEmail} is not the owner (${DROPBOX_GAT_OWNER_EMAIL || 'N/A'}) or whitelisted. Falling back to OAuth token.`);
       }
     } else {
       // No user email available - check if we should use GAT anyway
+      console.log(`[DROPBOX-GAT] No user email provided`);
       if (!DROPBOX_GAT_OWNER_EMAIL && DROPBOX_GAT_WHITELIST_EMAILS.length === 0) {
         // No owner email or whitelist configured - use GAT for everyone (backward compatibility)
         // WARNING: This means all users share the same Dropbox account
-        console.warn(`[DROPBOX] GAT is set but DROPBOX_GAT_OWNER_EMAIL and DROPBOX_GAT_WHITELIST_EMAILS are not configured. GAT will be used for ALL users.`);
+        console.warn(`[DROPBOX-GAT] ⚠️ GAT is set but DROPBOX_GAT_OWNER_EMAIL and DROPBOX_GAT_WHITELIST_EMAILS are not configured. GAT will be used for ALL users.`);
         return DROPBOX_GENERATED_ACCESS_TOKEN;
+      } else {
+        console.log(`[DROPBOX-GAT] ✗ Cannot use GAT: owner/whitelist is configured but no user email provided`);
       }
     }
+  } else {
+    console.log(`[DROPBOX-GAT] GAT token is NOT available in environment`);
   }
   
   // Priority 2: Use token from session (OAuth flow)
   // If we have both access token and refresh token, return access token
   // If it's expired, API calls will fail with 401 and we can refresh then
   if (sessionToken) {
+    console.log(`[DROPBOX-GAT] Using OAuth session token (GAT not used or not available)`);
     return sessionToken;
   }
   
