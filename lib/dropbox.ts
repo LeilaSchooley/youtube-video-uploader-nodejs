@@ -33,16 +33,23 @@ async function fetchWithBuffer(url: string | URL | Request, init?: RequestInit):
  * We explicitly create the DropboxAuth with fetch to avoid SDK's internal require issues
  */
 export function getDropboxClient(accessToken: string): Dropbox {
+  const isGAT = isGATToken(accessToken);
+  console.log(`[DROPBOX] Creating Dropbox client with ${isGAT ? 'GAT' : 'OAuth'} token`);
+  console.log(`[DROPBOX] Token details: length=${accessToken.length}, starts with: ${accessToken.substring(0, 15)}...`);
+  
   // Create auth with explicit fetch to ensure it's available
   const auth = new DropboxAuth({
     accessToken,
     fetch: fetchWithBuffer,
   });
   
-  return new Dropbox({ 
+  const client = new Dropbox({ 
     auth,
     fetch: fetchWithBuffer,
   });
+  
+  console.log(`[DROPBOX] Dropbox client created successfully`);
+  return client;
 }
 
 /**
@@ -65,39 +72,93 @@ async function handleDropbox401Error(
   sessionRefreshToken?: string | null,
   operation: string = "operation"
 ): Promise<string | null> {
+  console.log(`[DROPBOX] handleDropbox401Error called for operation: ${operation}`);
+  console.log(`[DROPBOX] Error object keys:`, Object.keys(error || {}));
+  console.log(`[DROPBOX] Error status: ${error?.status}, statusCode: ${error?.statusCode}`);
+  console.log(`[DROPBOX] Error error tag: ${error?.error?.error?.['.tag']}`);
+  console.log(`[DROPBOX] Error summary: ${error?.error?.error_summary}`);
+  
   const is401 = error?.status === 401 || 
                 error?.statusCode === 401 ||
                 error?.error?.error?.['.tag'] === 'expired_access_token' ||
                 error?.error?.error_summary?.includes('expired_access_token');
   
+  console.log(`[DROPBOX] Is 401 error: ${is401}`);
+  
   if (!is401) {
+    console.log(`[DROPBOX] Not a 401 error, returning null`);
     return null;
   }
   
+  const isGAT = isGATToken(accessToken);
+  console.log(`[DROPBOX] Token type: ${isGAT ? 'GAT' : 'OAuth'}`);
+  
   // If using GAT and getting 401, don't try to refresh - GAT doesn't expire
   // This means the GAT token is invalid, revoked, or doesn't have proper permissions
-  if (isGATToken(accessToken)) {
-    console.error(`[DROPBOX] GAT token returned 401 error during ${operation}. GAT tokens don't expire, so this indicates the token is invalid, revoked, or lacks required permissions.`);
-    console.error(`[DROPBOX] Error details:`, error?.error || error?.message);
-    throw new Error(`Dropbox GAT token is invalid or lacks permissions. Please verify DROPBOX_GENERATED_ACCESS_TOKEN is correct and has the required scopes (files.metadata.read, files.content.read, files.content.write).`);
+  if (isGAT) {
+    console.error(`[DROPBOX] ========== GAT TOKEN 401 ERROR ==========`);
+    console.error(`[DROPBOX] GAT token returned 401 error during ${operation}.`);
+    console.error(`[DROPBOX] GAT tokens don't expire, so this indicates:`);
+    console.error(`[DROPBOX]   - Token is invalid/revoked`);
+    console.error(`[DROPBOX]   - Token lacks required permissions`);
+    console.error(`[DROPBOX]   - Token is for a different Dropbox account`);
+    console.error(`[DROPBOX] Full error details:`, JSON.stringify({
+      error: error?.error,
+      error_summary: error?.error_summary,
+      status: error?.status,
+      statusCode: error?.statusCode,
+      message: error?.message,
+      headers: error?.headers,
+      request: error?.request ? 'present' : 'missing',
+    }, null, 2));
+    console.error(`[DROPBOX] GAT token info:`);
+    console.error(`[DROPBOX]   - Length: ${accessToken.length}`);
+    console.error(`[DROPBOX]   - First 20 chars: ${accessToken.substring(0, 20)}...`);
+    console.error(`[DROPBOX]   - Last 10 chars: ...${accessToken.substring(accessToken.length - 10)}`);
+    console.error(`[DROPBOX] Environment check:`);
+    console.error(`[DROPBOX]   - DROPBOX_GENERATED_ACCESS_TOKEN exists: ${!!process.env.DROPBOX_GENERATED_ACCESS_TOKEN}`);
+    console.error(`[DROPBOX]   - DROPBOX_GENERATED_ACCESS_TOKEN length: ${process.env.DROPBOX_GENERATED_ACCESS_TOKEN?.length || 0}`);
+    console.error(`[DROPBOX]   - Token matches env var: ${accessToken === process.env.DROPBOX_GENERATED_ACCESS_TOKEN}`);
+    console.error(`[DROPBOX] ========== TROUBLESHOOTING STEPS ==========`);
+    console.error(`[DROPBOX] 1. Go to https://www.dropbox.com/developers/apps`);
+    console.error(`[DROPBOX] 2. Open your app and check the Generated Access Token`);
+    console.error(`[DROPBOX] 3. Verify it matches DROPBOX_GENERATED_ACCESS_TOKEN in your environment`);
+    console.error(`[DROPBOX] 4. Ensure scopes are enabled: files.metadata.read, files.content.read, files.content.write`);
+    console.error(`[DROPBOX] 5. If token was regenerated, update DROPBOX_GENERATED_ACCESS_TOKEN and restart the app`);
+    console.error(`[DROPBOX] 6. Check if token was revoked in Dropbox App Console`);
+    console.error(`[DROPBOX] ==========================================`);
+    throw new Error(`Dropbox GAT token is invalid or lacks permissions. Please verify DROPBOX_GENERATED_ACCESS_TOKEN is correct and has the required scopes (files.metadata.read, files.content.read, files.content.write). Check logs for troubleshooting steps.`);
   }
   
   // Try to refresh OAuth token
   if (sessionId && sessionRefreshToken) {
-    console.log(`[DROPBOX] Token expired during ${operation} (401), attempting refresh...`);
+    console.log(`[DROPBOX] OAuth token expired during ${operation} (401), attempting refresh...`);
+    console.log(`[DROPBOX] Session ID: ${sessionId}`);
+    console.log(`[DROPBOX] Refresh token available: ${!!sessionRefreshToken}`);
     try {
       const { refreshDropboxTokenIfNeeded } = await import("./auth");
       const newToken = await refreshDropboxTokenIfNeeded(error, sessionId, sessionRefreshToken);
       
       if (newToken) {
-        console.log(`[DROPBOX] Successfully refreshed token, retrying ${operation}...`);
+        console.log(`[DROPBOX] ✓ Successfully refreshed OAuth token`);
+        console.log(`[DROPBOX] New token length: ${newToken.length}, starts with: ${newToken.substring(0, 15)}...`);
+        console.log(`[DROPBOX] Retrying ${operation} with refreshed token...`);
         return newToken;
+      } else {
+        console.error(`[DROPBOX] ✗ Token refresh returned null/undefined`);
       }
     } catch (refreshError: any) {
-      console.error(`[DROPBOX] Token refresh failed:`, refreshError?.message || refreshError);
+      console.error(`[DROPBOX] ✗ Token refresh failed:`, refreshError?.message || refreshError);
+      console.error(`[DROPBOX] Refresh error details:`, JSON.stringify({
+        message: refreshError?.message,
+        stack: refreshError?.stack,
+      }, null, 2));
     }
+  } else {
+    console.error(`[DROPBOX] Cannot refresh token: sessionId=${!!sessionId}, sessionRefreshToken=${!!sessionRefreshToken}`);
   }
   
+  console.log(`[DROPBOX] Returning null from handleDropbox401Error`);
   return null;
 }
 
@@ -118,6 +179,11 @@ export async function listDropboxVideos(
   pathLower?: string;
   modifiedTime?: string;
 }>> {
+  const isGAT = isGATToken(accessToken);
+  console.log(`[DROPBOX] listDropboxVideos called with ${isGAT ? 'GAT' : 'OAuth'} token`);
+  console.log(`[DROPBOX] Folder path: "${folderPath}"`);
+  console.log(`[DROPBOX] Session ID: ${sessionId || 'not provided'}, Refresh token: ${sessionRefreshToken ? 'provided' : 'not provided'}`);
+  
   const dbx = getDropboxClient(accessToken);
   
   try {
@@ -132,7 +198,9 @@ export async function listDropboxVideos(
       }
     }
     
+    console.log(`[DROPBOX] Calling filesListFolder with normalized path: "${normalizedPath}"`);
     const response = await dbx.filesListFolder({ path: normalizedPath });
+    console.log(`[DROPBOX] filesListFolder response received, entries: ${response.result.entries?.length || 0}`);
     
     if (!response.result.entries) {
       return [];

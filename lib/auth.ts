@@ -231,6 +231,8 @@ export async function getDropboxToken(
         console.log(`[DROPBOX-GAT] Comparing with owner email (lowercase): "${ownerEmailLower}"`);
         if (userEmailLower === ownerEmailLower) {
           console.log(`[DROPBOX-GAT] ✓ MATCH: Using GAT for owner account: ${userEmail}`);
+          console.log(`[DROPBOX-GAT] GAT token details: length=${DROPBOX_GENERATED_ACCESS_TOKEN.length}, starts with: ${DROPBOX_GENERATED_ACCESS_TOKEN.substring(0, 15)}...`);
+          console.log(`[DROPBOX-GAT] Returning GAT token to caller`);
           return DROPBOX_GENERATED_ACCESS_TOKEN;
         } else {
           console.log(`[DROPBOX-GAT] ✗ NO MATCH: User email does not match owner email`);
@@ -267,6 +269,8 @@ export async function getDropboxToken(
         
         if (isWhitelisted && matchedEntry) {
           console.log(`[DROPBOX-GAT] ✓ Using GAT for whitelisted account: ${userEmail} (matched entry: "${matchedEntry}")`);
+          console.log(`[DROPBOX-GAT] GAT token details: length=${DROPBOX_GENERATED_ACCESS_TOKEN.length}, starts with: ${DROPBOX_GENERATED_ACCESS_TOKEN.substring(0, 15)}...`);
+          console.log(`[DROPBOX-GAT] Returning GAT token to caller`);
           return DROPBOX_GENERATED_ACCESS_TOKEN;
         } else {
           console.log(`[DROPBOX-GAT] ✗ User email did not match any whitelist entries`);
@@ -300,6 +304,7 @@ export async function getDropboxToken(
   // If it's expired, API calls will fail with 401 and we can refresh then
   if (sessionToken) {
     console.log(`[DROPBOX-GAT] Using OAuth session token (GAT not used or not available)`);
+    console.log(`[DROPBOX-GAT] OAuth token details: length=${sessionToken.length}, starts with: ${sessionToken.substring(0, 15)}...`);
     return sessionToken;
   }
   
