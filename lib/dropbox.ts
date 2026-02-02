@@ -1,30 +1,32 @@
 import { Dropbox, DropboxAuth } from "dropbox";
 import { Readable } from "stream";
-import { isGATToken } from "./auth";
 
 // Create a fetch wrapper that adds .buffer() method to Response
 // This allows us to use native fetch (or node-fetch) while providing .buffer()
-async function fetchWithBuffer(url: string | URL | Request, init?: RequestInit): Promise<Response> {
+async function fetchWithBuffer(
+  url: string | URL | Request,
+  init?: RequestInit,
+): Promise<Response> {
   // Use node-fetch for compatibility
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const nodeFetch = require('node-fetch');
+  const nodeFetch = require("node-fetch");
   const fetchFn = nodeFetch.default || nodeFetch;
-  
-  if (typeof fetchFn !== 'function') {
-    console.error('[DROPBOX] fetchFn is not a function:', typeof fetchFn);
-    throw new Error('node-fetch is not available');
+
+  if (typeof fetchFn !== "function") {
+    console.error("[DROPBOX] fetchFn is not a function:", typeof fetchFn);
+    throw new Error("node-fetch is not available");
   }
-  
+
   const response = await fetchFn(url, init);
-  
+
   // Add .buffer() method if it doesn't exist (for native fetch compatibility)
   if (!response.buffer && response.arrayBuffer) {
-    response.buffer = async function() {
+    response.buffer = async function () {
       const arrayBuffer = await this.arrayBuffer();
       return Buffer.from(arrayBuffer);
     };
   }
-  
+
   return response;
 }
 
@@ -33,23 +35,16 @@ async function fetchWithBuffer(url: string | URL | Request, init?: RequestInit):
  * We explicitly create the DropboxAuth with fetch to avoid SDK's internal require issues
  */
 export function getDropboxClient(accessToken: string): Dropbox {
-  const isGAT = isGATToken(accessToken);
-  console.log(`[DROPBOX] Creating Dropbox client with ${isGAT ? 'GAT' : 'OAuth'} token`);
-  console.log(`[DROPBOX] Token details: length=${accessToken.length}, starts with: ${accessToken.substring(0, 15)}...`);
-  
   // Create auth with explicit fetch to ensure it's available
   const auth = new DropboxAuth({
     accessToken,
     fetch: fetchWithBuffer,
   });
-  
-  const client = new Dropbox({ 
+
+  return new Dropbox({
     auth,
     fetch: fetchWithBuffer,
   });
-  
-  console.log(`[DROPBOX] Dropbox client created successfully`);
-  return client;
 }
 
 /**
@@ -57,107 +52,77 @@ export function getDropboxClient(accessToken: string): Dropbox {
  */
 export function isDropboxPath(str: string): boolean {
   // Dropbox paths start with / and contain valid path characters
-  return typeof str === 'string' && str.startsWith('/') && str.length > 1;
+  return typeof str === "string" && str.startsWith("/") && str.length > 1;
 }
 
 /**
- * Handle 401 errors for Dropbox API calls
- * If using GAT, don't try to refresh (GAT doesn't expire)
- * If using OAuth token, attempt to refresh
+ * Handle 401 errors for Dropbox API calls - attempt to refresh OAuth token.
  */
 async function handleDropbox401Error(
   error: any,
-  accessToken: string,
+  _accessToken: string,
   sessionId?: string,
   sessionRefreshToken?: string | null,
-  operation: string = "operation"
+  operation: string = "operation",
 ): Promise<string | null> {
-  console.log(`[DROPBOX] handleDropbox401Error called for operation: ${operation}`);
-  console.log(`[DROPBOX] Error object keys:`, Object.keys(error || {}));
-  console.log(`[DROPBOX] Error status: ${error?.status}, statusCode: ${error?.statusCode}`);
-  console.log(`[DROPBOX] Error error tag: ${error?.error?.error?.['.tag']}`);
-  console.log(`[DROPBOX] Error summary: ${error?.error?.error_summary}`);
-  
-  const is401 = error?.status === 401 || 
-                error?.statusCode === 401 ||
-                error?.error?.error?.['.tag'] === 'expired_access_token' ||
-                error?.error?.error_summary?.includes('expired_access_token');
-  
-  console.log(`[DROPBOX] Is 401 error: ${is401}`);
-  
+  const is401 =
+    error?.status === 401 ||
+    error?.statusCode === 401 ||
+    error?.error?.error?.[".tag"] === "expired_access_token" ||
+    error?.error?.error_summary?.includes("expired_access_token");
+
   if (!is401) {
-    console.log(`[DROPBOX] Not a 401 error, returning null`);
     return null;
   }
-  
-  const isGAT = isGATToken(accessToken);
-  console.log(`[DROPBOX] Token type: ${isGAT ? 'GAT' : 'OAuth'}`);
-  
-  // If using GAT and getting 401, don't try to refresh - GAT doesn't expire
-  // This means the GAT token is invalid, revoked, or doesn't have proper permissions
-  if (isGAT) {
-    console.error(`[DROPBOX] ========== GAT TOKEN 401 ERROR ==========`);
-    console.error(`[DROPBOX] GAT token returned 401 error during ${operation}.`);
-    console.error(`[DROPBOX] GAT tokens don't expire, so this indicates:`);
-    console.error(`[DROPBOX]   - Token is invalid/revoked`);
-    console.error(`[DROPBOX]   - Token lacks required permissions`);
-    console.error(`[DROPBOX]   - Token is for a different Dropbox account`);
-    console.error(`[DROPBOX] Full error details:`, JSON.stringify({
-      error: error?.error,
-      error_summary: error?.error_summary,
-      status: error?.status,
-      statusCode: error?.statusCode,
-      message: error?.message,
-      headers: error?.headers,
-      request: error?.request ? 'present' : 'missing',
-    }, null, 2));
-    console.error(`[DROPBOX] GAT token info:`);
-    console.error(`[DROPBOX]   - Length: ${accessToken.length}`);
-    console.error(`[DROPBOX]   - First 20 chars: ${accessToken.substring(0, 20)}...`);
-    console.error(`[DROPBOX]   - Last 10 chars: ...${accessToken.substring(accessToken.length - 10)}`);
-    console.error(`[DROPBOX] Environment check:`);
-    console.error(`[DROPBOX]   - DROPBOX_GENERATED_ACCESS_TOKEN exists: ${!!process.env.DROPBOX_GENERATED_ACCESS_TOKEN}`);
-    console.error(`[DROPBOX]   - DROPBOX_GENERATED_ACCESS_TOKEN length: ${process.env.DROPBOX_GENERATED_ACCESS_TOKEN?.length || 0}`);
-    console.error(`[DROPBOX]   - Token matches env var: ${accessToken === process.env.DROPBOX_GENERATED_ACCESS_TOKEN}`);
-    console.error(`[DROPBOX] ========== TROUBLESHOOTING STEPS ==========`);
-    console.error(`[DROPBOX] 1. Go to https://www.dropbox.com/developers/apps`);
-    console.error(`[DROPBOX] 2. Open your app and check the Generated Access Token`);
-    console.error(`[DROPBOX] 3. Verify it matches DROPBOX_GENERATED_ACCESS_TOKEN in your environment`);
-    console.error(`[DROPBOX] 4. Ensure scopes are enabled: files.metadata.read, files.content.read, files.content.write`);
-    console.error(`[DROPBOX] 5. If token was regenerated, update DROPBOX_GENERATED_ACCESS_TOKEN and restart the app`);
-    console.error(`[DROPBOX] 6. Check if token was revoked in Dropbox App Console`);
-    console.error(`[DROPBOX] ==========================================`);
-    throw new Error(`Dropbox GAT token is invalid or lacks permissions. Please verify DROPBOX_GENERATED_ACCESS_TOKEN is correct and has the required scopes (files.metadata.read, files.content.read, files.content.write). Check logs for troubleshooting steps.`);
-  }
-  
+
   // Try to refresh OAuth token
   if (sessionId && sessionRefreshToken) {
-    console.log(`[DROPBOX] OAuth token expired during ${operation} (401), attempting refresh...`);
+    console.log(
+      `[DROPBOX] OAuth token expired during ${operation} (401), attempting refresh...`,
+    );
     console.log(`[DROPBOX] Session ID: ${sessionId}`);
     console.log(`[DROPBOX] Refresh token available: ${!!sessionRefreshToken}`);
     try {
       const { refreshDropboxTokenIfNeeded } = await import("./auth");
-      const newToken = await refreshDropboxTokenIfNeeded(error, sessionId, sessionRefreshToken);
-      
+      const newToken = await refreshDropboxTokenIfNeeded(
+        error,
+        sessionId,
+        sessionRefreshToken,
+      );
+
       if (newToken) {
         console.log(`[DROPBOX] ✓ Successfully refreshed OAuth token`);
-        console.log(`[DROPBOX] New token length: ${newToken.length}, starts with: ${newToken.substring(0, 15)}...`);
+        console.log(
+          `[DROPBOX] New token length: ${newToken.length}, starts with: ${newToken.substring(0, 15)}...`,
+        );
         console.log(`[DROPBOX] Retrying ${operation} with refreshed token...`);
         return newToken;
       } else {
         console.error(`[DROPBOX] ✗ Token refresh returned null/undefined`);
       }
     } catch (refreshError: any) {
-      console.error(`[DROPBOX] ✗ Token refresh failed:`, refreshError?.message || refreshError);
-      console.error(`[DROPBOX] Refresh error details:`, JSON.stringify({
-        message: refreshError?.message,
-        stack: refreshError?.stack,
-      }, null, 2));
+      console.error(
+        `[DROPBOX] ✗ Token refresh failed:`,
+        refreshError?.message || refreshError,
+      );
+      console.error(
+        `[DROPBOX] Refresh error details:`,
+        JSON.stringify(
+          {
+            message: refreshError?.message,
+            stack: refreshError?.stack,
+          },
+          null,
+          2,
+        ),
+      );
     }
   } else {
-    console.error(`[DROPBOX] Cannot refresh token: sessionId=${!!sessionId}, sessionRefreshToken=${!!sessionRefreshToken}`);
+    console.error(
+      `[DROPBOX] Cannot refresh token: sessionId=${!!sessionId}, sessionRefreshToken=${!!sessionRefreshToken}`,
+    );
   }
-  
+
   console.log(`[DROPBOX] Returning null from handleDropbox401Error`);
   return null;
 }
@@ -170,22 +135,19 @@ export async function listDropboxVideos(
   folderPath: string,
   accessToken: string,
   sessionId?: string,
-  sessionRefreshToken?: string | null
-): Promise<Array<{
-  id: string; // Dropbox uses path as ID
-  name: string;
-  mimeType: string;
-  size?: number;
-  pathLower?: string;
-  modifiedTime?: string;
-}>> {
-  const isGAT = isGATToken(accessToken);
-  console.log(`[DROPBOX] listDropboxVideos called with ${isGAT ? 'GAT' : 'OAuth'} token`);
-  console.log(`[DROPBOX] Folder path: "${folderPath}"`);
-  console.log(`[DROPBOX] Session ID: ${sessionId || 'not provided'}, Refresh token: ${sessionRefreshToken ? 'provided' : 'not provided'}`);
-  
+  sessionRefreshToken?: string | null,
+): Promise<
+  Array<{
+    id: string; // Dropbox uses path as ID
+    name: string;
+    mimeType: string;
+    size?: number;
+    pathLower?: string;
+    modifiedTime?: string;
+  }>
+> {
   const dbx = getDropboxClient(accessToken);
-  
+
   try {
     // Normalize path for Dropbox API (empty string for root, no trailing slash for subfolders)
     let normalizedPath = folderPath.trim();
@@ -197,56 +159,83 @@ export async function listDropboxVideos(
         normalizedPath = "/" + normalizedPath;
       }
     }
-    
-    console.log(`[DROPBOX] Calling filesListFolder with normalized path: "${normalizedPath}"`);
+
     const response = await dbx.filesListFolder({ path: normalizedPath });
-    console.log(`[DROPBOX] filesListFolder response received, entries: ${response.result.entries?.length || 0}`);
-    
+
     if (!response.result.entries) {
       return [];
     }
 
     // Filter for video files
-    const videoExtensions = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.flv', '.wmv', '.m4v'];
+    const videoExtensions = [
+      ".mp4",
+      ".mov",
+      ".avi",
+      ".mkv",
+      ".webm",
+      ".flv",
+      ".wmv",
+      ".m4v",
+    ];
     const allEntries: any[] = [...response.result.entries];
 
     // Handle pagination - Dropbox API returns up to 2000 entries per page
-    let cursor: string | undefined = response.result.has_more ? response.result.cursor : undefined;
+    let cursor: string | undefined = response.result.has_more
+      ? response.result.cursor
+      : undefined;
     while (cursor) {
       const nextResponse = await dbx.filesListFolderContinue({ cursor });
       if (!nextResponse.result.entries) break;
-      
+
       allEntries.push(...nextResponse.result.entries);
-      cursor = nextResponse.result.has_more && nextResponse.result.cursor ? nextResponse.result.cursor : undefined;
+      cursor =
+        nextResponse.result.has_more && nextResponse.result.cursor
+          ? nextResponse.result.cursor
+          : undefined;
     }
 
-    const videoFiles = allEntries.filter(entry => {
-      if (entry['.tag'] !== 'file') return false;
+    const videoFiles = allEntries.filter((entry) => {
+      if (entry[".tag"] !== "file") return false;
       const file = entry as any;
-      const name = file.name?.toLowerCase() || '';
-      return videoExtensions.some(ext => name.endsWith(ext));
+      const name = file.name?.toLowerCase() || "";
+      return videoExtensions.some((ext) => name.endsWith(ext));
     });
 
-    console.log(`[DROPBOX] Found ${videoFiles.length} videos in folder (scanned ${allEntries.length} total files)`);
+    console.log(
+      `[DROPBOX] Found ${videoFiles.length} videos in folder (scanned ${allEntries.length} total files)`,
+    );
 
     return videoFiles.map((entry: any) => ({
       id: entry.path_lower || entry.path_display || entry.id,
       name: entry.name,
-      mimeType: entry.content_hash ? 'video/mp4' : 'application/octet-stream', // Dropbox doesn't always provide mimeType
+      mimeType: entry.content_hash ? "video/mp4" : "application/octet-stream", // Dropbox doesn't always provide mimeType
       size: entry.size,
       pathLower: entry.path_lower,
       modifiedTime: entry.server_modified,
     }));
   } catch (error: any) {
-    // Handle 401 errors (GAT check + token refresh)
-    const newToken = await handleDropbox401Error(error, accessToken, sessionId, sessionRefreshToken, "list videos");
+    // Handle 401 errors (token refresh)
+    const newToken = await handleDropbox401Error(
+      error,
+      accessToken,
+      sessionId,
+      sessionRefreshToken,
+      "list videos",
+    );
     if (newToken) {
       // Retry with new token
-      return listDropboxVideos(folderPath, newToken, sessionId, sessionRefreshToken);
+      return listDropboxVideos(
+        folderPath,
+        newToken,
+        sessionId,
+        sessionRefreshToken,
+      );
     }
-    
+
     console.error("[DROPBOX] Error listing videos:", error?.message);
-    throw new Error(`Failed to list Dropbox videos: ${error?.message || "Unknown error"}`);
+    throw new Error(
+      `Failed to list Dropbox videos: ${error?.message || "Unknown error"}`,
+    );
   }
 }
 
@@ -259,16 +248,18 @@ export async function listDropboxVideosRecursive(
   accessToken: string,
   maxDepth: number = 10,
   sessionId?: string,
-  sessionRefreshToken?: string | null
-): Promise<Array<{
-  id: string;
-  name: string;
-  mimeType: string;
-  size?: number;
-  pathLower?: string;
-  modifiedTime?: string;
-  folderPath?: string;
-}>> {
+  sessionRefreshToken?: string | null,
+): Promise<
+  Array<{
+    id: string;
+    name: string;
+    mimeType: string;
+    size?: number;
+    pathLower?: string;
+    modifiedTime?: string;
+    folderPath?: string;
+  }>
+> {
   let dbx = getDropboxClient(accessToken);
   let currentToken = accessToken;
   const videos: Array<{
@@ -281,7 +272,11 @@ export async function listDropboxVideosRecursive(
     folderPath?: string;
   }> = [];
 
-  async function scanFolder(path: string, folderPath: string = "", depth: number = 0): Promise<void> {
+  async function scanFolder(
+    path: string,
+    folderPath: string = "",
+    depth: number = 0,
+  ): Promise<void> {
     if (depth > maxDepth) {
       console.warn(`[DROPBOX] Max depth ${maxDepth} reached at ${path}`);
       return;
@@ -304,24 +299,35 @@ export async function listDropboxVideosRecursive(
         return;
       }
 
-      const videoExtensions = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.flv', '.wmv', '.m4v'];
+      const videoExtensions = [
+        ".mp4",
+        ".mov",
+        ".avi",
+        ".mkv",
+        ".webm",
+        ".flv",
+        ".wmv",
+        ".m4v",
+      ];
 
       for (const entry of response.result.entries) {
-        if (entry['.tag'] === 'file') {
+        if (entry[".tag"] === "file") {
           const file = entry as any;
-          const name = file.name?.toLowerCase() || '';
-          if (videoExtensions.some(ext => name.endsWith(ext))) {
+          const name = file.name?.toLowerCase() || "";
+          if (videoExtensions.some((ext) => name.endsWith(ext))) {
             videos.push({
               id: file.path_lower || file.path_display || file.id,
               name: file.name,
-              mimeType: file.content_hash ? 'video/mp4' : 'application/octet-stream',
+              mimeType: file.content_hash
+                ? "video/mp4"
+                : "application/octet-stream",
               size: file.size,
               pathLower: file.path_lower,
               modifiedTime: file.server_modified,
-              folderPath: folderPath || '/',
+              folderPath: folderPath || "/",
             });
           }
-        } else if (entry['.tag'] === 'folder') {
+        } else if (entry[".tag"] === "folder") {
           const folder = entry as any;
           const subPath = folder.path_lower || folder.path_display || folder.id;
           await scanFolder(subPath, subPath, depth + 1);
@@ -336,33 +342,45 @@ export async function listDropboxVideosRecursive(
           if (!nextResponse.result.entries) break;
 
           for (const entry of nextResponse.result.entries) {
-            if (entry['.tag'] === 'file') {
+            if (entry[".tag"] === "file") {
               const file = entry as any;
-              const name = file.name?.toLowerCase() || '';
-              if (videoExtensions.some(ext => name.endsWith(ext))) {
+              const name = file.name?.toLowerCase() || "";
+              if (videoExtensions.some((ext) => name.endsWith(ext))) {
                 videos.push({
                   id: file.path_lower || file.path_display || file.id,
                   name: file.name,
-                  mimeType: file.content_hash ? 'video/mp4' : 'application/octet-stream',
+                  mimeType: file.content_hash
+                    ? "video/mp4"
+                    : "application/octet-stream",
                   size: file.size,
                   pathLower: file.path_lower,
                   modifiedTime: file.server_modified,
-                  folderPath: folderPath || '/',
+                  folderPath: folderPath || "/",
                 });
               }
-            } else if (entry['.tag'] === 'folder') {
+            } else if (entry[".tag"] === "folder") {
               const folder = entry as any;
-              const subPath = folder.path_lower || folder.path_display || folder.id;
+              const subPath =
+                folder.path_lower || folder.path_display || folder.id;
               await scanFolder(subPath, subPath, depth + 1);
             }
           }
 
-          cursor = nextResponse.result.has_more && nextResponse.result.cursor ? nextResponse.result.cursor : undefined;
+          cursor =
+            nextResponse.result.has_more && nextResponse.result.cursor
+              ? nextResponse.result.cursor
+              : undefined;
         }
       }
     } catch (error: any) {
-      // Handle 401 errors (GAT check + token refresh)
-      const newToken = await handleDropbox401Error(error, currentToken, sessionId, sessionRefreshToken, "recursive scan");
+      // Handle 401 errors (token refresh)
+      const newToken = await handleDropbox401Error(
+        error,
+        currentToken,
+        sessionId,
+        sessionRefreshToken,
+        "recursive scan",
+      );
       if (newToken) {
         // Update token and client, then retry
         currentToken = newToken;
@@ -371,7 +389,7 @@ export async function listDropboxVideosRecursive(
         await scanFolder(path, folderPath, depth);
         return;
       }
-      
+
       console.error(`[DROPBOX] Error scanning folder ${path}:`, error?.message);
       // Continue with other folders
     }
@@ -389,64 +407,94 @@ export async function downloadDropboxFile(
   filePath: string,
   accessToken: string,
   sessionId?: string,
-  sessionRefreshToken?: string | null
+  sessionRefreshToken?: string | null,
 ): Promise<Readable> {
   console.log(`[DROPBOX] Downloading file: ${filePath}`);
-  console.log(`[DROPBOX] Token available: ${!!accessToken}, Token length: ${accessToken?.length || 0}`);
-  
+  console.log(
+    `[DROPBOX] Token available: ${!!accessToken}, Token length: ${accessToken?.length || 0}`,
+  );
+
   const dbx = getDropboxClient(accessToken);
-  
+
   try {
     console.log(`[DROPBOX] Calling filesDownload for: ${filePath}`);
     const response = await dbx.filesDownload({ path: filePath });
-    console.log(`[DROPBOX] Got response, result keys:`, Object.keys(response.result || {}));
-    
+    console.log(
+      `[DROPBOX] Got response, result keys:`,
+      Object.keys(response.result || {}),
+    );
+
     // Dropbox SDK v10+ returns result with fileBinary property
     // Handle both Buffer and Uint8Array formats
     let fileData: Buffer | Uint8Array | undefined;
-    
-    if (response.result && typeof response.result === 'object') {
+
+    if (response.result && typeof response.result === "object") {
       const result = response.result as any;
       // Try different possible properties
       fileData = result.fileBinary || result.fileContents || result.data;
-      
-      console.log(`[DROPBOX] File data type: ${typeof fileData}, isBuffer: ${Buffer.isBuffer(fileData)}, isUint8Array: ${fileData instanceof Uint8Array}`);
-      
+
+      console.log(
+        `[DROPBOX] File data type: ${typeof fileData}, isBuffer: ${Buffer.isBuffer(fileData)}, isUint8Array: ${fileData instanceof Uint8Array}`,
+      );
+
       // If it's a Uint8Array, convert to Buffer
       if (fileData instanceof Uint8Array && !Buffer.isBuffer(fileData)) {
         fileData = Buffer.from(fileData);
       }
     }
-    
+
     if (!fileData) {
-      console.error(`[DROPBOX] Response structure:`, JSON.stringify(Object.keys(response.result || {})));
-      throw new Error("No file data returned from Dropbox - unexpected response structure");
+      console.error(
+        `[DROPBOX] Response structure:`,
+        JSON.stringify(Object.keys(response.result || {})),
+      );
+      throw new Error(
+        "No file data returned from Dropbox - unexpected response structure",
+      );
     }
 
     // Convert to Buffer if not already
     const buffer = Buffer.isBuffer(fileData) ? fileData : Buffer.from(fileData);
-    console.log(`[DROPBOX] Successfully downloaded file, size: ${buffer.length} bytes`);
-    
+    console.log(
+      `[DROPBOX] Successfully downloaded file, size: ${buffer.length} bytes`,
+    );
+
     // Convert Buffer to Readable stream
     const stream = new Readable();
     stream.push(buffer);
     stream.push(null); // End the stream
-    
+
     return stream;
   } catch (error: any) {
-    // Handle 401 errors (GAT check + token refresh)
-    const newToken = await handleDropbox401Error(error, accessToken, sessionId, sessionRefreshToken, "download");
+    // Handle 401 errors (token refresh)
+    const newToken = await handleDropbox401Error(
+      error,
+      accessToken,
+      sessionId,
+      sessionRefreshToken,
+      "download",
+    );
     if (newToken) {
       // Retry with new token
-      return downloadDropboxFile(filePath, newToken, sessionId, sessionRefreshToken);
+      return downloadDropboxFile(
+        filePath,
+        newToken,
+        sessionId,
+        sessionRefreshToken,
+      );
     }
-    
-    console.error(`[DROPBOX] Error downloading file ${filePath}:`, error?.message);
+
+    console.error(
+      `[DROPBOX] Error downloading file ${filePath}:`,
+      error?.message,
+    );
     console.error(`[DROPBOX] Error details:`, error?.error || error);
     if (error?.status) {
       console.error(`[DROPBOX] HTTP Status:`, error.status);
     }
-    throw new Error(`Failed to download Dropbox file: ${error?.message || "Unknown error"}`);
+    throw new Error(
+      `Failed to download Dropbox file: ${error?.message || "Unknown error"}`,
+    );
   }
 }
 
@@ -458,7 +506,7 @@ export async function getDropboxFileMetadata(
   filePath: string,
   accessToken: string,
   sessionId?: string,
-  sessionRefreshToken?: string | null
+  sessionRefreshToken?: string | null,
 ): Promise<{
   id: string;
   name: string;
@@ -468,29 +516,45 @@ export async function getDropboxFileMetadata(
   modifiedTime?: string;
 }> {
   const dbx = getDropboxClient(accessToken);
-  
+
   try {
     const response = await dbx.filesGetMetadata({ path: filePath });
     const file = response.result as any;
-    
+
     return {
       id: file.path_lower || file.path_display || file.id,
       name: file.name,
-      mimeType: file.content_hash ? 'video/mp4' : 'application/octet-stream',
+      mimeType: file.content_hash ? "video/mp4" : "application/octet-stream",
       size: file.size,
       pathLower: file.path_lower,
       modifiedTime: file.server_modified,
     };
   } catch (error: any) {
-    // Handle 401 errors (GAT check + token refresh)
-    const newToken = await handleDropbox401Error(error, accessToken, sessionId, sessionRefreshToken, "get metadata");
+    // Handle 401 errors (token refresh)
+    const newToken = await handleDropbox401Error(
+      error,
+      accessToken,
+      sessionId,
+      sessionRefreshToken,
+      "get metadata",
+    );
     if (newToken) {
       // Retry with new token
-      return getDropboxFileMetadata(filePath, newToken, sessionId, sessionRefreshToken);
+      return getDropboxFileMetadata(
+        filePath,
+        newToken,
+        sessionId,
+        sessionRefreshToken,
+      );
     }
-    
-    console.error(`[DROPBOX] Error getting metadata for ${filePath}:`, error?.message);
-    throw new Error(`Failed to get Dropbox file metadata: ${error?.message || "Unknown error"}`);
+
+    console.error(
+      `[DROPBOX] Error getting metadata for ${filePath}:`,
+      error?.message,
+    );
+    throw new Error(
+      `Failed to get Dropbox file metadata: ${error?.message || "Unknown error"}`,
+    );
   }
 }
 
@@ -503,32 +567,46 @@ export async function renameDropboxFile(
   newName: string,
   accessToken: string,
   sessionId?: string,
-  sessionRefreshToken?: string | null
+  sessionRefreshToken?: string | null,
 ): Promise<void> {
   const dbx = getDropboxClient(accessToken);
-  
+
   try {
     // Get directory path
-    const pathParts = filePath.split('/');
+    const pathParts = filePath.split("/");
     pathParts.pop(); // Remove filename
-    const directory = pathParts.join('/') || '/';
+    const directory = pathParts.join("/") || "/";
     const newPath = `${directory}/${newName}`;
-    
+
     await dbx.filesMoveV2({
       from_path: filePath,
       to_path: newPath,
     });
     console.log(`[DROPBOX] Renamed file ${filePath} to ${newPath}`);
   } catch (error: any) {
-    // Handle 401 errors (GAT check + token refresh)
-    const newToken = await handleDropbox401Error(error, accessToken, sessionId, sessionRefreshToken, "rename");
+    // Handle 401 errors (token refresh)
+    const newToken = await handleDropbox401Error(
+      error,
+      accessToken,
+      sessionId,
+      sessionRefreshToken,
+      "rename",
+    );
     if (newToken) {
       // Retry with new token
-      return renameDropboxFile(filePath, newName, newToken, sessionId, sessionRefreshToken);
+      return renameDropboxFile(
+        filePath,
+        newName,
+        newToken,
+        sessionId,
+        sessionRefreshToken,
+      );
     }
-    
+
     console.error(`[DROPBOX] Error renaming file ${filePath}:`, error?.message);
-    throw new Error(`Failed to rename Dropbox file: ${error?.message || "Unknown error"}`);
+    throw new Error(
+      `Failed to rename Dropbox file: ${error?.message || "Unknown error"}`,
+    );
   }
 }
 
@@ -541,31 +619,45 @@ export async function moveDropboxFile(
   targetFolderPath: string,
   accessToken: string,
   sessionId?: string,
-  sessionRefreshToken?: string | null
+  sessionRefreshToken?: string | null,
 ): Promise<void> {
   const dbx = getDropboxClient(accessToken);
-  
+
   try {
     // Get filename
-    const pathParts = filePath.split('/');
+    const pathParts = filePath.split("/");
     const filename = pathParts[pathParts.length - 1];
-    const targetPath = `${targetFolderPath.endsWith('/') ? targetFolderPath.slice(0, -1) : targetFolderPath}/${filename}`;
-    
+    const targetPath = `${targetFolderPath.endsWith("/") ? targetFolderPath.slice(0, -1) : targetFolderPath}/${filename}`;
+
     await dbx.filesMoveV2({
       from_path: filePath,
       to_path: targetPath,
     });
     console.log(`[DROPBOX] Moved file ${filePath} to ${targetPath}`);
   } catch (error: any) {
-    // Handle 401 errors (GAT check + token refresh)
-    const newToken = await handleDropbox401Error(error, accessToken, sessionId, sessionRefreshToken, "move");
+    // Handle 401 errors (token refresh)
+    const newToken = await handleDropbox401Error(
+      error,
+      accessToken,
+      sessionId,
+      sessionRefreshToken,
+      "move",
+    );
     if (newToken) {
       // Retry with new token
-      return moveDropboxFile(filePath, targetFolderPath, newToken, sessionId, sessionRefreshToken);
+      return moveDropboxFile(
+        filePath,
+        targetFolderPath,
+        newToken,
+        sessionId,
+        sessionRefreshToken,
+      );
     }
-    
+
     console.error(`[DROPBOX] Error moving file ${filePath}:`, error?.message);
-    throw new Error(`Failed to move Dropbox file: ${error?.message || "Unknown error"}`);
+    throw new Error(
+      `Failed to move Dropbox file: ${error?.message || "Unknown error"}`,
+    );
   }
 }
 
@@ -577,23 +669,36 @@ export async function deleteDropboxFile(
   filePath: string,
   accessToken: string,
   sessionId?: string,
-  sessionRefreshToken?: string | null
+  sessionRefreshToken?: string | null,
 ): Promise<void> {
   const dbx = getDropboxClient(accessToken);
-  
+
   try {
     await dbx.filesDeleteV2({ path: filePath });
     console.log(`[DROPBOX] Deleted file ${filePath}`);
   } catch (error: any) {
-    // Handle 401 errors (GAT check + token refresh)
-    const newToken = await handleDropbox401Error(error, accessToken, sessionId, sessionRefreshToken, "delete");
+    // Handle 401 errors (token refresh)
+    const newToken = await handleDropbox401Error(
+      error,
+      accessToken,
+      sessionId,
+      sessionRefreshToken,
+      "delete",
+    );
     if (newToken) {
       // Retry with new token
-      return deleteDropboxFile(filePath, newToken, sessionId, sessionRefreshToken);
+      return deleteDropboxFile(
+        filePath,
+        newToken,
+        sessionId,
+        sessionRefreshToken,
+      );
     }
-    
+
     console.error(`[DROPBOX] Error deleting file ${filePath}:`, error?.message);
-    throw new Error(`Failed to delete Dropbox file: ${error?.message || "Unknown error"}`);
+    throw new Error(
+      `Failed to delete Dropbox file: ${error?.message || "Unknown error"}`,
+    );
   }
 }
 
@@ -605,22 +710,24 @@ export async function listDropboxItems(
   folderPath: string,
   accessToken: string,
   sessionId?: string,
-  sessionRefreshToken?: string | null
-): Promise<Array<{
-  id: string;
-  name: string;
-  type: 'file' | 'folder';
-  size?: number;
-  modifiedTime?: string;
-}>> {
+  sessionRefreshToken?: string | null,
+): Promise<
+  Array<{
+    id: string;
+    name: string;
+    type: "file" | "folder";
+    size?: number;
+    modifiedTime?: string;
+  }>
+> {
   const dbx = getDropboxClient(accessToken);
-  
+
   try {
     // Dropbox API expects "" for root, and paths without trailing slash for subfolders
     // Root folder: "/" or "" -> ""
     // Subfolders: "/Videos" or "/Videos/" -> "/Videos"
     let normalizedPath = folderPath.trim();
-    
+
     // Handle root folder - Dropbox API expects empty string
     if (normalizedPath === "/" || normalizedPath === "") {
       normalizedPath = "";
@@ -632,73 +739,95 @@ export async function listDropboxItems(
         normalizedPath = "/" + normalizedPath;
       }
     }
-    
+
     console.log(`[DROPBOX] Listing items in folder: "${normalizedPath}"`);
-    
+
     // Collect all items with pagination support
     const allItems: Array<{
       id: string;
       name: string;
-      type: 'file' | 'folder';
+      type: "file" | "folder";
       size?: number;
       modifiedTime?: string;
     }> = [];
-    
+
     // Initial request
     let response = await dbx.filesListFolder({ path: normalizedPath });
-    
+
     const processEntries = (entries: any[]) => {
       for (const entry of entries) {
         allItems.push({
           id: entry.path_lower || entry.path_display || entry.id,
           name: entry.name,
-          type: entry['.tag'] === 'folder' ? 'folder' : 'file',
+          type: entry[".tag"] === "folder" ? "folder" : "file",
           size: entry.size,
           modifiedTime: entry.server_modified,
         });
       }
     };
-    
+
     if (response.result.entries) {
       processEntries(response.result.entries);
     }
-    
+
     // Handle pagination - fetch remaining items
     while (response.result.has_more) {
-      console.log(`[DROPBOX] Fetching more items... (current count: ${allItems.length})`);
-      response = await dbx.filesListFolderContinue({ cursor: response.result.cursor });
+      console.log(
+        `[DROPBOX] Fetching more items... (current count: ${allItems.length})`,
+      );
+      response = await dbx.filesListFolderContinue({
+        cursor: response.result.cursor,
+      });
       if (response.result.entries) {
         processEntries(response.result.entries);
       }
     }
-    
+
     console.log(`[DROPBOX] Total items fetched: ${allItems.length}`);
     return allItems;
   } catch (error: any) {
-    // Handle 401 errors (GAT check + token refresh)
-    const newToken = await handleDropbox401Error(error, accessToken, sessionId, sessionRefreshToken, "list items");
+    // Handle 401 errors (token refresh)
+    const newToken = await handleDropbox401Error(
+      error,
+      accessToken,
+      sessionId,
+      sessionRefreshToken,
+      "list items",
+    );
     if (newToken) {
       // Retry with new token
-      return listDropboxItems(folderPath, newToken, sessionId, sessionRefreshToken);
+      return listDropboxItems(
+        folderPath,
+        newToken,
+        sessionId,
+        sessionRefreshToken,
+      );
     }
-    
+
     // Log full error details for debugging
     console.error("[DROPBOX] Error listing items:", error?.message);
-    console.error("[DROPBOX] Error details:", JSON.stringify({
-      status: error?.status,
-      error: error?.error,
-      message: error?.message,
-      headers: error?.headers,
-    }, null, 2));
-    
+    console.error(
+      "[DROPBOX] Error details:",
+      JSON.stringify(
+        {
+          status: error?.status,
+          error: error?.error,
+          message: error?.message,
+          headers: error?.headers,
+        },
+        null,
+        2,
+      ),
+    );
+
     // Extract more specific error message from Dropbox API response
     let errorMessage = error?.message || "Unknown error";
     if (error?.error?.error_summary) {
       errorMessage = error.error.error_summary;
-    } else if (error?.error?.error?.['.tag']) {
-      errorMessage = `${error.error.error['.tag']}: ${JSON.stringify(error.error.error)}`;
+    } else if (error?.error?.error?.[".tag"]) {
+      errorMessage = `${error.error.error[".tag"]}: ${JSON.stringify(error.error.error)}`;
     }
-    
+
     throw new Error(`Failed to list Dropbox items: ${errorMessage}`);
   }
 }

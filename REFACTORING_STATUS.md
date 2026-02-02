@@ -2,50 +2,24 @@
 
 ## Completed ✅
 
-1. **Created component structure**
-   - `app/components/dashboard/types.ts` - Shared TypeScript interfaces
-   - `app/components/dashboard/Header.tsx` - Header component extracted (~80 lines saved)
+- **Header** – `app/components/dashboard/Header.tsx`
+- **Statistics** – `app/components/dashboard/Statistics.tsx`
+- **UploadForms** – `app/components/dashboard/UploadForms.tsx`
+- **QueueManagement** – `app/components/dashboard/QueueManagement.tsx`
+- **UploadSummary** – `app/components/dashboard/UploadSummary.tsx`
+- **Tabs** – `app/components/dashboard/Tabs.tsx`
+- **types** – `app/components/dashboard/types.ts`
 
-2. **Updated main dashboard**
-   - Added imports for Header component
-   - Replaced inline header JSX with component
-   - Added TODO comments for future extractions
+Main dashboard (`app/dashboard/page.tsx`) is now ~990 lines; state and handlers live in the page, UI is split into the components above.
 
-## Current Issue ⚠️
+## Removed (unused)
 
-There's a syntax error in the ternary operator structure around line 3989-4322. The "Uploaded Files Management" section was moved inside the ternary's true branch, but the closing structure needs to be verified.
+- `AllFilesSection.tsx` – never imported
+- `DashboardContent.tsx` – never imported
+- `hooks/useDashboardData.ts` – only used by removed DashboardContent
+- `*.tmp` backup files – deleted
 
-**Error Location**: Line 4336 - "Unterminated regexp literal" / Missing ')'
+## Optional next steps
 
-**Structure Issue**: The ternary `{progress.length > 0 ? (...) : (...)}` contains:
-- True branch: Video list + Uploaded Files Management
-- False branch: "Processing will begin shortly" message
-
-The div structure needs to be verified to ensure all opening tags have matching closing tags.
-
-## Next Steps
-
-1. **Fix syntax error** - Verify div/parenthesis structure in ternary
-2. **Extract Statistics component** (~200 lines) - Self-contained, easier to extract
-3. **Extract UploadForms component** (~1500 lines) - Largest impact
-4. **Extract ProgressDisplays component** (~500 lines)
-5. **Extract QueueManagement component** (~800 lines)
-6. **Extract FileManagement component** (~600 lines)
-7. **Extract custom hooks** (~900 lines)
-
-## File Size Progress
-
-- **Before**: 4397 lines
-- **After Header extraction**: ~4317 lines (80 lines saved)
-- **Target**: ~500-800 lines in main dashboard
-
-## Component Extraction Pattern
-
-The pattern established with Header component:
-1. Create component file in `app/components/dashboard/`
-2. Define props interface
-3. Extract JSX and related logic
-4. Import and use in main dashboard
-5. Pass necessary state and handlers as props
-
-
+- Move more state into a custom hook (e.g. queue + job status) to shrink the page further
+- Consider adaptive polling (e.g. 1s when jobs are processing, 2–3s when idle)

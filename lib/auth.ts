@@ -73,48 +73,6 @@ const DROPBOX_APP_SECRET = process.env.DROPBOX_APP_SECRET;
 const DROPBOX_REDIRECT_URI =
   process.env.DROPBOX_REDIRECT_URI ||
   REDIRECT_URL?.replace("/api/auth/callback", "/api/auth/dropbox/callback");
-// Generated Access Token (GAT) - long-lived token that doesn't expire
-// Only used for the owner account (email must match DROPBOX_GAT_OWNER_EMAIL)
-const DROPBOX_GENERATED_ACCESS_TOKEN =
-  process.env.DROPBOX_GENERATED_ACCESS_TOKEN;
-// Owner email - GAT will only be used for this user
-const DROPBOX_GAT_OWNER_EMAIL = process.env.DROPBOX_GAT_OWNER_EMAIL;
-// Whitelist emails - comma-separated list of emails that can use GAT (for internal testing)
-const DROPBOX_GAT_WHITELIST_EMAILS = process.env.DROPBOX_GAT_WHITELIST_EMAILS
-  ? process.env.DROPBOX_GAT_WHITELIST_EMAILS.split(",").map((e) =>
-      e.trim().toLowerCase(),
-    )
-  : [];
-
-// Log environment variable status on module load (only once, not on every call)
-if (typeof process !== "undefined") {
-  const envCheck = {
-    hasDropboxAppKey: !!DROPBOX_APP_KEY,
-    hasDropboxAppSecret: !!DROPBOX_APP_SECRET,
-    hasDropboxRedirectUri: !!DROPBOX_REDIRECT_URI,
-    hasGAT: !!DROPBOX_GENERATED_ACCESS_TOKEN,
-    gatLength: DROPBOX_GENERATED_ACCESS_TOKEN?.length || 0,
-    hasGATOwnerEmail: !!DROPBOX_GAT_OWNER_EMAIL,
-    gatOwnerEmail: DROPBOX_GAT_OWNER_EMAIL || "NOT SET",
-    hasGATWhitelist: DROPBOX_GAT_WHITELIST_EMAILS.length > 0,
-    gatWhitelistCount: DROPBOX_GAT_WHITELIST_EMAILS.length,
-    gatWhitelistEntries: DROPBOX_GAT_WHITELIST_EMAILS,
-    nodeEnv: process.env.NODE_ENV,
-    // Check if env vars exist in process.env (even if empty)
-    envVarExists: {
-      DROPBOX_GENERATED_ACCESS_TOKEN:
-        "DROPBOX_GENERATED_ACCESS_TOKEN" in process.env,
-      DROPBOX_GAT_OWNER_EMAIL: "DROPBOX_GAT_OWNER_EMAIL" in process.env,
-      DROPBOX_GAT_WHITELIST_EMAILS:
-        "DROPBOX_GAT_WHITELIST_EMAILS" in process.env,
-    },
-  };
-  console.log(
-    `[DROPBOX-GAT] Environment check on module load:`,
-    JSON.stringify(envCheck, null, 2),
-  );
-}
-
 /**
  * Generate Dropbox OAuth authorization URL
  * Scopes required for file browsing and downloading:
@@ -219,179 +177,20 @@ async function refreshDropboxToken(
 }
 
 /**
- * Get Dropbox access token - checks Generated Access Token (GAT) first, then session token
- * Automatically refreshes expired tokens using refresh token if available
- * GAT is a long-lived token that doesn't expire, perfect for automated systems
- * GAT is only used for the owner account (matching DROPBOX_GAT_OWNER_EMAIL)
+ * Get Dropbox access token from session (OAuth flow).
+ * Automatically refreshes expired tokens using refresh token if available.
  */
 export async function getDropboxToken(
   sessionToken?: string | null,
   sessionRefreshToken?: string | null,
   sessionId?: string,
-  userEmail?: string | null,
 ): Promise<string | undefined> {
-  // Priority 1: Use Generated Access Token from environment (never expires)
-  // BUT only if this is the owner's account or whitelisted email
-  if (DROPBOX_GENERATED_ACCESS_TOKEN) {
-    console.log(
-      `[DROPBOX-GAT] GAT token is available (length: ${DROPBOX_GENERATED_ACCESS_TOKEN.length})`,
-    );
-    console.log(
-      `[DROPBOX-GAT] Owner email configured: ${DROPBOX_GAT_OWNER_EMAIL || "NOT SET"}`,
-    );
-    console.log(
-      `[DROPBOX-GAT] Whitelist emails configured: ${DROPBOX_GAT_WHITELIST_EMAILS.length > 0 ? DROPBOX_GAT_WHITELIST_EMAILS.join(", ") : "NONE"}`,
-    );
-    console.log(
-      `[DROPBOX-GAT] User email provided: ${userEmail || "NOT PROVIDED"}`,
-    );
-
-    if (userEmail) {
-      const userEmailLower = userEmail.toLowerCase();
-      console.log(
-        `[DROPBOX-GAT] Checking user email (lowercase): "${userEmailLower}"`,
-      );
-
-      // Check if user is the owner
-      if (DROPBOX_GAT_OWNER_EMAIL) {
-        const ownerEmailLower = DROPBOX_GAT_OWNER_EMAIL.toLowerCase();
-        console.log(
-          `[DROPBOX-GAT] Comparing with owner email (lowercase): "${ownerEmailLower}"`,
-        );
-        if (userEmailLower === ownerEmailLower) {
-          console.log(
-            `[DROPBOX-GAT] ✓ MATCH: Using GAT for owner account: ${userEmail}`,
-          );
-          console.log(
-            `[DROPBOX-GAT] GAT token details: length=${DROPBOX_GENERATED_ACCESS_TOKEN.length}, starts with: ${DROPBOX_GENERATED_ACCESS_TOKEN.substring(0, 15)}...`,
-          );
-          console.log(`[DROPBOX-GAT] Returning GAT token to caller`);
-          return DROPBOX_GENERATED_ACCESS_TOKEN;
-        } else {
-          console.log(
-            `[DROPBOX-GAT] ✗ NO MATCH: User email does not match owner email`,
-          );
-        }
-      } else {
-        console.log(
-          `[DROPBOX-GAT] Owner email not configured, skipping owner check`,
-        );
-      }
-
-      // Check if user is in whitelist (supports partial matching)
-      if (DROPBOX_GAT_WHITELIST_EMAILS.length > 0) {
-        console.log(
-          `[DROPBOX-GAT] Checking whitelist (${DROPBOX_GAT_WHITELIST_EMAILS.length} entries)...`,
-        );
-        let matchedEntry: string | null = null;
-        const isWhitelisted = DROPBOX_GAT_WHITELIST_EMAILS.some(
-          (whitelistEmail) => {
-            const whitelistEmailLower = whitelistEmail.toLowerCase();
-            const exactMatch = userEmailLower === whitelistEmailLower;
-            const userContainsWhitelist =
-              userEmailLower.includes(whitelistEmailLower);
-            const whitelistContainsUser =
-              whitelistEmailLower.includes(userEmailLower);
-
-            console.log(
-              `[DROPBOX-GAT]   Comparing with whitelist entry: "${whitelistEmailLower}"`,
-            );
-            console.log(`[DROPBOX-GAT]     Exact match: ${exactMatch}`);
-            console.log(
-              `[DROPBOX-GAT]     User contains whitelist: ${userContainsWhitelist} (user: "${userEmailLower}" contains "${whitelistEmailLower}")`,
-            );
-            console.log(
-              `[DROPBOX-GAT]     Whitelist contains user: ${whitelistContainsUser} ("${whitelistEmailLower}" contains "${userEmailLower}")`,
-            );
-
-            const matches =
-              exactMatch || userContainsWhitelist || whitelistContainsUser;
-            if (matches) {
-              matchedEntry = whitelistEmail;
-              console.log(
-                `[DROPBOX-GAT]     ✓ MATCH FOUND with entry: "${whitelistEmail}"`,
-              );
-            } else {
-              console.log(`[DROPBOX-GAT]     ✗ NO MATCH`);
-            }
-
-            return matches;
-          },
-        );
-
-        if (isWhitelisted && matchedEntry) {
-          console.log(
-            `[DROPBOX-GAT] ✓ Using GAT for whitelisted account: ${userEmail} (matched entry: "${matchedEntry}")`,
-          );
-          console.log(
-            `[DROPBOX-GAT] GAT token details: length=${DROPBOX_GENERATED_ACCESS_TOKEN.length}, starts with: ${DROPBOX_GENERATED_ACCESS_TOKEN.substring(0, 15)}...`,
-          );
-          console.log(`[DROPBOX-GAT] Returning GAT token to caller`);
-          return DROPBOX_GENERATED_ACCESS_TOKEN;
-        } else {
-          console.log(
-            `[DROPBOX-GAT] ✗ User email did not match any whitelist entries`,
-          );
-        }
-      } else {
-        console.log(
-          `[DROPBOX-GAT] Whitelist is empty, skipping whitelist check`,
-        );
-      }
-
-      // Not the owner or whitelisted - don't use GAT, fall through to OAuth token
-      if (DROPBOX_GAT_OWNER_EMAIL || DROPBOX_GAT_WHITELIST_EMAILS.length > 0) {
-        console.log(
-          `[DROPBOX-GAT] ✗ GAT available but user ${userEmail} is not the owner (${DROPBOX_GAT_OWNER_EMAIL || "N/A"}) or whitelisted. Falling back to OAuth token.`,
-        );
-      }
-    } else {
-      // No user email available - use GAT when owner is configured (load owner's Dropbox files)
-      console.log(`[DROPBOX-GAT] No user email provided`);
-      if (
-        !DROPBOX_GAT_OWNER_EMAIL &&
-        DROPBOX_GAT_WHITELIST_EMAILS.length === 0
-      ) {
-        // No owner email or whitelist configured - use GAT for everyone (backward compatibility)
-        // WARNING: This means all users share the same Dropbox account
-        console.warn(
-          `[DROPBOX-GAT] ⚠️ GAT is set but DROPBOX_GAT_OWNER_EMAIL and DROPBOX_GAT_WHITELIST_EMAILS are not configured. GAT will be used for ALL users.`,
-        );
-        return DROPBOX_GENERATED_ACCESS_TOKEN;
-      } else if (DROPBOX_GAT_OWNER_EMAIL) {
-        // Owner is configured but we couldn't get logged-in user email - use GAT anyway to load owner's files
-        // The GAT token is the owner's token; using it loads the owner's Dropbox (example@gmail.com's files)
-        console.log(
-          `[DROPBOX-GAT] ✓ Using GAT for owner's files (no user email provided; treating as owner access)`,
-        );
-        console.log(
-          `[DROPBOX-GAT] GAT token will load owner Dropbox: ${DROPBOX_GAT_OWNER_EMAIL}`,
-        );
-        return DROPBOX_GENERATED_ACCESS_TOKEN;
-      } else {
-        console.log(
-          `[DROPBOX-GAT] ✗ Cannot use GAT: whitelist is configured but no user email provided`,
-        );
-      }
-    }
-  } else {
-    console.log(`[DROPBOX-GAT] GAT token is NOT available in environment`);
-  }
-
-  // Priority 2: Use token from session (OAuth flow)
-  // If we have both access token and refresh token, return access token
-  // If it's expired, API calls will fail with 401 and we can refresh then
+  // Use token from session (OAuth flow)
   if (sessionToken) {
-    console.log(
-      `[DROPBOX-GAT] Using OAuth session token (GAT not used or not available)`,
-    );
-    console.log(
-      `[DROPBOX-GAT] OAuth token details: length=${sessionToken.length}, starts with: ${sessionToken.substring(0, 15)}...`,
-    );
     return sessionToken;
   }
 
-  // Priority 3: No access token but have refresh token - refresh now
+  // No access token but have refresh token - refresh now
   if (sessionRefreshToken && sessionId) {
     try {
       console.log(
@@ -472,16 +271,6 @@ export async function refreshDropboxTokenIfNeeded(
   return undefined;
 }
 
-/**
- * Check if a token is the Generated Access Token (GAT)
- * GAT tokens don't expire, so if they get 401, it means the token is invalid/revoked
- */
-export function isGATToken(token: string): boolean {
-  return (
-    !!DROPBOX_GENERATED_ACCESS_TOKEN && token === DROPBOX_GENERATED_ACCESS_TOKEN
-  );
-}
-
 export {
   CLIENT_ID,
   CLIENT_SECRET,
@@ -489,7 +278,4 @@ export {
   DROPBOX_APP_KEY,
   DROPBOX_APP_SECRET,
   DROPBOX_REDIRECT_URI,
-  DROPBOX_GENERATED_ACCESS_TOKEN,
-  DROPBOX_GAT_OWNER_EMAIL,
-  DROPBOX_GAT_WHITELIST_EMAILS,
 };

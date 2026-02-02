@@ -15,7 +15,7 @@ Your YouTube uploader now supports **streaming directly from external URLs** to 
 ## How It Works
 
 ```
-External Server (CDN/Storage) 
+External Server (CDN/Storage)
     ↓
     Stream (via HTTP/HTTPS)
     ↓
@@ -78,23 +78,27 @@ My Video,Description,https://secure.example.com/video.mp4,"{""Authorization"":""
 ### Common Auth Patterns
 
 **Bearer Token:**
+
 ```json
-{"Authorization":"Bearer your-token-here"}
+{ "Authorization": "Bearer your-token-here" }
 ```
 
 **API Key:**
+
 ```json
-{"X-API-Key":"your-api-key"}
+{ "X-API-Key": "your-api-key" }
 ```
 
 **Basic Auth:**
+
 ```json
-{"Authorization":"Basic base64-encoded-credentials"}
+{ "Authorization": "Basic base64-encoded-credentials" }
 ```
 
 **Custom Headers:**
+
 ```json
-{"X-Custom-Header":"value","Authorization":"Bearer token"}
+{ "X-Custom-Header": "value", "Authorization": "Bearer token" }
 ```
 
 ---
@@ -132,16 +136,19 @@ When using `/api/upload-bulk`, files are automatically queued for background pro
 
 ```javascript
 const formData = new FormData();
-formData.append('urls', 'https://cdn.example.com/video1.mp4');
-formData.append('urls', 'https://cdn.example.com/video2.mp4');
-formData.append('urlAuthHeaders', JSON.stringify({
-  'Authorization': 'Bearer token123'
-}));
-formData.append('useWorker', 'true'); // Default: true
+formData.append("urls", "https://cdn.example.com/video1.mp4");
+formData.append("urls", "https://cdn.example.com/video2.mp4");
+formData.append(
+  "urlAuthHeaders",
+  JSON.stringify({
+    Authorization: "Bearer token123",
+  }),
+);
+formData.append("useWorker", "true"); // Default: true
 
-const response = await fetch('/api/upload-bulk', {
-  method: 'POST',
-  body: formData
+const response = await fetch("/api/upload-bulk", {
+  method: "POST",
+  body: formData,
 });
 
 const { jobId } = await response.json();
@@ -180,6 +187,7 @@ pm2 start npm --name "bulk-upload-worker" -- run worker
 ```
 
 The worker:
+
 - Checks for new jobs every 5 seconds
 - Processes videos in batches (3 at a time)
 - Handles retries and errors automatically
@@ -190,26 +198,33 @@ The worker:
 ## Benefits for Your Use Case
 
 ### 1. **No Disk Space Issues**
+
 Your Hetzner box stays lean. Videos never touch your disk.
 
 ### 2. **No Browser Uploads**
+
 Skip the browser entirely. Server-to-server is stable and fast.
 
 ### 3. **Perfect for 1,000+ Videos**
+
 Your CSV can reference 1,000 URLs. The worker processes them 24/7.
 
 ### 4. **Works with Your Existing CSV**
+
 Just replace:
+
 ```
 C:\Users\Me\Videos\clip1.mp4
 ```
 
 With:
+
 ```
 https://cdn.example.com/videos/clip1.mp4
 ```
 
 ### 5. **Scalable**
+
 - Add more external servers? ✅
 - Add more workers? ✅
 - Process multiple channels? ✅
@@ -221,6 +236,7 @@ https://cdn.example.com/videos/clip1.mp4
 ### Step 1: Upload Videos to External Server
 
 Move your videos to:
+
 - CDN (Cloudflare, CloudFront, etc.)
 - Object Storage (S3, Backblaze, etc.)
 - Your own server with public URLs
@@ -230,6 +246,7 @@ Move your videos to:
 Replace file paths with URLs:
 
 **Before:**
+
 ```csv
 path
 C:\Users\Me\Videos\video1.mp4
@@ -237,6 +254,7 @@ C:\Users\Me\Videos\video1.mp4
 ```
 
 **After:**
+
 ```csv
 path
 https://cdn.example.com/videos/video1.mp4
@@ -244,6 +262,7 @@ https://cdn.example.com/videos/video2.mp4
 ```
 
 Or use the `video_url` column:
+
 ```csv
 video_url
 https://cdn.example.com/videos/video1.mp4
@@ -252,7 +271,7 @@ https://cdn.example.com/videos/video2.mp4
 
 ### Step 3: Upload CSV
 
-Use `/api/upload-csv` or `/api/upload-queue` - the system automatically detects URLs and streams them.
+Use **`/api/upload-queue`** (primary; streaming, queue-based, used by dashboard) or **`/api/upload-csv`** (alternative; for scripts or direct API use). The system automatically detects URLs and streams them.
 
 ---
 
@@ -316,8 +335,8 @@ Video 1000,Description,https://cdn.example.com/videos/1000.mp4,public
 ## Support
 
 For issues or questions:
+
 - Check worker logs: `pm2 logs bulk-upload-worker`
 - Check API logs: `pm2 logs nextjs`
 - Verify URLs are accessible
 - Check authentication if required
-

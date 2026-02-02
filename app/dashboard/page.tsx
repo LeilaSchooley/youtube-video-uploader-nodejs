@@ -2,7 +2,7 @@
 
 /**
  * Dashboard Page - Main upload management interface
- * 
+ *
  * Refactored: Extracted components to reduce file size from 4087 to 1824 lines:
  * - Statistics component - extracted to app/components/dashboard/Statistics.tsx
  * - UploadForms component - extracted to app/components/dashboard/UploadForms.tsx
@@ -68,13 +68,15 @@ export default function Dashboard() {
   const [debugLogs, setDebugLogs] = useState<
     Array<{ time: string; message: string; type: "info" | "success" | "error" }>
   >([]);
-  const [availableChannels, setAvailableChannels] = useState<Array<{
-    userId: string;
-    displayName: string;
-    fileCount: number;
-    jobCount: number;
-    isCurrent: boolean;
-  }>>([]);
+  const [availableChannels, setAvailableChannels] = useState<
+    Array<{
+      userId: string;
+      displayName: string;
+      fileCount: number;
+      jobCount: number;
+      isCurrent: boolean;
+    }>
+  >([]);
   const [selectedChannel, setSelectedChannel] = useState<string>("");
   const [uploadProgress, setUploadProgress] = useState<{
     currentFile: number;
@@ -118,18 +120,18 @@ export default function Dashboard() {
     useState<boolean>(false); // Collapsed by default
   const fileInputRef = useRef<HTMLInputElement>(null);
   const csvFileInputRef = useRef<HTMLInputElement>(null);
-  
+
   // Add debug log helper
   const addDebugLog = useCallback(
     (message: string, type: "info" | "success" | "error" = "info") => {
-    const logEntry = {
-      time: new Date().toLocaleTimeString(),
-      message,
+      const logEntry = {
+        time: new Date().toLocaleTimeString(),
+        message,
         type,
       };
       setDebugLogs((prev) => [...prev.slice(-49), logEntry]); // Keep last 50 logs
     },
-    []
+    [],
   );
 
   // CSV validation function
@@ -149,7 +151,7 @@ export default function Dashboard() {
         .map((h) => h.trim().replace(/"/g, ""));
       const requiredHeaders = ["youtube_title", "youtube_description", "path"];
       const missingHeaders = requiredHeaders.filter(
-        (req) => !headers.includes(req.toLowerCase())
+        (req) => !headers.includes(req.toLowerCase()),
       );
 
       if (missingHeaders.length > 0) {
@@ -173,25 +175,35 @@ export default function Dashboard() {
           errors.push(`Row ${i + 1}: Missing youtube_description`);
         }
         // Check for video source: path, video_url, or drive_file_id
-        if (!row.path?.trim() && !row.video_url?.trim() && !row.drive_file_id?.trim()) {
-          errors.push(`Row ${i + 1}: Missing video source (path, video_url, or drive_file_id)`);
+        if (
+          !row.path?.trim() &&
+          !row.video_url?.trim() &&
+          !row.drive_file_id?.trim()
+        ) {
+          errors.push(
+            `Row ${i + 1}: Missing video source (path, video_url, or drive_file_id)`,
+          );
         }
       }
     } catch (error) {
       errors.push(
         `Error reading CSV: ${
           error instanceof Error ? error.message : "Unknown error"
-        }`
+        }`,
       );
     }
     return errors;
   };
 
-  // Keyboard shortcuts
+  // Keyboard shortcuts (Ctrl+K only in development)
   useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent) => {
-      // Ctrl/Cmd + K: Toggle debug panel
-      if ((e.ctrlKey || e.metaKey) && e.key === "k") {
+      // Ctrl/Cmd + K: Toggle debug panel (dev only)
+      if (
+        process.env.NODE_ENV === "development" &&
+        (e.ctrlKey || e.metaKey) &&
+        e.key === "k"
+      ) {
         e.preventDefault();
         setShowDebugPanel((prev) => !prev);
       }
@@ -199,7 +211,7 @@ export default function Dashboard() {
       if ((e.ctrlKey || e.metaKey) && e.key === "e") {
         e.preventDefault();
         const exportBtn = document.querySelector(
-          '[title="Export statistics as JSON"]'
+          '[title="Export statistics as JSON"]',
         ) as HTMLButtonElement;
         if (exportBtn) exportBtn.click();
       }
@@ -230,32 +242,32 @@ export default function Dashboard() {
         // Use startDate from job if provided, otherwise use today
         const startDate = job.startDate ? new Date(job.startDate) : new Date();
         startDate.setHours(12, 0, 0, 0); // Set to noon for consistency
-        
+
         // Count how many videos have been completed
         const completedCount =
           job.progress?.filter(
             (p: ProgressItem) =>
-              p && p.status && (
-                p.status.includes("Uploaded") || 
+              p &&
+              p.status &&
+              (p.status.includes("Uploaded") ||
                 p.status.includes("scheduled") ||
-                p.status.includes("Scheduled")
-              )
+                p.status.includes("Scheduled")),
           ).length || 0;
-        
+
         const totalVideos = job.items?.length || job.totalVideos || 0;
-        
+
         // If there are still videos to upload
         if (completedCount < totalVideos) {
           // Calculate which day we're on (0-indexed)
           // dayIndex = Math.floor(videoIndex / videosPerDay)
           const currentDayIndex = Math.floor(completedCount / job.videosPerDay);
-          
+
           // Calculate when the next batch should start uploading
           // Next batch is on startDate + (currentDayIndex + 1) days at noon
           const nextBatchStartTime = new Date(startDate);
           nextBatchStartTime.setDate(startDate.getDate() + currentDayIndex + 1);
           nextBatchStartTime.setHours(12, 0, 0, 0);
-          
+
           // Only consider future times
           if (nextBatchStartTime > now) {
             if (!earliestDate || nextBatchStartTime < earliestDate) {
@@ -293,7 +305,7 @@ export default function Dashboard() {
 
       const days = Math.floor(diff / (1000 * 60 * 60 * 24));
       const hours = Math.floor(
-        (diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)
+        (diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60),
       );
       const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
       const seconds = Math.floor((diff % (1000 * 60)) / 1000);
@@ -313,7 +325,6 @@ export default function Dashboard() {
     const timerInterval = setInterval(updateTimer, 1000);
     return () => clearInterval(timerInterval);
   }, [nextUploadTime]);
-
 
   // Recalculate next upload time when queue changes
   useEffect(() => {
@@ -353,7 +364,6 @@ export default function Dashboard() {
     }
   }, []);
 
-
   // Real-time polling: Refresh all uploaded files automatically while uploads are active
 
   // Load batch instructions preference from localStorage
@@ -364,6 +374,18 @@ export default function Dashboard() {
     }
   }, []);
 
+  // Load Upload Videos (bulk) section preference from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem("showBulkUpload");
+    if (saved !== null) {
+      setShowBulkUpload(saved === "true");
+    }
+  }, []);
+
+  // Persist Upload Videos collapse state when it changes
+  useEffect(() => {
+    localStorage.setItem("showBulkUpload", String(showBulkUpload));
+  }, [showBulkUpload]);
 
   const toggleDarkMode = () => {
     const newMode = !darkMode;
@@ -383,7 +405,6 @@ export default function Dashboard() {
     localStorage.setItem("showBatchUpload", String(newState));
   };
 
-
   const toggleBatchInstructions = () => {
     const newState = !showBatchInstructions;
     setShowBatchInstructions(newState);
@@ -392,14 +413,15 @@ export default function Dashboard() {
 
   const handleQueueAction = async (
     jobId: string,
-    action: "pause" | "resume" | "cancel" | "delete" | "delete-all-jobs"
+    action: "pause" | "resume" | "cancel" | "delete" | "delete-all-jobs",
   ) => {
     try {
       // For delete-all-jobs, don't send jobId
-      const body = action === "delete-all-jobs" 
-        ? JSON.stringify({ action })
-        : JSON.stringify({ jobId, action });
-      
+      const body =
+        action === "delete-all-jobs"
+          ? JSON.stringify({ action })
+          : JSON.stringify({ jobId, action });
+
       const res = await fetch("/api/queue-manage", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -435,22 +457,27 @@ export default function Dashboard() {
     }
   };
 
+  // Adaptive polling: 1s when jobs are processing/pending, 3s when idle
+  const hasActiveJobs = queue.some(
+    (j) => j.status === "processing" || j.status === "pending",
+  );
+  const pollIntervalMs = hasActiveJobs ? 1000 : 3000;
+
   useEffect(() => {
     fetchUser();
     fetchAvailableChannels();
     fetchQueue();
-    
-    // Real-time polling - check every 1 second for near-instant updates
+
     const pollInterval = setInterval(() => {
       fetchQueue();
       if (selectedJobId) {
         fetchJobStatus(selectedJobId);
       }
-    }, 1000); // Check every 1 second for real-time feel
-    
+    }, pollIntervalMs);
+
     return () => clearInterval(pollInterval);
-  }, [selectedJobId]);
-  
+  }, [selectedJobId, pollIntervalMs]);
+
   // Immediate fetch when selectedJobId changes
   useEffect(() => {
     if (selectedJobId) {
@@ -475,15 +502,14 @@ export default function Dashboard() {
     }
   };
 
-
   const handleDeleteFile = async (
     jobId: string,
     filePath: string,
-    fileName: string
+    fileName: string,
   ) => {
     if (
       !confirm(
-        `Are you sure you want to delete "${fileName}"? This action cannot be undone.`
+        `Are you sure you want to delete "${fileName}"? This action cannot be undone.`,
       )
     ) {
       return;
@@ -492,11 +518,11 @@ export default function Dashboard() {
     try {
       const res = await fetch(
         `/api/delete-videos?jobId=${jobId}&filePath=${encodeURIComponent(
-          filePath
+          filePath,
         )}`,
         {
           method: "DELETE",
-        }
+        },
       );
       const data = await res.json();
       if (res.ok) {
@@ -522,7 +548,7 @@ export default function Dashboard() {
   const handleDeleteAllFiles = async (jobId: string) => {
     if (
       !confirm(
-        "Are you sure you want to delete ALL uploaded files for this job? This action cannot be undone."
+        "Are you sure you want to delete ALL uploaded files for this job? This action cannot be undone.",
       )
     ) {
       return;
@@ -533,7 +559,7 @@ export default function Dashboard() {
         `/api/delete-videos?jobId=${jobId}&deleteAll=true`,
         {
           method: "DELETE",
-        }
+        },
       );
       const data = await res.json();
       if (res.ok) {
@@ -555,7 +581,6 @@ export default function Dashboard() {
       });
     }
   };
-
 
   const fetchAvailableChannels = async () => {
     try {
@@ -606,16 +631,16 @@ export default function Dashboard() {
       if (res.ok && data.queue) {
         const prevQueueLength = queue.length;
         const prevProcessingCount = queue.filter(
-          (j) => j.status === "processing"
+          (j) => j.status === "processing",
         ).length;
         setQueue(data.queue);
-        
+
         // Debug logging
         const newQueueLength = data.queue.length;
         const newProcessingCount = data.queue.filter(
-          (j: any) => j.status === "processing"
+          (j: any) => j.status === "processing",
         ).length;
-        
+
         // Only log when there are actual changes (not just polling)
         if (
           newQueueLength !== prevQueueLength ||
@@ -625,10 +650,10 @@ export default function Dashboard() {
           console.log(`[DEBUG] ${logMsg}`);
           addDebugLog(logMsg, "info");
         }
-        
+
         // Check for stuck pending jobs (only log once per job to avoid spam)
         const pendingJobs = data.queue.filter(
-          (j: any) => j.status === "pending"
+          (j: any) => j.status === "pending",
         );
         if (pendingJobs.length > 0) {
           pendingJobs.forEach((job: any) => {
@@ -650,58 +675,59 @@ export default function Dashboard() {
       // Determine if this is a bulk job (starts with "bulk-") or regular queue job
       const isBulkJob = jobId.startsWith("bulk-");
       const endpoint = isBulkJob ? "/api/bulk-status" : "/api/queue-status";
-      
+
       // Add cache-busting to ensure fresh data
-      const res = await fetch(
-        `${endpoint}?jobId=${jobId}&t=${timestamp}`
-      );
+      const res = await fetch(`${endpoint}?jobId=${jobId}&t=${timestamp}`);
       const data = await res.json();
-      
+
       if (res.ok) {
         // Handle both bulk-status and queue-status response formats
         const job = data.job || data; // queue-status returns {job: {...}}, bulk-status returns {...}
         const jobData = job || data;
-        
+
         if (jobData) {
           const prevStatus = jobStatus?.status;
           const prevProgressCount = jobStatus?.progress?.length || 0;
           const prevCompletedCount =
             jobStatus?.progress?.filter(
               (p: ProgressItem) =>
-                p && p.status && (
-                  p.status.includes("Uploaded") || 
-                  p.status.includes("Scheduled")
-                )
-          ).length || 0;
-          
+                p &&
+                p.status &&
+                (p.status.includes("Uploaded") ||
+                  p.status.includes("Scheduled")),
+            ).length || 0;
+
           // Normalize bulk job data to match queue job format
-          const normalizedJob = isBulkJob ? {
-            id: jobData.jobId || jobData.id,
-            status: jobData.status,
-            progress: jobData.progress || [],
-            totalVideos: jobData.totalItems || jobData.progress?.length || 0,
-            items: jobData.items || [], // Include items for title display
-            videosPerDay: jobData.videosPerDay,
-            startDate: jobData.startDate,
-            createdAt: jobData.createdAt,
-            updatedAt: jobData.updatedAt,
-            error: jobData.error,
-          } : jobData;
-          
+          const normalizedJob = isBulkJob
+            ? {
+                id: jobData.jobId || jobData.id,
+                status: jobData.status,
+                progress: jobData.progress || [],
+                totalVideos:
+                  jobData.totalItems || jobData.progress?.length || 0,
+                items: jobData.items || [], // Include items for title display
+                videosPerDay: jobData.videosPerDay,
+                startDate: jobData.startDate,
+                createdAt: jobData.createdAt,
+                updatedAt: jobData.updatedAt,
+                error: jobData.error,
+              }
+            : jobData;
+
           setJobStatus(normalizedJob);
-          
+
           // Debug logging for progress changes
           const newProgressCount = normalizedJob.progress?.length || 0;
           const newCompletedCount =
             normalizedJob.progress?.filter(
               (p: ProgressItem) =>
-                p && p.status && (
-                  p.status.includes("Uploaded") ||
+                p &&
+                p.status &&
+                (p.status.includes("Uploaded") ||
                   p.status.includes("Scheduled") ||
-                  p.status.includes("scheduled")
-                )
+                  p.status.includes("scheduled")),
             ).length || 0;
-        
+
           // Only log meaningful changes
           if (
             normalizedJob.status !== prevStatus ||
@@ -718,7 +744,7 @@ export default function Dashboard() {
                 : "";
             const logMsg = `Job ${jobId.substring(
               0,
-              20
+              20,
             )}... ${statusChange} ${progressChange}`.trim();
             if (logMsg.length > 20) {
               // Only log if there's actual content
@@ -728,8 +754,8 @@ export default function Dashboard() {
                 newCompletedCount > prevCompletedCount
                   ? "success"
                   : normalizedJob.status === "processing"
-                  ? "info"
-                  : "info"
+                    ? "info"
+                    : "info",
               );
             }
           }
@@ -781,7 +807,7 @@ export default function Dashboard() {
         console.error("Status:", data.status);
         console.error("Full response:", data);
         console.error("=============================");
-        
+
         const errorMsg = data.error || "Error uploading video";
         setShowToast({ message: errorMsg, type: "error" });
         setMessage({ type: "error", text: errorMsg });
@@ -792,7 +818,7 @@ export default function Dashboard() {
       console.error("Message:", error?.message);
       console.error("Stack:", error?.stack);
       console.error("=================================");
-      
+
       const errorMsg =
         error?.message || "An error occurred while uploading the video.";
       setShowToast({ message: errorMsg, type: "error" });
@@ -814,35 +840,38 @@ export default function Dashboard() {
     setMessage({ type: null, text: null });
 
     if (selectedBulkFiles.length === 0 && bulkUrls.length === 0) {
-      setShowToast({ message: "Please select video files or enter URLs to upload.", type: "error" });
+      setShowToast({
+        message: "Please select video files or enter URLs to upload.",
+        type: "error",
+      });
       setBulkUploading(false);
       return;
     }
 
     const formData = new FormData();
-    
+
     // Add files
     selectedBulkFiles.forEach((file) => {
       formData.append("files", file);
     });
-    
+
     // Add URLs
     bulkUrls.forEach((url) => {
       if (url.trim()) {
         formData.append("urls", url.trim());
       }
     });
-    
+
     // Add auth headers if provided
     if (urlAuthHeaders.trim()) {
       formData.append("urlAuthHeaders", urlAuthHeaders.trim());
     }
-    
+
     // Add timeout if provided
     if (urlTimeout.trim()) {
       formData.append("urlTimeout", urlTimeout.trim());
     }
-    
+
     // Use worker by default
     formData.append("useWorker", "true");
 
@@ -853,7 +882,9 @@ export default function Dashboard() {
       });
 
       if (!res.ok) {
-        const errorData = await res.json().catch(() => ({ error: "Bulk upload failed" }));
+        const errorData = await res
+          .json()
+          .catch(() => ({ error: "Bulk upload failed" }));
         throw new Error(errorData.error || "Bulk upload failed");
       }
 
@@ -917,7 +948,7 @@ export default function Dashboard() {
                   break;
 
                 case "batch_start":
-                  setBulkUploadProgress(prev => ({
+                  setBulkUploadProgress((prev) => ({
                     ...prev!,
                     currentBatch: data.batchNumber,
                     totalBatches: data.totalBatches,
@@ -926,7 +957,7 @@ export default function Dashboard() {
                   break;
 
                 case "upload_start":
-                  setBulkUploadProgress(prev => ({
+                  setBulkUploadProgress((prev) => ({
                     ...prev!,
                     currentFile: data.filename,
                     message: `Uploading: ${data.filename}`,
@@ -935,7 +966,7 @@ export default function Dashboard() {
 
                 case "upload_success":
                   totalCompleted++;
-                  setBulkUploadProgress(prev => ({
+                  setBulkUploadProgress((prev) => ({
                     ...prev!,
                     completed: totalCompleted,
                     message: `✅ ${data.filename} uploaded (${totalCompleted}/${prev!.total})`,
@@ -944,7 +975,7 @@ export default function Dashboard() {
 
                 case "upload_failed":
                   totalFailed++;
-                  setBulkUploadProgress(prev => ({
+                  setBulkUploadProgress((prev) => ({
                     ...prev!,
                     failed: totalFailed,
                     message: `❌ ${data.filename} failed: ${data.error}`,
@@ -952,7 +983,7 @@ export default function Dashboard() {
                   break;
 
                 case "batch_complete":
-                  setBulkUploadProgress(prev => ({
+                  setBulkUploadProgress((prev) => ({
                     ...prev!,
                     completed: data.completed,
                     failed: data.failed,
@@ -961,7 +992,7 @@ export default function Dashboard() {
                   break;
 
                 case "progress":
-                  setBulkUploadProgress(prev => ({
+                  setBulkUploadProgress((prev) => ({
                     ...prev!,
                     completed: data.totalCompleted,
                     failed: data.totalFailed,
@@ -992,7 +1023,11 @@ export default function Dashboard() {
                   throw new Error(data.error);
               }
             } catch (parseError) {
-              console.error("Error parsing SSE data for bulk upload:", parseError, line);
+              console.error(
+                "Error parsing SSE data for bulk upload:",
+                parseError,
+                line,
+              );
             }
           }
         }
@@ -1006,14 +1041,14 @@ export default function Dashboard() {
     } catch (error: any) {
       console.error("=== BULK UPLOAD EXCEPTION (Client) ===");
       console.error("Error:", error);
-      const errorMsg = error?.message || "An error occurred during bulk upload.";
+      const errorMsg =
+        error?.message || "An error occurred during bulk upload.";
       setShowToast({ message: errorMsg, type: "error" });
       setMessage({ type: "error", text: errorMsg });
     } finally {
       setBulkUploading(false);
     }
   };
-
 
   const handleCsvUpload = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -1025,7 +1060,7 @@ export default function Dashboard() {
     // Store form reference before async operation
     const form = e.currentTarget;
     const formData = new FormData(form);
-    
+
     // Add batch size (default: 5)
     const batchSize = 5; // Can be made configurable later
     formData.append("batchSize", batchSize.toString());
@@ -1046,7 +1081,9 @@ export default function Dashboard() {
       });
 
       if (!res.ok) {
-        const errorData = await res.json().catch(() => ({ error: "Upload failed" }));
+        const errorData = await res
+          .json()
+          .catch(() => ({ error: "Upload failed" }));
         throw new Error(errorData.error || "Upload failed");
       }
 
@@ -1159,7 +1196,7 @@ export default function Dashboard() {
                 case "final":
                   completed = data.totalCompleted || 0;
                   failed = data.totalFailed || 0;
-                  
+
                   let finalMessage = `✅ Upload Complete!\n\n`;
                   finalMessage += `📊 ${completed} videos uploaded successfully`;
                   if (failed > 0) {
@@ -1168,8 +1205,8 @@ export default function Dashboard() {
                   if (data.invalidCount > 0) {
                     finalMessage += `\n⚠️ ${data.invalidCount} videos skipped (no matching files)`;
                   }
-        
-        setShowToast({ 
+
+                  setShowToast({
                     message: finalMessage.trim(),
                     type: failed > 0 ? "info" : "success",
                   });
@@ -1177,15 +1214,15 @@ export default function Dashboard() {
                     type: failed > 0 ? "info" : "success",
                     text: `✅ Upload complete: ${completed} succeeded${failed > 0 ? `, ${failed} failed` : ""}`,
                   });
-                  
+
                   // Reset form
-        if (form) {
-          form.reset();
-        }
+                  if (form) {
+                    form.reset();
+                  }
                   setSelectedCsvFile(null);
-                  
+
                   // Refresh queue
-        fetchQueue();
+                  fetchQueue();
                   break;
 
                 case "error":
@@ -1207,8 +1244,9 @@ export default function Dashboard() {
       console.error("Message:", error?.message);
       console.error("Stack:", error?.stack);
       console.error("==========================");
-      
-      const errorMsg = error?.message || "An error occurred while uploading files.";
+
+      const errorMsg =
+        error?.message || "An error occurred while uploading files.";
       setShowToast({ message: errorMsg, type: "error" });
       setMessage({ type: "error", text: errorMsg });
     } finally {
@@ -1220,11 +1258,10 @@ export default function Dashboard() {
     }
   };
 
-
   const handleDeleteAccount = async () => {
     if (
       !confirm(
-        "Are you sure you want to delete your account data and revoke access? This action can be undone by reauthorizing the app."
+        "Are you sure you want to delete your account data and revoke access? This action can be undone by reauthorizing the app.",
       )
     ) {
       return;
@@ -1234,14 +1271,23 @@ export default function Dashboard() {
       const res = await fetch("/api/delete-account", { method: "POST" });
       const data = await res.json();
       if (res.ok) {
-        alert(data.message || "Account deletion requested.");
-        router.push("/");
+        setShowToast({
+          message: data.message || "Account deletion requested.",
+          type: "success",
+        });
+        setTimeout(() => router.push("/"), 2000);
       } else {
-        alert(data.message || "Failed to delete account.");
+        setShowToast({
+          message: data.message || "Failed to delete account.",
+          type: "error",
+        });
       }
     } catch (err) {
       console.error(err);
-      alert("Error: Could not reach the server.");
+      setShowToast({
+        message: "Could not reach the server.",
+        type: "error",
+      });
     }
   };
 
@@ -1278,244 +1324,247 @@ export default function Dashboard() {
           handleDeleteAccount={handleDeleteAccount}
         />
 
-      {/* Toast Notification */}
-      {showToast && (
-        <Toast
-          message={showToast.message}
-          type={showToast.type}
-          onClose={() => setShowToast(null)}
+        {/* Toast Notification */}
+        {showToast && (
+          <Toast
+            message={showToast.message}
+            type={showToast.type}
+            onClose={() => setShowToast(null)}
             duration={showToast.type === "info" ? 8000 : 5000}
           />
         )}
 
-        {/* Keyboard Shortcuts Help */}
-        <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 rounded-lg text-xs text-blue-800 dark:text-blue-200">
-          <strong>⌨️ Keyboard Shortcuts:</strong>{" "}
-          <kbd className="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-800 rounded">
-            Ctrl/Cmd+K
+        {/* Keyboard shortcuts (Debug only in development) */}
+        <div className="mb-4 py-1.5 px-3 rounded-lg text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700">
+          {process.env.NODE_ENV === "development" && (
+            <>
+              <kbd className="px-1 py-0.5 rounded bg-gray-200 dark:bg-gray-700 font-mono">
+                Ctrl+K
+              </kbd>{" "}
+              Debug ·{" "}
+            </>
+          )}
+          <kbd className="px-1 py-0.5 rounded bg-gray-200 dark:bg-gray-700 font-mono">
+            Ctrl+E
           </kbd>{" "}
-          Debug Panel |{" "}
-          <kbd className="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-800 rounded">
-            Ctrl/Cmd+E
-          </kbd>{" "}
-          Export Stats |{" "}
-          <kbd className="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-800 rounded">
+          Export ·{" "}
+          <kbd className="px-1 py-0.5 rounded bg-gray-200 dark:bg-gray-700 font-mono">
             Esc
           </kbd>{" "}
-          Close Details
+          Close details
         </div>
 
-      {/* Debug Panel */}
-      {showDebugPanel && (
-        <div className="mb-6 card bg-gray-900 dark:bg-gray-950 border-2 border-purple-500">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-bold text-purple-400 flex items-center gap-2">
-              <span>🐛</span>
-              <span>Debug Logs</span>
-            </h3>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setDebugLogs([])}
-                className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-sm rounded-lg"
-              >
-                Clear
-              </button>
-              <button
-                onClick={() => setShowDebugPanel(false)}
-                className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-sm rounded-lg"
-              >
-                ×
-              </button>
+        {/* Debug Panel (development only) */}
+        {process.env.NODE_ENV === "development" && showDebugPanel && (
+          <div className="mb-6 card bg-gray-900 dark:bg-gray-950 border-2 border-purple-500">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold text-purple-400 flex items-center gap-2">
+                <span>🐛</span>
+                <span>Debug Logs</span>
+              </h3>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setDebugLogs([])}
+                  className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-sm rounded-lg"
+                >
+                  Clear
+                </button>
+                <button
+                  onClick={() => setShowDebugPanel(false)}
+                  className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-sm rounded-lg"
+                >
+                  ×
+                </button>
+              </div>
             </div>
-          </div>
-          <div className="bg-black rounded-lg p-4 max-h-96 overflow-y-auto font-mono text-xs">
-            {debugLogs.length === 0 ? (
+            <div className="bg-black rounded-lg p-4 max-h-96 overflow-y-auto font-mono text-xs">
+              {debugLogs.length === 0 ? (
                 <div className="text-gray-500">
                   No debug logs yet. Logs will appear as the system updates.
                 </div>
-            ) : (
-              debugLogs.map((log, idx) => (
-                <div
-                  key={idx}
-                  className={`mb-1 ${
+              ) : (
+                debugLogs.map((log, idx) => (
+                  <div
+                    key={idx}
+                    className={`mb-1 ${
                       log.type === "success"
                         ? "text-green-400"
                         : log.type === "error"
-                        ? "text-red-400"
-                        : "text-gray-300"
+                          ? "text-red-400"
+                          : "text-gray-300"
                     }`}
                   >
                     <span className="text-gray-500">[{log.time}]</span>{" "}
-                  <span>{log.message}</span>
-                </div>
-              ))
-            )}
-          </div>
-          <div className="mt-3 text-xs text-gray-400">
-            Polling: Every 1s | Queue updates logged | Job progress tracked
-          </div>
-        </div>
-      )}
-
-      {/* Info Message (for copying progress) */}
-        {message.type === "info" && (
-        <div className="mb-5 p-4 rounded-lg font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 border border-blue-200 dark:border-blue-700 flex items-center gap-3">
-          <div className="inline-block animate-spin rounded-full h-5 w-5 border-b-2 border-blue-800 dark:border-blue-200"></div>
-          <span>{message.text}</span>
-        </div>
-      )}
-
-      {/* Success Message (for CSV upload success) */}
-        {message.type === "success" && (
-        <div className="mb-5 p-4 rounded-lg font-medium bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200 border border-green-200 dark:border-green-700 flex items-center gap-3">
-          <div className="text-xl">✅</div>
-          <span>{message.text}</span>
-        </div>
-      )}
-
-      {/* Tabbed Interface */}
-      <Tabs
-        tabs={[
-          {
-            id: "upload",
-            label: "Upload Videos",
-            icon: "📤",
-          },
-          {
-            id: "queue",
-            label: "Queue & Progress",
-            icon: "📊",
-            badge: queue.filter(j => j.status === "processing" || j.status === "pending").length,
-          },
-          {
-            id: "statistics",
-            label: "Statistics",
-            icon: "📈",
-          },
-        ]}
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-      >
-        {activeTab === "upload" && (
-          <div className="space-y-6">
-            {/* Upload Summary - Quick overview */}
-            <UploadSummary
-              queue={queue}
-              nextUploadTime={nextUploadTime}
-              timeUntilNext={timeUntilNext}
-            />
-
-            {/* Upload Forms - Extracted to UploadForms component */}
-            <UploadForms
-              showSingleUpload={showSingleUpload}
-              toggleSingleUpload={toggleSingleUpload}
-              handleSingleUpload={handleSingleUpload}
-              selectedVideoFile={selectedVideoFile}
-              setSelectedVideoFile={setSelectedVideoFile}
-              fileInputRef={fileInputRef}
-              uploading={uploading}
-              showBatchUpload={showBatchUpload}
-              toggleBatchUpload={toggleBatchUpload}
-              showBatchInstructions={showBatchInstructions}
-              toggleBatchInstructions={toggleBatchInstructions}
-              handleCsvUpload={handleCsvUpload}
-              selectedCsvFile={selectedCsvFile}
-              setSelectedCsvFile={setSelectedCsvFile}
-              csvFileInputRef={csvFileInputRef}
-              csvUploading={csvUploading}
-              validateCsv={validateCsv}
-              csvValidationErrors={csvValidationErrors}
-              setCsvValidationErrors={setCsvValidationErrors}
-              uploadProgress={uploadProgress}
-              showBulkUpload={showBulkUpload}
-              setShowBulkUpload={setShowBulkUpload}
-              handleBulkUpload={handleBulkUpload}
-              selectedBulkFiles={selectedBulkFiles}
-              setSelectedBulkFiles={setSelectedBulkFiles}
-              bulkFilesInputRef={bulkFilesInputRef}
-              bulkUploading={bulkUploading}
-              bulkUploadProgress={bulkUploadProgress}
-              bulkUrls={bulkUrls}
-              setBulkUrls={setBulkUrls}
-              urlAuthHeaders={urlAuthHeaders}
-              setUrlAuthHeaders={setUrlAuthHeaders}
-              urlTimeout={urlTimeout}
-              setUrlTimeout={setUrlTimeout}
-              setShowToast={setShowToast}
-              setSelectedJobId={setSelectedJobId}
-              fetchJobStatus={fetchJobStatus}
-              fetchQueue={fetchQueue}
-            />
-          </div>
-        )}
-
-        {activeTab === "queue" && (
-          <div className="space-y-6">
-            {/* Quick Stats Banner */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-              <div className="bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl p-4 text-white shadow-lg">
-                <div className="text-sm opacity-90 mb-1">Total Jobs</div>
-                <div className="text-3xl font-bold">{queue.length}</div>
-              </div>
-              <div className="bg-gradient-to-br from-yellow-500 to-orange-600 rounded-xl p-4 text-white shadow-lg">
-                <div className="text-sm opacity-90 mb-1">Processing</div>
-                <div className="text-3xl font-bold">
-                  {queue.filter(j => j.status === "processing" || j.status === "pending").length}
-                </div>
-              </div>
-              <div className="bg-gradient-to-br from-green-500 to-emerald-600 rounded-xl p-4 text-white shadow-lg">
-                <div className="text-sm opacity-90 mb-1">Completed</div>
-                <div className="text-3xl font-bold">
-                  {queue.filter(j => j.status === "completed").length}
-                </div>
-              </div>
-              <div className="bg-gradient-to-br from-red-500 to-pink-600 rounded-xl p-4 text-white shadow-lg">
-                <div className="text-sm opacity-90 mb-1">Failed</div>
-                <div className="text-3xl font-bold">
-                  {queue.filter(j => j.status === "failed").length}
-                </div>
-              </div>
+                    <span>{log.message}</span>
+                  </div>
+                ))
+              )}
             </div>
-
-            {/* Queue Management - Extracted to QueueManagement component */}
-            <QueueManagement
-              queue={queue}
-              searchQuery={searchQuery}
-              selectedJobId={selectedJobId}
-              setSelectedJobId={setSelectedJobId}
-              fetchJobStatus={fetchJobStatus}
-              fetchQueue={fetchQueue}
-              handleQueueAction={handleQueueAction}
-              jobStatus={jobStatus}
-              jobFiles={jobFiles}
-              loadingFiles={loadingFiles}
-              handleDeleteFile={handleDeleteFile}
-              handleDeleteAllFiles={handleDeleteAllFiles}
-              setShowToast={setShowToast}
-            />
+            <div className="mt-3 text-xs text-gray-400">
+              Polling: Adaptive (1s when jobs active, 3s idle) | Queue updates
+              logged | Job progress tracked
+            </div>
           </div>
         )}
 
-        {activeTab === "statistics" && (
-          <div className="space-y-6">
-            {/* Statistics Dashboard - Extracted to Statistics component (includes Next Upload Timer) */}
-            <Statistics 
-              queue={queue}
-              nextUploadTime={nextUploadTime}
-              timeUntilNext={timeUntilNext}
-            />
-
-            {/* Upload Summary - Quick overview */}
-            <UploadSummary
-              queue={queue}
-              nextUploadTime={nextUploadTime}
-              timeUntilNext={timeUntilNext}
-            />
+        {/* Info Message (for copying progress) */}
+        {message.type === "info" && (
+          <div className="mb-5 p-4 rounded-lg font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 border border-blue-200 dark:border-blue-700 flex items-center gap-3">
+            <div className="inline-block animate-spin rounded-full h-5 w-5 border-b-2 border-blue-800 dark:border-blue-200"></div>
+            <span>{message.text}</span>
           </div>
         )}
-      </Tabs>
 
-      <footer className="text-center py-5 text-gray-500">
+        {/* Success Message (for CSV upload success) */}
+        {message.type === "success" && (
+          <div className="mb-5 p-4 rounded-lg font-medium bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200 border border-green-200 dark:border-green-700 flex items-center gap-3">
+            <div className="text-xl">✅</div>
+            <span>{message.text}</span>
+          </div>
+        )}
+
+        {/* Tabbed Interface */}
+        <Tabs
+          tabs={[
+            {
+              id: "upload",
+              label: "Upload Videos",
+              icon: "📤",
+            },
+            {
+              id: "queue",
+              label: "Queue & Progress",
+              icon: "📊",
+              badge: queue.filter(
+                (j) => j.status === "processing" || j.status === "pending",
+              ).length,
+            },
+            {
+              id: "statistics",
+              label: "Statistics",
+              icon: "📈",
+            },
+          ]}
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+        >
+          {activeTab === "upload" && (
+            <div className="space-y-6">
+              {/* Upload Summary - Quick overview */}
+              <UploadSummary
+                queue={queue}
+                nextUploadTime={nextUploadTime}
+                timeUntilNext={timeUntilNext}
+              />
+
+              {/* Upload Forms - Extracted to UploadForms component */}
+              <UploadForms
+                showSingleUpload={showSingleUpload}
+                toggleSingleUpload={toggleSingleUpload}
+                handleSingleUpload={handleSingleUpload}
+                selectedVideoFile={selectedVideoFile}
+                setSelectedVideoFile={setSelectedVideoFile}
+                fileInputRef={fileInputRef}
+                uploading={uploading}
+                showBatchUpload={showBatchUpload}
+                toggleBatchUpload={toggleBatchUpload}
+                showBatchInstructions={showBatchInstructions}
+                toggleBatchInstructions={toggleBatchInstructions}
+                handleCsvUpload={handleCsvUpload}
+                selectedCsvFile={selectedCsvFile}
+                setSelectedCsvFile={setSelectedCsvFile}
+                csvFileInputRef={csvFileInputRef}
+                csvUploading={csvUploading}
+                validateCsv={validateCsv}
+                csvValidationErrors={csvValidationErrors}
+                setCsvValidationErrors={setCsvValidationErrors}
+                uploadProgress={uploadProgress}
+                showBulkUpload={showBulkUpload}
+                setShowBulkUpload={setShowBulkUpload}
+                handleBulkUpload={handleBulkUpload}
+                selectedBulkFiles={selectedBulkFiles}
+                setSelectedBulkFiles={setSelectedBulkFiles}
+                bulkFilesInputRef={bulkFilesInputRef}
+                bulkUploading={bulkUploading}
+                bulkUploadProgress={bulkUploadProgress}
+                bulkUrls={bulkUrls}
+                setBulkUrls={setBulkUrls}
+                urlAuthHeaders={urlAuthHeaders}
+                setUrlAuthHeaders={setUrlAuthHeaders}
+                urlTimeout={urlTimeout}
+                setUrlTimeout={setUrlTimeout}
+                setShowToast={setShowToast}
+                setSelectedJobId={setSelectedJobId}
+                fetchJobStatus={fetchJobStatus}
+                fetchQueue={fetchQueue}
+              />
+            </div>
+          )}
+
+          {activeTab === "queue" && (
+            <div className="space-y-6">
+              {/* Quick Stats Banner */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                <div className="bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl p-4 text-white shadow-lg">
+                  <div className="text-sm opacity-90 mb-1">Total Jobs</div>
+                  <div className="text-3xl font-bold">{queue.length}</div>
+                </div>
+                <div className="bg-gradient-to-br from-yellow-500 to-orange-600 rounded-xl p-4 text-white shadow-lg">
+                  <div className="text-sm opacity-90 mb-1">Processing</div>
+                  <div className="text-3xl font-bold">
+                    {
+                      queue.filter(
+                        (j) =>
+                          j.status === "processing" || j.status === "pending",
+                      ).length
+                    }
+                  </div>
+                </div>
+                <div className="bg-gradient-to-br from-green-500 to-emerald-600 rounded-xl p-4 text-white shadow-lg">
+                  <div className="text-sm opacity-90 mb-1">Completed</div>
+                  <div className="text-3xl font-bold">
+                    {queue.filter((j) => j.status === "completed").length}
+                  </div>
+                </div>
+                <div className="bg-gradient-to-br from-red-500 to-pink-600 rounded-xl p-4 text-white shadow-lg">
+                  <div className="text-sm opacity-90 mb-1">Failed</div>
+                  <div className="text-3xl font-bold">
+                    {queue.filter((j) => j.status === "failed").length}
+                  </div>
+                </div>
+              </div>
+
+              {/* Queue Management - Extracted to QueueManagement component */}
+              <QueueManagement
+                queue={queue}
+                searchQuery={searchQuery}
+                selectedJobId={selectedJobId}
+                setSelectedJobId={setSelectedJobId}
+                fetchJobStatus={fetchJobStatus}
+                fetchQueue={fetchQueue}
+                handleQueueAction={handleQueueAction}
+                jobStatus={jobStatus}
+                jobFiles={jobFiles}
+                loadingFiles={loadingFiles}
+                handleDeleteFile={handleDeleteFile}
+                handleDeleteAllFiles={handleDeleteAllFiles}
+                setShowToast={setShowToast}
+              />
+            </div>
+          )}
+
+          {activeTab === "statistics" && (
+            <div className="space-y-6">
+              <Statistics
+                queue={queue}
+                nextUploadTime={nextUploadTime}
+                timeUntilNext={timeUntilNext}
+              />
+            </div>
+          )}
+        </Tabs>
+
+        <footer className="text-center py-5 text-gray-500">
           &copy; 2025 ZonDiscounts.{" "}
           <Link href="/privacy" className="text-red-600 hover:underline">
             Privacy
@@ -1524,7 +1573,7 @@ export default function Dashboard() {
           <Link href="/terms" className="text-red-600 hover:underline">
             Terms
           </Link>
-      </footer>
+        </footer>
       </div>
     </div>
   );

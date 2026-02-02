@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
-import { getDropboxToken, getOAuthClient } from "@/lib/auth";
+import { getDropboxToken } from "@/lib/auth";
 import { listDropboxItems } from "@/lib/dropbox";
 import { cookies } from "next/headers";
-import { google } from "googleapis";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -29,34 +28,10 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
-    // Get user email for GAT owner/whitelist check
-    let userEmail: string | undefined = session.userId?.includes("@")
-      ? session.userId
-      : undefined;
-    if (!userEmail) {
-      try {
-        const oAuthClient = getOAuthClient();
-        oAuthClient.setCredentials(session.tokens);
-        const oauth2 = google.oauth2({
-          version: "v2",
-          auth: oAuthClient,
-        });
-        const userInfo = await oauth2.userinfo.get();
-        userEmail = userInfo.data.email || undefined;
-      } catch (e: any) {
-        console.warn(
-          "[BROWSE-DROPBOX] Could not fetch user email for GAT check:",
-          e?.message,
-        );
-      }
-    }
-
-    // Get Dropbox token - checks GAT from env first (owner/whitelist), then session token
     const dropboxToken = await getDropboxToken(
       session.dropboxToken,
       session.dropboxRefreshToken,
       sessionId,
-      userEmail,
     );
     if (!dropboxToken) {
       return NextResponse.json(

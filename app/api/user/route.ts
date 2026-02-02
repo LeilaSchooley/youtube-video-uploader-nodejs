@@ -5,26 +5,20 @@ import { getSession } from "@/lib/session";
 import { google } from "googleapis";
 import { cookies } from "next/headers";
 
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   try {
     const cookieStore = await cookies();
     const sessionId = cookieStore.get("sessionId")?.value;
-    
+
     if (!sessionId) {
-      return NextResponse.json(
-        { authenticated: false },
-        { status: 401 }
-      );
+      return NextResponse.json({ authenticated: false }, { status: 401 });
     }
 
     const session = getSession(sessionId);
     if (!session || !session.authenticated || !session.tokens) {
-      return NextResponse.json(
-        { authenticated: false },
-        { status: 401 }
-      );
+      return NextResponse.json({ authenticated: false }, { status: 401 });
     }
 
     const oAuthClient = getOAuthClient();
@@ -36,17 +30,13 @@ export async function GET(request: NextRequest) {
     });
 
     const response = await oauth2.userinfo.get();
-    const userEmail = response.data.email || undefined;
-    
-    // Check if Dropbox is available (GAT or session token, auto-refreshes if needed)
-    // GAT is only used if userEmail matches DROPBOX_GAT_OWNER_EMAIL
+
     const dropboxToken = await getDropboxToken(
       session.dropboxToken,
       session.dropboxRefreshToken,
       sessionId,
-      userEmail
     );
-    
+
     return NextResponse.json({
       authenticated: true,
       name: response.data.name,
@@ -57,8 +47,7 @@ export async function GET(request: NextRequest) {
     console.error("User info error:", error);
     return NextResponse.json(
       { authenticated: false, error: error?.message || "Unknown error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
-

@@ -1,3 +1,6 @@
+/**
+ * Migrate files between user directories. Used by scripts or future UI; not used by dashboard.
+ */
 import { NextResponse } from "next/server";
 import { NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
@@ -17,18 +20,12 @@ export async function GET(request: NextRequest) {
     const sessionId = cookieStore.get("sessionId")?.value;
 
     if (!sessionId) {
-      return NextResponse.json(
-        { error: "Not authenticated" },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
     const session = getSession(sessionId);
     if (!session || !session.authenticated) {
-      return NextResponse.json(
-        { error: "Not authenticated" },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
     const uploadsDir = path.join(process.cwd(), "uploads");
@@ -47,7 +44,7 @@ export async function GET(request: NextRequest) {
     for (const entry of entries) {
       if (entry.isDirectory()) {
         const dirPath = path.join(uploadsDir, entry.name);
-        
+
         // Count files in this directory
         let fileCount = 0;
         let hasStaging = false;
@@ -63,7 +60,7 @@ export async function GET(request: NextRequest) {
                 const stagingPath = path.join(dirPath, "staging");
                 const videosPath = path.join(stagingPath, "videos");
                 const thumbnailsPath = path.join(stagingPath, "thumbnails");
-                
+
                 if (fs.existsSync(videosPath)) {
                   fileCount += fs.readdirSync(videosPath).length;
                 }
@@ -76,7 +73,7 @@ export async function GET(request: NextRequest) {
                 const jobPath = path.join(dirPath, sub.name);
                 const videosPath = path.join(jobPath, "videos");
                 const thumbnailsPath = path.join(jobPath, "thumbnails");
-                
+
                 if (fs.existsSync(videosPath)) {
                   fileCount += fs.readdirSync(videosPath).length;
                 }
@@ -95,7 +92,8 @@ export async function GET(request: NextRequest) {
           hasStaging,
           jobCount,
           fileCount,
-          isCurrentUser: session.userId && 
+          isCurrentUser:
+            session.userId &&
             entry.name === session.userId.replace(/[^a-zA-Z0-9._-]/g, "_"),
         });
       }
@@ -110,7 +108,7 @@ export async function GET(request: NextRequest) {
     console.error("[MIGRATE-FILES] Error listing directories:", error);
     return NextResponse.json(
       { error: error?.message || "Failed to list directories" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
@@ -125,18 +123,12 @@ export async function POST(request: NextRequest) {
     const sessionId = cookieStore.get("sessionId")?.value;
 
     if (!sessionId) {
-      return NextResponse.json(
-        { error: "Not authenticated" },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
     const session = getSession(sessionId);
     if (!session || !session.authenticated) {
-      return NextResponse.json(
-        { error: "Not authenticated" },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
     const body = await request.json();
@@ -145,14 +137,14 @@ export async function POST(request: NextRequest) {
     if (!sourceDir || !destDir) {
       return NextResponse.json(
         { error: "sourceDir and destDir are required" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     if (sourceDir === destDir) {
       return NextResponse.json(
         { error: "Source and destination cannot be the same" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -165,18 +157,20 @@ export async function POST(request: NextRequest) {
     const normalizedDest = path.normalize(destPath);
     const normalizedUploads = path.normalize(uploadsDir);
 
-    if (!normalizedSource.startsWith(normalizedUploads) || 
-        !normalizedDest.startsWith(normalizedUploads)) {
+    if (
+      !normalizedSource.startsWith(normalizedUploads) ||
+      !normalizedDest.startsWith(normalizedUploads)
+    ) {
       return NextResponse.json(
         { error: "Invalid directory path" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     if (!fs.existsSync(sourcePath)) {
       return NextResponse.json(
         { error: `Source directory not found: ${sourceDir}` },
-        { status: 404 }
+        { status: 404 },
       );
     }
 
@@ -216,7 +210,9 @@ export async function POST(request: NextRequest) {
       fs.rmSync(sourcePath, { recursive: true, force: true });
     }
 
-    console.log(`[MIGRATE-FILES] Migrated ${filesCopied} files from ${sourceDir} to ${destDir}, deleteSource=${deleteSource}`);
+    console.log(
+      `[MIGRATE-FILES] Migrated ${filesCopied} files from ${sourceDir} to ${destDir}, deleteSource=${deleteSource}`,
+    );
 
     return NextResponse.json({
       success: true,
@@ -228,11 +224,7 @@ export async function POST(request: NextRequest) {
     console.error("[MIGRATE-FILES] Error migrating files:", error);
     return NextResponse.json(
       { error: error?.message || "Failed to migrate files" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
-
-
-
-

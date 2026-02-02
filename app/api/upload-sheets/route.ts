@@ -201,9 +201,8 @@ export async function POST(request: NextRequest) {
       return mapped;
     });
 
-    // Get userId and email from session
+    // Ensure userId is set on session
     let userId = session.userId;
-    let userEmail: string | undefined;
     if (!userId) {
       const oauth2 = google.oauth2({
         version: "v2",
@@ -213,41 +212,15 @@ export async function POST(request: NextRequest) {
       userId = (userInfo.data.email || userInfo.data.id || undefined) as
         | string
         | undefined;
-      userEmail = userInfo.data.email || undefined;
       session.userId = userId;
       setSession(sessionId, session);
-    } else {
-      // userId might be email
-      userEmail = userId.includes("@") ? userId : undefined;
-      // If we have userId but no email (e.g. numeric ID), fetch email from Google for GAT check
-      if (!userEmail) {
-        try {
-          const oauth2 = google.oauth2({
-            version: "v2",
-            auth: oAuthClient,
-          });
-          const userInfo = await oauth2.userinfo.get();
-          userEmail = userInfo.data.email || undefined;
-          if (userEmail) {
-            session.userId = userEmail;
-            setSession(sessionId, session);
-          }
-        } catch (e: any) {
-          console.warn(
-            "[UPLOAD-SHEETS] Could not fetch user email for GAT check:",
-            e?.message,
-          );
-        }
-      }
     }
 
-    // Get Dropbox token if needed (checks GAT for owner/whitelist, or OAuth token)
     const dropboxToken = dropboxFolderPath
       ? await getDropboxToken(
           session.dropboxToken,
           session.dropboxRefreshToken,
           sessionId,
-          userEmail,
         )
       : undefined;
 
@@ -333,7 +306,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           error:
-            "Dropbox folder specified but Dropbox not authenticated. Please connect Dropbox first or set DROPBOX_GENERATED_ACCESS_TOKEN in environment variables.",
+            "Dropbox folder specified but Dropbox not authenticated. Please connect Dropbox first.",
         },
         { status: 400 },
       );

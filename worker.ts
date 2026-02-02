@@ -5,13 +5,34 @@
  * This worker processes uploads from the bulk queue asynchronously
  */
 
-import { getBulkQueue, getNextPendingBulkItem, markBulkAsProcessing, markBulkAsCompleted, markBulkAsFailed, updateBulkProgress } from "./lib/bulk-queue";
+import {
+  getBulkQueue,
+  getNextPendingBulkItem,
+  markBulkAsProcessing,
+  markBulkAsCompleted,
+  markBulkAsFailed,
+  updateBulkProgress,
+} from "./lib/bulk-queue";
 import { getSession, loadSessions } from "./lib/session";
 import { getOAuthClient, getDropboxToken } from "./lib/auth";
 import { google } from "googleapis";
 import { fetchFileAsStream, isValidUrl } from "./lib/url-stream";
-import { downloadDriveFile, isDriveFileId, renameDriveFile, moveDriveFile, deleteDriveFile, getDriveFileMetadata } from "./lib/drive";
-import { downloadDropboxFile, isDropboxPath, renameDropboxFile, moveDropboxFile, deleteDropboxFile, getDropboxFileMetadata } from "./lib/dropbox";
+import {
+  downloadDriveFile,
+  isDriveFileId,
+  renameDriveFile,
+  moveDriveFile,
+  deleteDriveFile,
+  getDriveFileMetadata,
+} from "./lib/drive";
+import {
+  downloadDropboxFile,
+  isDropboxPath,
+  renameDropboxFile,
+  moveDropboxFile,
+  deleteDropboxFile,
+  getDropboxFileMetadata,
+} from "./lib/dropbox";
 import { Readable } from "stream";
 import fs from "fs";
 
@@ -48,11 +69,11 @@ interface UploadTask {
  * Get video stream from file, URL, Drive, or Dropbox
  */
 async function getVideoStream(
-  task: UploadTask, 
+  task: UploadTask,
   oAuthClient: ReturnType<typeof getOAuthClient>,
   dropboxToken?: string,
   sessionId?: string,
-  sessionRefreshToken?: string | null
+  sessionRefreshToken?: string | null,
 ): Promise<Readable> {
   const { item } = task;
 
@@ -66,7 +87,12 @@ async function getVideoStream(
     if (!dropboxToken) {
       throw new Error("Dropbox token required but not available");
     }
-    return await downloadDropboxFile(item.dropboxFileId, dropboxToken, sessionId, sessionRefreshToken);
+    return await downloadDropboxFile(
+      item.dropboxFileId,
+      dropboxToken,
+      sessionId,
+      sessionRefreshToken,
+    );
   }
 
   // Handle URL-based upload
@@ -94,11 +120,11 @@ async function getVideoStream(
  * Get thumbnail stream if available
  */
 async function getThumbnailStream(
-  task: UploadTask, 
+  task: UploadTask,
   oAuthClient: ReturnType<typeof getOAuthClient>,
   dropboxToken?: string,
   sessionId?: string,
-  sessionRefreshToken?: string | null
+  sessionRefreshToken?: string | null,
 ): Promise<Readable | null> {
   const { item } = task;
 
@@ -110,13 +136,22 @@ async function getThumbnailStream(
   // Handle Dropbox thumbnails
   if (item.dropboxThumbnailId && isDropboxPath(item.dropboxThumbnailId)) {
     if (!dropboxToken) {
-      console.warn("[WORKER] Dropbox thumbnail requested but token not available");
+      console.warn(
+        "[WORKER] Dropbox thumbnail requested but token not available",
+      );
       return null;
     }
     try {
-      return await downloadDropboxFile(item.dropboxThumbnailId, dropboxToken, sessionId, sessionRefreshToken);
+      return await downloadDropboxFile(
+        item.dropboxThumbnailId,
+        dropboxToken,
+        sessionId,
+        sessionRefreshToken,
+      );
     } catch (error: any) {
-      console.error(`[WORKER] Failed to download Dropbox thumbnail: ${error?.message}`);
+      console.error(
+        `[WORKER] Failed to download Dropbox thumbnail: ${error?.message}`,
+      );
       return null;
     }
   }
@@ -142,11 +177,16 @@ async function getThumbnailStream(
 async function uploadVideo(
   youtube: ReturnType<typeof google.youtube>,
   task: UploadTask,
-  sendProgress: (index: number, status: string, videoId?: string, error?: string) => void,
+  sendProgress: (
+    index: number,
+    status: string,
+    videoId?: string,
+    error?: string,
+  ) => void,
   oAuthClient: ReturnType<typeof getOAuthClient>,
   dropboxToken?: string,
   sessionId?: string,
-  sessionRefreshToken?: string | null
+  sessionRefreshToken?: string | null,
 ): Promise<{ success: boolean; videoId?: string; error?: string }> {
   const { index, item } = task;
 
@@ -159,26 +199,33 @@ async function uploadVideo(
     // Prepare request body
     const requestBody: {
       snippet: { title: string; description: string };
-      status: { 
-        privacyStatus: string; 
+      status: {
+        privacyStatus: string;
         publishAt?: string;
         selfDeclaredMadeForKids?: boolean;
       };
     } = {
       snippet: { title, description },
-      status: { 
+      status: {
         privacyStatus,
         selfDeclaredMadeForKids: item.madeForKids ?? false, // Default to false (not made for kids)
       },
     };
 
     // Only set publishAt if it's a valid future date (15+ minutes from now)
-    if (item.publishDate && typeof item.publishDate === 'string' && item.publishDate.trim()) {
+    if (
+      item.publishDate &&
+      typeof item.publishDate === "string" &&
+      item.publishDate.trim()
+    ) {
       const publishDate = new Date(item.publishDate);
       const now = new Date();
       const minScheduleTime = now.getTime() + 15 * 60 * 1000; // 15 minutes from now
-      
-      if (!isNaN(publishDate.getTime()) && publishDate.getTime() > minScheduleTime) {
+
+      if (
+        !isNaN(publishDate.getTime()) &&
+        publishDate.getTime() > minScheduleTime
+      ) {
         // Ensure the scheduled time is at least at the start of the next hour to avoid edge cases
         const safePublishDate = new Date(publishDate);
         // If scheduling for today/tomorrow, ensure time is in the future
@@ -186,19 +233,25 @@ async function uploadVideo(
           // Less than 1 hour from now - push to next hour
           safePublishDate.setHours(safePublishDate.getHours() + 1, 0, 0, 0);
         }
-        
+
         // Double-check it's still in the future
         if (safePublishDate.getTime() > now.getTime() + 15 * 60 * 1000) {
           requestBody.status.publishAt = safePublishDate.toISOString();
           requestBody.status.privacyStatus = "private";
-          console.log(`[WORKER] Video ${index + 1}: Scheduling for ${safePublishDate.toISOString()}`);
+          console.log(
+            `[WORKER] Video ${index + 1}: Scheduling for ${safePublishDate.toISOString()}`,
+          );
         } else {
-          console.log(`[WORKER] Video ${index + 1}: Adjusted date still too soon, uploading as public`);
+          console.log(
+            `[WORKER] Video ${index + 1}: Adjusted date still too soon, uploading as public`,
+          );
           requestBody.status.privacyStatus = "public";
         }
       } else {
         // Date is invalid or too soon - upload immediately as public
-        console.log(`[WORKER] Video ${index + 1}: publishDate "${item.publishDate}" is invalid or too soon, uploading as public`);
+        console.log(
+          `[WORKER] Video ${index + 1}: publishDate "${item.publishDate}" is invalid or too soon, uploading as public`,
+        );
         requestBody.status.privacyStatus = "public";
       }
     }
@@ -214,11 +267,17 @@ async function uploadVideo(
     } else if (item.file) {
       sourceInfo = `file: ${item.file.name}`;
     }
-    
+
     sendProgress(index, `Fetching video ${sourceInfo}...`);
 
     // Get video stream
-    const videoStream = await getVideoStream(task, oAuthClient, dropboxToken, sessionId, sessionRefreshToken);
+    const videoStream = await getVideoStream(
+      task,
+      oAuthClient,
+      dropboxToken,
+      sessionId,
+      sessionRefreshToken,
+    );
 
     sendProgress(index, `Uploading "${title}" to YouTube...`);
 
@@ -239,10 +298,20 @@ async function uploadVideo(
       };
     }
 
-    sendProgress(index, `Uploaded successfully (${uploadDuration.toFixed(1)}s)`, videoId);
+    sendProgress(
+      index,
+      `Uploaded successfully (${uploadDuration.toFixed(1)}s)`,
+      videoId,
+    );
 
     // Upload thumbnail if available
-    const thumbnailStream = await getThumbnailStream(task, oAuthClient, dropboxToken, sessionId, sessionRefreshToken);
+    const thumbnailStream = await getThumbnailStream(
+      task,
+      oAuthClient,
+      dropboxToken,
+      sessionId,
+      sessionRefreshToken,
+    );
     if (thumbnailStream && videoId) {
       sendProgress(index, "Uploading thumbnail...", videoId);
       try {
@@ -252,71 +321,125 @@ async function uploadVideo(
         });
         sendProgress(index, "Thumbnail uploaded", videoId);
       } catch (thumbError: any) {
-        console.error(`[WORKER] Thumbnail upload failed for video ${index}:`, thumbError);
+        console.error(
+          `[WORKER] Thumbnail upload failed for video ${index}:`,
+          thumbError,
+        );
         // Don't fail the whole upload
       }
     }
 
     // Post-upload actions for Drive files
-    if (item.driveFileId && videoId && item.postUploadAction && item.postUploadAction !== "none") {
+    if (
+      item.driveFileId &&
+      videoId &&
+      item.postUploadAction &&
+      item.postUploadAction !== "none"
+    ) {
       try {
         switch (item.postUploadAction.toLowerCase()) {
           case "rename":
-            const fileMetadata = await getDriveFileMetadata(item.driveFileId, oAuthClient);
-            const extension = fileMetadata.name.split('.').pop() || 'mp4';
+            const fileMetadata = await getDriveFileMetadata(
+              item.driveFileId,
+              oAuthClient,
+            );
+            const extension = fileMetadata.name.split(".").pop() || "mp4";
             const newName = `${videoId}.${extension}`;
             await renameDriveFile(item.driveFileId, newName, oAuthClient);
             sendProgress(index, `Renamed to ${newName}`, videoId);
             break;
-            
+
           case "delete":
             await deleteDriveFile(item.driveFileId, oAuthClient);
             sendProgress(index, "Deleted from Drive", videoId);
             break;
-            
+
           case "move":
             if (item.completedFolderId) {
-              await moveDriveFile(item.driveFileId, item.completedFolderId, oAuthClient);
+              await moveDriveFile(
+                item.driveFileId,
+                item.completedFolderId,
+                oAuthClient,
+              );
               sendProgress(index, `Moved to folder`, videoId);
             } else {
-              console.warn(`[WORKER] Move action requested but no completedFolderId provided`);
+              console.warn(
+                `[WORKER] Move action requested but no completedFolderId provided`,
+              );
             }
             break;
         }
       } catch (actionError: any) {
-        console.error(`[WORKER] Post-upload action failed for video ${index}:`, actionError);
+        console.error(
+          `[WORKER] Post-upload action failed for video ${index}:`,
+          actionError,
+        );
         // Don't fail the upload - action is optional
       }
     }
 
     // Post-upload actions for Dropbox files
-    if (item.dropboxFileId && videoId && item.postUploadAction && item.postUploadAction !== "none" && dropboxToken) {
+    if (
+      item.dropboxFileId &&
+      videoId &&
+      item.postUploadAction &&
+      item.postUploadAction !== "none" &&
+      dropboxToken
+    ) {
       try {
         switch (item.postUploadAction.toLowerCase()) {
           case "rename":
-            const dropboxMetadata = await getDropboxFileMetadata(item.dropboxFileId, dropboxToken, sessionId, sessionRefreshToken);
-            const dropboxExtension = dropboxMetadata.name.split('.').pop() || 'mp4';
+            const dropboxMetadata = await getDropboxFileMetadata(
+              item.dropboxFileId,
+              dropboxToken,
+              sessionId,
+              sessionRefreshToken,
+            );
+            const dropboxExtension =
+              dropboxMetadata.name.split(".").pop() || "mp4";
             const dropboxNewName = `${videoId}.${dropboxExtension}`;
-            await renameDropboxFile(item.dropboxFileId, dropboxNewName, dropboxToken, sessionId, sessionRefreshToken);
+            await renameDropboxFile(
+              item.dropboxFileId,
+              dropboxNewName,
+              dropboxToken,
+              sessionId,
+              sessionRefreshToken,
+            );
             sendProgress(index, `Renamed to ${dropboxNewName}`, videoId);
             break;
-            
+
           case "delete":
-            await deleteDropboxFile(item.dropboxFileId, dropboxToken, sessionId, sessionRefreshToken);
+            await deleteDropboxFile(
+              item.dropboxFileId,
+              dropboxToken,
+              sessionId,
+              sessionRefreshToken,
+            );
             sendProgress(index, "Deleted from Dropbox", videoId);
             break;
-            
+
           case "move":
             if (item.completedFolderId) {
-              await moveDropboxFile(item.dropboxFileId, item.completedFolderId, dropboxToken, sessionId, sessionRefreshToken);
+              await moveDropboxFile(
+                item.dropboxFileId,
+                item.completedFolderId,
+                dropboxToken,
+                sessionId,
+                sessionRefreshToken,
+              );
               sendProgress(index, `Moved to folder`, videoId);
             } else {
-              console.warn(`[WORKER] Move action requested but no completedFolderId provided`);
+              console.warn(
+                `[WORKER] Move action requested but no completedFolderId provided`,
+              );
             }
             break;
         }
       } catch (actionError: any) {
-        console.error(`[WORKER] Dropbox post-upload action failed for video ${index}:`, actionError);
+        console.error(
+          `[WORKER] Dropbox post-upload action failed for video ${index}:`,
+          actionError,
+        );
         // Don't fail the upload - action is optional
       }
     }
@@ -329,7 +452,10 @@ async function uploadVideo(
       "Unknown error";
 
     // Improve error messages for common cases
-    if (errorMessage.includes("File not found") || errorMessage.includes("404")) {
+    if (
+      errorMessage.includes("File not found") ||
+      errorMessage.includes("404")
+    ) {
       errorMessage = `Video file not found or inaccessible`;
     } else if (errorMessage.includes("Failed to download Drive file")) {
       errorMessage = `Drive file not found or access denied`;
@@ -339,11 +465,17 @@ async function uploadVideo(
       errorMessage = `Dropbox authentication required - please reconnect Dropbox`;
     } else if (errorMessage.includes("No valid video source found")) {
       errorMessage = `No video source available (missing drive_file_id, dropbox_file_id, video_url, or file)`;
-    } else if (errorMessage.includes("timeout") || errorMessage.includes("ETIMEDOUT")) {
+    } else if (
+      errorMessage.includes("timeout") ||
+      errorMessage.includes("ETIMEDOUT")
+    ) {
       errorMessage = `Upload timeout - video may be too large or connection too slow`;
     }
 
-    console.error(`[WORKER] Upload failed for video ${index + 1} ("${item.title || 'Untitled'}"):`, errorMessage);
+    console.error(
+      `[WORKER] Upload failed for video ${index + 1} ("${item.title || "Untitled"}"):`,
+      errorMessage,
+    );
     console.log(`[WORKER] Continuing with remaining videos...`);
     return { success: false, error: errorMessage };
   }
@@ -355,14 +487,29 @@ async function uploadVideo(
 async function processBatch(
   youtube: ReturnType<typeof google.youtube>,
   batch: UploadTask[],
-  sendProgress: (index: number, status: string, videoId?: string, error?: string) => void,
+  sendProgress: (
+    index: number,
+    status: string,
+    videoId?: string,
+    error?: string,
+  ) => void,
   oAuthClient: ReturnType<typeof getOAuthClient>,
   dropboxToken?: string,
   sessionId?: string,
-  sessionRefreshToken?: string | null
+  sessionRefreshToken?: string | null,
 ): Promise<void> {
   const results = await Promise.allSettled(
-    batch.map((task) => uploadVideo(youtube, task, sendProgress, oAuthClient, dropboxToken, sessionId, sessionRefreshToken))
+    batch.map((task) =>
+      uploadVideo(
+        youtube,
+        task,
+        sendProgress,
+        oAuthClient,
+        dropboxToken,
+        sessionId,
+        sessionRefreshToken,
+      ),
+    ),
   );
 
   const batchResults = {
@@ -378,11 +525,16 @@ async function processBatch(
         sendProgress(
           task.index,
           `Completed: ${result.value.videoId}`,
-          result.value.videoId
+          result.value.videoId,
         );
       } else {
         batchResults.failed++;
-        sendProgress(task.index, `Failed: ${result.value.error}`, undefined, result.value.error);
+        sendProgress(
+          task.index,
+          `Failed: ${result.value.error}`,
+          undefined,
+          result.value.error,
+        );
       }
     } else {
       batchResults.failed++;
@@ -390,20 +542,22 @@ async function processBatch(
         task.index,
         `Failed: ${result.reason?.message || "Unknown error"}`,
         undefined,
-        result.reason?.message || "Unknown error"
+        result.reason?.message || "Unknown error",
       );
     }
   });
 
-  console.log(`[WORKER] Batch completed: ${batchResults.success} succeeded, ${batchResults.failed} failed`);
+  console.log(
+    `[WORKER] Batch completed: ${batchResults.success} succeeded, ${batchResults.failed} failed`,
+  );
 }
 
 /**
  * Process a single bulk upload job
- * 
+ *
  * IMPORTANT: videosPerDay controls how many videos are UPLOADED per day (YouTube's daily limit)
  * NOT how many are scheduled. Videos are uploaded gradually over multiple days.
- * 
+ *
  * - If videosPerDay is set, only upload that many videos TODAY, then wait for tomorrow
  * - If a video has publishAt from the sheet, use it for YouTube's scheduled publish feature
  * - If no publishAt, upload as public immediately
@@ -419,7 +573,9 @@ async function processBulkJob(jobId: string): Promise<void> {
 
   // Allow both "pending" and "processing" jobs (processing = waiting for next day's batch)
   if (job.status !== "pending" && job.status !== "processing") {
-    console.log(`[WORKER] Job ${jobId} is not pending/processing (status: ${job.status})`);
+    console.log(
+      `[WORKER] Job ${jobId} is not pending/processing (status: ${job.status})`,
+    );
     return;
   }
 
@@ -428,12 +584,12 @@ async function processBulkJob(jobId: string): Promise<void> {
   // Get session and authenticate
   loadSessions();
   let session = getSession(job.sessionId);
-  
+
   if (!session) {
     loadSessions();
     session = getSession(job.sessionId);
   }
-  
+
   if (!session || !session.authenticated || !session.tokens) {
     markBulkAsFailed(jobId, "Session not authenticated");
     console.error(`[WORKER] Job ${jobId}: Session not authenticated`);
@@ -448,90 +604,110 @@ async function processBulkJob(jobId: string): Promise<void> {
     auth: oAuthClient,
   });
 
-  // Get user email for GAT owner check
-  let userEmail: string | undefined;
-  if (session.userId && session.userId.includes('@')) {
-    userEmail = session.userId;
-  } else {
-    // Try to get email from Google API
-    try {
-      const oauth2 = google.oauth2({
-        version: "v2",
-        auth: oAuthClient,
-      });
-      const userInfo = await oauth2.userinfo.get();
-      userEmail = userInfo.data.email || undefined;
-    } catch (error) {
-      // If we can't get email, continue without it (GAT won't be used)
-      console.warn(`[WORKER] Could not get user email for GAT check:`, error);
-    }
-  }
-
-  // Get Dropbox token - checks GAT from env first (only for owner), then session token, auto-refreshes if needed
   const dropboxToken = await getDropboxToken(
     session.dropboxToken,
     session.dropboxRefreshToken,
     job.sessionId,
-    userEmail
   );
 
   // Determine which videos to upload TODAY (using UTC for consistency)
   const now = new Date();
-  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0)); // Start of today in UTC
-  
+  const today = new Date(
+    Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate(),
+      0,
+      0,
+      0,
+      0,
+    ),
+  ); // Start of today in UTC
+
   // Get job start date (convert to UTC)
-  const startDateRaw = job.startDate ? new Date(job.startDate) : new Date(job.createdAt);
-  const startDate = new Date(Date.UTC(startDateRaw.getUTCFullYear(), startDateRaw.getUTCMonth(), startDateRaw.getUTCDate(), 0, 0, 0, 0)); // Start of start date in UTC
-  
+  const startDateRaw = job.startDate
+    ? new Date(job.startDate)
+    : new Date(job.createdAt);
+  const startDate = new Date(
+    Date.UTC(
+      startDateRaw.getUTCFullYear(),
+      startDateRaw.getUTCMonth(),
+      startDateRaw.getUTCDate(),
+      0,
+      0,
+      0,
+      0,
+    ),
+  ); // Start of start date in UTC
+
   // Calculate how many days since job started
-  const daysSinceStart = Math.floor((today.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
-  
+  const daysSinceStart = Math.floor(
+    (today.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24),
+  );
+
   // Find which videos have already been processed
   const completedIndices = new Set<number>();
   const failedIndices = new Set<number>();
-  (job.progress || []).forEach(p => {
-    if (p && typeof p.index === 'number') {
-      if (p.videoId || (p.status && (p.status.includes("Uploaded") || p.status.includes("Scheduled") || p.status.includes("scheduled")))) {
+  (job.progress || []).forEach((p) => {
+    if (p && typeof p.index === "number") {
+      if (
+        p.videoId ||
+        (p.status &&
+          (p.status.includes("Uploaded") ||
+            p.status.includes("Scheduled") ||
+            p.status.includes("scheduled")))
+      ) {
         completedIndices.add(p.index);
       } else if (p.status && p.status.includes("Failed")) {
         failedIndices.add(p.index);
       }
     }
   });
-  
+
   const totalVideos = job.items.length;
   const completedCount = completedIndices.size;
   const failedCount = failedIndices.size;
   const processedCount = completedCount + failedCount;
-  
-  console.log(`[WORKER] Job ${jobId}: ${totalVideos} total, ${completedCount} completed, ${failedCount} failed, ${totalVideos - processedCount} pending`);
-  
+
+  console.log(
+    `[WORKER] Job ${jobId}: ${totalVideos} total, ${completedCount} completed, ${failedCount} failed, ${totalVideos - processedCount} pending`,
+  );
+
   // If all videos are done, mark job complete
   if (processedCount >= totalVideos) {
     markBulkAsCompleted(jobId);
-    console.log(`[WORKER] Job ${jobId} completed: ${completedCount} succeeded, ${failedCount} failed`);
+    console.log(
+      `[WORKER] Job ${jobId} completed: ${completedCount} succeeded, ${failedCount} failed`,
+    );
     return;
   }
-  
+
   // Determine today's batch
   let todaysBatch: UploadTask[] = [];
-  
+
   if (job.videosPerDay && job.videosPerDay > 0) {
     // Calculate which video indices are for TODAY based on videosPerDay
     // Day 0: indices 0 to (videosPerDay - 1)
     // Day 1: indices videosPerDay to (2 * videosPerDay - 1)
     // etc.
     const todayStartIndex = daysSinceStart * job.videosPerDay;
-    const todayEndIndex = Math.min(todayStartIndex + job.videosPerDay, totalVideos);
-    
-    console.log(`[WORKER] Day ${daysSinceStart}: Processing videos ${todayStartIndex + 1} to ${todayEndIndex} (${job.videosPerDay}/day limit)`);
-    
+    const todayEndIndex = Math.min(
+      todayStartIndex + job.videosPerDay,
+      totalVideos,
+    );
+
+    console.log(
+      `[WORKER] Day ${daysSinceStart}: Processing videos ${todayStartIndex + 1} to ${todayEndIndex} (${job.videosPerDay}/day limit)`,
+    );
+
     // If today's batch hasn't started yet (future day), wait
     if (daysSinceStart < 0) {
-      console.log(`[WORKER] Job ${jobId}: Start date is in the future, waiting...`);
+      console.log(
+        `[WORKER] Job ${jobId}: Start date is in the future, waiting...`,
+      );
       return;
     }
-    
+
     // Get today's videos that haven't been processed yet
     for (let i = todayStartIndex; i < todayEndIndex && i < totalVideos; i++) {
       if (!completedIndices.has(i) && !failedIndices.has(i)) {
@@ -542,27 +718,33 @@ async function processBulkJob(jobId: string): Promise<void> {
         });
       }
     }
-    
+
     if (todaysBatch.length === 0) {
       // Today's batch is complete, but there are more videos for future days
       const nextDayIndex = daysSinceStart + 1;
       const nextBatchStartIndex = nextDayIndex * job.videosPerDay;
-      
+
       if (nextBatchStartIndex < totalVideos) {
-        console.log(`[WORKER] Job ${jobId}: Today's batch complete. Next batch (videos ${nextBatchStartIndex + 1}+) scheduled for tomorrow.`);
+        console.log(
+          `[WORKER] Job ${jobId}: Today's batch complete. Next batch (videos ${nextBatchStartIndex + 1}+) scheduled for tomorrow.`,
+        );
         // Keep job in "processing" status - worker will check again tomorrow
         return;
       } else {
         // No more batches, job is complete
         markBulkAsCompleted(jobId);
-        console.log(`[WORKER] Job ${jobId} completed: ${completedCount} succeeded, ${failedCount} failed`);
+        console.log(
+          `[WORKER] Job ${jobId} completed: ${completedCount} succeeded, ${failedCount} failed`,
+        );
         return;
       }
     }
   } else {
     // No videosPerDay limit - process all remaining videos
-    console.log(`[WORKER] No daily limit set, processing all ${totalVideos - processedCount} remaining videos`);
-    
+    console.log(
+      `[WORKER] No daily limit set, processing all ${totalVideos - processedCount} remaining videos`,
+    );
+
     for (let i = 0; i < totalVideos; i++) {
       if (!completedIndices.has(i) && !failedIndices.has(i)) {
         const item = job.items[i];
@@ -573,42 +755,57 @@ async function processBulkJob(jobId: string): Promise<void> {
       }
     }
   }
-  
-  console.log(`[WORKER] Processing ${todaysBatch.length} videos today for job ${jobId}`);
-  
+
+  console.log(
+    `[WORKER] Processing ${todaysBatch.length} videos today for job ${jobId}`,
+  );
+
   // Process publishAt from sheet (for YouTube's scheduled publish feature)
   // This is INDEPENDENT from videosPerDay (upload limit)
   const MIN_SCHEDULE_BUFFER_MS = 15 * 60 * 1000; // 15 minutes
-  
-  todaysBatch = todaysBatch.map(task => {
+
+  todaysBatch = todaysBatch.map((task) => {
     const taskItem = { ...task.item };
-    
+
     // Check if video has publishAt from the sheet
-    if (taskItem.publishDate && typeof taskItem.publishDate === 'string' && taskItem.publishDate.trim()) {
+    if (
+      taskItem.publishDate &&
+      typeof taskItem.publishDate === "string" &&
+      taskItem.publishDate.trim()
+    ) {
       const publishDate = new Date(taskItem.publishDate);
       if (isNaN(publishDate.getTime())) {
         // Invalid date - upload as public
-        console.log(`[WORKER] Video ${task.index + 1}: Invalid publishAt "${taskItem.publishDate}", uploading as public`);
+        console.log(
+          `[WORKER] Video ${task.index + 1}: Invalid publishAt "${taskItem.publishDate}", uploading as public`,
+        );
         delete taskItem.publishDate;
         if (!taskItem.privacyStatus) taskItem.privacyStatus = "public";
-      } else if (publishDate.getTime() <= now.getTime() + MIN_SCHEDULE_BUFFER_MS) {
+      } else if (
+        publishDate.getTime() <=
+        now.getTime() + MIN_SCHEDULE_BUFFER_MS
+      ) {
         // Date is too soon or in past - upload as public
-        console.log(`[WORKER] Video ${task.index + 1}: publishAt is past/too soon, uploading as public`);
+        console.log(
+          `[WORKER] Video ${task.index + 1}: publishAt is past/too soon, uploading as public`,
+        );
         delete taskItem.publishDate;
         if (!taskItem.privacyStatus) taskItem.privacyStatus = "public";
       } else {
         // Valid future date - will schedule on YouTube
-        console.log(`[WORKER] Video ${task.index + 1}: Will be scheduled on YouTube for ${publishDate.toISOString()}`);
+        console.log(
+          `[WORKER] Video ${task.index + 1}: Will be scheduled on YouTube for ${publishDate.toISOString()}`,
+        );
         taskItem.privacyStatus = "private"; // Required for YouTube scheduling
       }
     } else {
       // No publishAt - upload as public (or whatever privacy was specified)
       if (!taskItem.privacyStatus) taskItem.privacyStatus = "public";
     }
-    
+
     return { index: task.index, item: taskItem };
   });
-  
+
   // Create smaller batches for parallel processing (3 at a time)
   const tasks = todaysBatch;
 
@@ -620,19 +817,27 @@ async function processBulkJob(jobId: string): Promise<void> {
 
   // Track progress in memory to avoid race conditions with disk writes
   let localProgress = [...(job.progress || [])];
-  
+
   const sendProgress = (
     index: number,
     status: string,
     videoId?: string,
-    error?: string
+    error?: string,
   ) => {
     const item = job.items[index];
     const title = item?.title || `Video ${index + 1}`;
     // Include title in status for better visibility
-    const statusWithTitle = status.includes(title) ? status : `${title}: ${status}`;
-    localProgress[index] = { index, status: statusWithTitle, videoId, error, title };
-    
+    const statusWithTitle = status.includes(title)
+      ? status
+      : `${title}: ${status}`;
+    localProgress[index] = {
+      index,
+      status: statusWithTitle,
+      videoId,
+      error,
+      title,
+    };
+
     // Write immediately if this is a final status (success or failure)
     const isFinal = !!(videoId || error);
     updateBulkProgress(jobId, localProgress, isFinal);
@@ -641,28 +846,45 @@ async function processBulkJob(jobId: string): Promise<void> {
   try {
     // Validate TODAY's batch items have video sources
     const tasksWithoutSource = tasks.filter(
-      (task) => !task.item.driveFileId && !task.item.dropboxFileId && !task.item.url && !task.item.file
+      (task) =>
+        !task.item.driveFileId &&
+        !task.item.dropboxFileId &&
+        !task.item.url &&
+        !task.item.file,
     );
-    
+
     if (tasksWithoutSource.length > 0) {
-      console.warn(`[WORKER] ${tasksWithoutSource.length} item(s) in today's batch missing video source`);
-      
+      console.warn(
+        `[WORKER] ${tasksWithoutSource.length} item(s) in today's batch missing video source`,
+      );
+
       // Mark items without sources as failed, but continue with others
       tasksWithoutSource.forEach((task) => {
-        sendProgress(task.index, `Failed: Missing video source`, undefined, "No video source found");
+        sendProgress(
+          task.index,
+          `Failed: Missing video source`,
+          undefined,
+          "No video source found",
+        );
       });
-      
+
       // Remove invalid tasks from today's batch
       const validTasks = tasks.filter(
-        (task) => task.item.driveFileId || task.item.dropboxFileId || task.item.url || task.item.file
+        (task) =>
+          task.item.driveFileId ||
+          task.item.dropboxFileId ||
+          task.item.url ||
+          task.item.file,
       );
-      
+
       if (validTasks.length === 0) {
-        console.log(`[WORKER] No valid items in today's batch for job ${jobId}`);
+        console.log(
+          `[WORKER] No valid items in today's batch for job ${jobId}`,
+        );
         // Don't fail the whole job - there might be valid items in future batches
         return;
       }
-      
+
       // Update batches with valid tasks only
       batches.length = 0;
       for (let i = 0; i < validTasks.length; i += BATCH_SIZE) {
@@ -674,34 +896,50 @@ async function processBulkJob(jobId: string): Promise<void> {
     for (let i = 0; i < batches.length; i++) {
       const batch = batches[i];
       console.log(
-        `[WORKER] Uploading batch ${i + 1}/${batches.length} (${batch.length} videos)`
+        `[WORKER] Uploading batch ${i + 1}/${batches.length} (${batch.length} videos)`,
       );
-      await processBatch(youtube, batch, sendProgress, oAuthClient, dropboxToken, job.sessionId, session.dropboxRefreshToken);
+      await processBatch(
+        youtube,
+        batch,
+        sendProgress,
+        oAuthClient,
+        dropboxToken,
+        job.sessionId,
+        session.dropboxRefreshToken,
+      );
     }
 
     // Check progress after today's batch (use in-memory progress for accuracy)
     const totalItems = job.items.length;
     const successfulItems = localProgress.filter(
-      (p) => p && p.videoId && !p.error
+      (p) => p && p.videoId && !p.error,
     ).length;
     const failedItems = localProgress.filter((p) => p && p.error).length;
     const totalProcessed = successfulItems + failedItems;
-    
-    console.log(`[WORKER] Job ${jobId} today's summary: ${tasks.length} attempted, total progress: ${successfulItems}/${totalItems} succeeded, ${failedItems} failed`);
-    
+
+    console.log(
+      `[WORKER] Job ${jobId} today's summary: ${tasks.length} attempted, total progress: ${successfulItems}/${totalItems} succeeded, ${failedItems} failed`,
+    );
+
     // Check if ALL videos are done (either succeeded or failed)
     if (totalProcessed >= totalItems) {
       markBulkAsCompleted(jobId);
-      console.log(`[WORKER] Job ${jobId} COMPLETED: ${successfulItems} succeeded, ${failedItems} failed`);
+      console.log(
+        `[WORKER] Job ${jobId} COMPLETED: ${successfulItems} succeeded, ${failedItems} failed`,
+      );
       return;
     }
-    
+
     // More videos to process on future days
     if (job.videosPerDay && job.videosPerDay > 0) {
       const remainingVideos = totalItems - totalProcessed;
       const remainingDays = Math.ceil(remainingVideos / job.videosPerDay);
-      console.log(`[WORKER] Job ${jobId}: ${remainingVideos} videos remaining, ~${remainingDays} more day(s) to complete`);
-      console.log(`[WORKER] Job ${jobId}: Will continue tomorrow with next batch of ${job.videosPerDay} videos`);
+      console.log(
+        `[WORKER] Job ${jobId}: ${remainingVideos} videos remaining, ~${remainingDays} more day(s) to complete`,
+      );
+      console.log(
+        `[WORKER] Job ${jobId}: Will continue tomorrow with next batch of ${job.videosPerDay} videos`,
+      );
       // Job stays in "processing" status - worker will check again later
       return;
     }
@@ -719,51 +957,90 @@ function getNextJobToProcess(): { id: string; status: string } | null {
   const queue = getBulkQueue();
   const now = new Date();
   // Use UTC for day calculations (consistent with processBulkJob)
-  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
-  
+  const today = new Date(
+    Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate(),
+      0,
+      0,
+      0,
+      0,
+    ),
+  );
+
   for (const job of queue) {
     if (job.status === "pending") {
       return { id: job.id, status: job.status };
     }
-    
+
     // Check "processing" jobs that might have more batches for today
-    if (job.status === "processing" && job.videosPerDay && job.videosPerDay > 0) {
-      const startDateRaw = job.startDate ? new Date(job.startDate) : new Date(job.createdAt);
-      const startDate = new Date(Date.UTC(startDateRaw.getUTCFullYear(), startDateRaw.getUTCMonth(), startDateRaw.getUTCDate(), 0, 0, 0, 0));
-      
-      const daysSinceStart = Math.floor((today.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
-      
+    if (
+      job.status === "processing" &&
+      job.videosPerDay &&
+      job.videosPerDay > 0
+    ) {
+      const startDateRaw = job.startDate
+        ? new Date(job.startDate)
+        : new Date(job.createdAt);
+      const startDate = new Date(
+        Date.UTC(
+          startDateRaw.getUTCFullYear(),
+          startDateRaw.getUTCMonth(),
+          startDateRaw.getUTCDate(),
+          0,
+          0,
+          0,
+          0,
+        ),
+      );
+
+      const daysSinceStart = Math.floor(
+        (today.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24),
+      );
+
       // Calculate today's batch range
       const todayStartIndex = daysSinceStart * job.videosPerDay;
-      const todayEndIndex = Math.min(todayStartIndex + job.videosPerDay, job.items.length);
-      
+      const todayEndIndex = Math.min(
+        todayStartIndex + job.videosPerDay,
+        job.items.length,
+      );
+
       // Check if there are unprocessed videos in today's batch
       const completedIndices = new Set<number>();
       const failedIndices = new Set<number>();
-      (job.progress || []).forEach(p => {
-        if (p && typeof p.index === 'number') {
-          if (p.videoId || (p.status && (p.status.includes("Uploaded") || p.status.includes("Scheduled")))) {
+      (job.progress || []).forEach((p) => {
+        if (p && typeof p.index === "number") {
+          if (
+            p.videoId ||
+            (p.status &&
+              (p.status.includes("Uploaded") || p.status.includes("Scheduled")))
+          ) {
             completedIndices.add(p.index);
           } else if (p.status && p.status.includes("Failed")) {
             failedIndices.add(p.index);
           }
         }
       });
-      
+
       let hasPendingToday = false;
-      for (let i = todayStartIndex; i < todayEndIndex && i < job.items.length; i++) {
+      for (
+        let i = todayStartIndex;
+        i < todayEndIndex && i < job.items.length;
+        i++
+      ) {
         if (!completedIndices.has(i) && !failedIndices.has(i)) {
           hasPendingToday = true;
           break;
         }
       }
-      
+
       if (hasPendingToday) {
         return { id: job.id, status: job.status };
       }
     }
   }
-  
+
   return null;
 }
 
@@ -786,7 +1063,9 @@ async function workerLoop(): Promise<void> {
 
 // Start worker
 console.log("[WORKER] Starting bulk upload worker...");
-console.log(`[WORKER] Checking for jobs every ${WORKER_INTERVAL / 1000} seconds`);
+console.log(
+  `[WORKER] Checking for jobs every ${WORKER_INTERVAL / 1000} seconds`,
+);
 workerLoop();
 
 // Handle graceful shutdown
@@ -799,4 +1078,3 @@ process.on("SIGTERM", () => {
   console.log("[WORKER] Shutting down gracefully...");
   process.exit(0);
 });
-

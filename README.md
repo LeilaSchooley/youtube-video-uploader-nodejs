@@ -14,11 +14,13 @@ This project has been migrated from Express.js + EJS to Next.js with React. The 
 ## Setup
 
 1. Install dependencies:
+
 ```bash
 npm install
 ```
 
 2. Set up environment variables in `.env`:
+
 ```
 GOOGLE_CLIENT_ID=your_client_id
 GOOGLE_CLIENT_SECRET=your_client_secret
@@ -28,6 +30,7 @@ GOOGLE_REDIRECT_URI=http://localhost:3000/api/auth/callback
 Or provide `src/creds.json` with the same structure as before.
 
 3. Run the development server:
+
 ```bash
 npm run dev
 ```
@@ -71,8 +74,11 @@ npm run dev
 - `GET /api/auth/logout` - Logout user
 - `GET /api/user` - Get authenticated user info
 - `POST /api/upload` - Upload a single video
-- `POST /api/upload-csv` - Upload videos from CSV
+- `POST /api/upload-queue` - **Primary** CSV/batch upload (streaming, queue-based; used by dashboard)
+- `POST /api/upload-csv` - Alternative CSV upload (non-streaming; for scripts or direct API use)
 - `POST /api/delete-account` - Delete account and revoke access
+
+**Other APIs (scripts / future UI):** `GET /api/list-all-files` (list uploaded files by channel), `POST /api/migrate-files` (migrate files between directories). Not used by the dashboard.
 
 ## Notes
 
@@ -84,12 +90,3 @@ npm run dev
 ## License
 
 ISC
-
-
-
-
-
-
-
-
-

@@ -85,13 +85,15 @@ export default function Header({
           </div>
         )}
         <div className="flex gap-3 flex-wrap">
-          <button
-            onClick={() => setShowDebugPanel(!showDebugPanel)}
-            className="px-4 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-xl transition-all duration-200 hover:scale-105 active:scale-95 shadow-sm hover:shadow-md"
-            title="Toggle Debug Panel"
-          >
-            🐛 Debug
-          </button>
+          {process.env.NODE_ENV === "development" && (
+            <button
+              onClick={() => setShowDebugPanel(!showDebugPanel)}
+              className="px-4 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-xl transition-all duration-200 hover:scale-105 active:scale-95 shadow-sm hover:shadow-md"
+              title="Toggle Debug Panel"
+            >
+              🐛 Debug
+            </button>
+          )}
           <button
             onClick={toggleDarkMode}
             className="px-4 py-2.5 bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 text-gray-700 dark:text-gray-300 font-medium rounded-xl transition-all duration-200 hover:scale-105 active:scale-95 shadow-sm hover:shadow-md"
@@ -113,5 +115,3 @@ export default function Header({
     </div>
   );
 }
-
-

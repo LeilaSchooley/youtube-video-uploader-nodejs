@@ -517,9 +517,8 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  // Get userId and email from session (or fetch if not stored)
+  // Ensure userId is set on session (for display/queue)
   let userId = session.userId;
-  let userEmail: string | undefined;
   if (!userId) {
     const oAuthClient = getOAuthClient();
     oAuthClient.setCredentials(session.tokens);
@@ -531,34 +530,8 @@ export async function POST(request: NextRequest) {
     userId = (userInfo.data.email || userInfo.data.id || undefined) as
       | string
       | undefined;
-    userEmail = userInfo.data.email || undefined;
     session.userId = userId;
     setSession(sessionId, session);
-  } else {
-    // userId might be email
-    userEmail = userId.includes("@") ? userId : undefined;
-    // If we have userId but no email (e.g. numeric ID), fetch email from Google for GAT check
-    if (!userEmail) {
-      try {
-        const oAuthClient = getOAuthClient();
-        oAuthClient.setCredentials(session.tokens);
-        const oauth2 = google.oauth2({
-          version: "v2",
-          auth: oAuthClient,
-        });
-        const userInfo = await oauth2.userinfo.get();
-        userEmail = userInfo.data.email || undefined;
-        if (userEmail) {
-          session.userId = userEmail;
-          setSession(sessionId, session);
-        }
-      } catch (e: any) {
-        console.warn(
-          "[UPLOAD-QUEUE] Could not fetch user email for GAT check:",
-          e?.message,
-        );
-      }
-    }
   }
 
   const formData = await request.formData();
@@ -570,18 +543,15 @@ export async function POST(request: NextRequest) {
   // Handle Dropbox CSV file
   if (csvSource === "dropbox" && dropboxCsvPath) {
     try {
-      // Get Dropbox access token - checks GAT for owner, or OAuth token
       const dropboxAccessToken = await getDropboxToken(
         session.dropboxToken,
         session.dropboxRefreshToken,
         sessionId,
-        userEmail,
       );
       if (!dropboxAccessToken) {
         return new Response(
           JSON.stringify({
-            error:
-              "Dropbox not connected. Please connect Dropbox first or set DROPBOX_GENERATED_ACCESS_TOKEN in environment variables.",
+            error: "Dropbox not connected. Please connect Dropbox first.",
           }),
           { status: 401, headers: { "Content-Type": "application/json" } },
         );
