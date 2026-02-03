@@ -3,18 +3,28 @@ import { getSession, setSession } from "@/lib/session";
 import { getOAuthClient } from "@/lib/auth";
 import { google } from "googleapis";
 import { cookies } from "next/headers";
-import { listDriveVideosRecursive, listDriveVideos, downloadDriveFile, renameDriveFile, moveDriveFile, deleteDriveFile, getDriveFileMetadata, getDriveFolderMetadata, listDriveItems } from "@/lib/drive";
+import {
+  listDriveVideosRecursive,
+  listDriveVideos,
+  downloadDriveFile,
+  renameDriveFile,
+  moveDriveFile,
+  deleteDriveFile,
+  getDriveFileMetadata,
+  getDriveFolderMetadata,
+  listDriveItems,
+} from "@/lib/drive";
 import { addToBulkQueue } from "@/lib/bulk-queue";
 import { checkDuplicatesBatch } from "@/lib/youtube-utils";
 
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
 export const maxDuration = 60;
-export const runtime = 'nodejs';
+export const runtime = "nodejs";
 
 /**
  * POST /api/upload-drive
  * Upload videos from a Google Drive folder
- * 
+ *
  * Body:
  * - driveFolderId: string (required) - Google Drive folder ID
  * - recursive: boolean (optional) - Scan subfolders (default: false)
@@ -27,20 +37,14 @@ export async function POST(request: NextRequest) {
   try {
     const cookieStore = await cookies();
     const sessionId = cookieStore.get("sessionId")?.value;
-    
+
     if (!sessionId) {
-      return NextResponse.json(
-        { error: "Not authenticated" },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
     const session = getSession(sessionId);
     if (!session || !session.authenticated || !session.tokens) {
-      return NextResponse.json(
-        { error: "Not authenticated" },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
     // Get userId from session
@@ -53,7 +57,9 @@ export async function POST(request: NextRequest) {
         auth: oAuthClient,
       });
       const userInfo = await oauth2.userinfo.get();
-      userId = (userInfo.data.email || userInfo.data.id || undefined) as string | undefined;
+      userId = (userInfo.data.email || userInfo.data.id || undefined) as
+        | string
+        | undefined;
       session.userId = userId;
       setSession(sessionId, session);
     }
@@ -71,14 +77,17 @@ export async function POST(request: NextRequest) {
     if (!driveFolderId) {
       return NextResponse.json(
         { error: "driveFolderId is required" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     if (postUploadAction === "move" && !completedFolderId) {
       return NextResponse.json(
-        { error: "completedFolderId is required when postUploadAction is 'move'" },
-        { status: 400 }
+        {
+          error:
+            "completedFolderId is required when postUploadAction is 'move'",
+        },
+        { status: 400 },
       );
     }
 
@@ -89,13 +98,18 @@ export async function POST(request: NextRequest) {
     let folderName = "My Drive";
     if (driveFolderId !== "root") {
       try {
-        const folderMetadata = await getDriveFolderMetadata(driveFolderId, oAuthClient);
+        const folderMetadata = await getDriveFolderMetadata(
+          driveFolderId,
+          oAuthClient,
+        );
         folderName = folderMetadata.name;
         console.log(`[UPLOAD-DRIVE] Scanning folder: ${folderName}`);
       } catch (error: any) {
         return NextResponse.json(
-          { error: `Failed to access Drive folder: ${error?.message || "Unknown error"}` },
-          { status: 400 }
+          {
+            error: `Failed to access Drive folder: ${error?.message || "Unknown error"}`,
+          },
+          { status: 400 },
         );
       }
     } else {
@@ -107,7 +121,7 @@ export async function POST(request: NextRequest) {
     try {
       // Handle root folder - use 'root' as the folder ID for Drive API
       const targetFolderId = driveFolderId === "root" ? "root" : driveFolderId;
-      
+
       if (recursive) {
         videos = await listDriveVideosRecursive(targetFolderId, oAuthClient);
       } else {
@@ -115,15 +129,17 @@ export async function POST(request: NextRequest) {
       }
     } catch (error: any) {
       return NextResponse.json(
-        { error: `Failed to list videos: ${error?.message || "Unknown error"}` },
-        { status: 500 }
+        {
+          error: `Failed to list videos: ${error?.message || "Unknown error"}`,
+        },
+        { status: 500 },
       );
     }
 
     if (videos.length === 0) {
       return NextResponse.json(
         { error: "No video files found in the specified Drive folder" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -146,42 +162,54 @@ export async function POST(request: NextRequest) {
             version: "v3",
             auth: oAuthClient,
           });
-          
-          const titles = queueItems.map(item => item.title || '').filter(t => t.trim());
-          console.log(`[UPLOAD-DRIVE] Checking ${titles.length} videos for duplicates on YouTube channel...`);
-          
+
+          const titles = queueItems
+            .map((item) => item.title || "")
+            .filter((t) => t.trim());
+          console.log(
+            `[UPLOAD-DRIVE] Checking ${titles.length} videos for duplicates on YouTube channel...`,
+          );
+
           const duplicates = await checkDuplicatesBatch(youtube, titles);
           duplicateCount = duplicates.size;
-          
+
           if (duplicateCount > 0) {
-            console.log(`[UPLOAD-DRIVE] Found ${duplicateCount} duplicate video(s) already on channel, filtering them out`);
-            
+            console.log(
+              `[UPLOAD-DRIVE] Found ${duplicateCount} duplicate video(s) already on channel, filtering them out`,
+            );
+
             // Filter out duplicates
-            queueItems = queueItems.filter(item => {
-              const title = item.title || '';
+            queueItems = queueItems.filter((item) => {
+              const title = item.title || "";
               const isDuplicate = duplicates.has(title.trim());
               if (isDuplicate) {
-                console.log(`[UPLOAD-DRIVE] Skipping duplicate: "${title.substring(0, 50)}..."`);
+                console.log(
+                  `[UPLOAD-DRIVE] Skipping duplicate: "${title.substring(0, 50)}..."`,
+                );
               }
               return !isDuplicate;
             });
           } else {
-            console.log(`[UPLOAD-DRIVE] No duplicates found, all ${queueItems.length} videos are new`);
+            console.log(
+              `[UPLOAD-DRIVE] No duplicates found, all ${queueItems.length} videos are new`,
+            );
           }
         } catch (error: any) {
-          console.warn(`[UPLOAD-DRIVE] Error checking for duplicates: ${error?.message || error}. Continuing without duplicate check.`);
+          console.warn(
+            `[UPLOAD-DRIVE] Error checking for duplicates: ${error?.message || error}. Continuing without duplicate check.`,
+          );
           // Continue without duplicate check if it fails
         }
       }
 
       if (queueItems.length === 0) {
         return NextResponse.json(
-          { 
-            error: `All videos were filtered out. ${duplicateCount > 0 ? `${duplicateCount} duplicate(s) already on channel. ` : ''}No new videos to upload.`,
+          {
+            error: `All videos were filtered out. ${duplicateCount > 0 ? `${duplicateCount} duplicate(s) already on channel. ` : ""}No new videos to upload.`,
             totalVideos: videos.length,
             duplicateCount,
           },
-          { status: 400 }
+          { status: 400 },
         );
       }
 
@@ -194,7 +222,7 @@ export async function POST(request: NextRequest) {
 
       return NextResponse.json({
         success: true,
-        message: `Upload queued for processing${duplicateCount > 0 ? ` (${duplicateCount} duplicate(s) skipped)` : ''}`,
+        message: `Upload queued for processing${duplicateCount > 0 ? ` (${duplicateCount} duplicate(s) skipped)` : ""}`,
         jobId,
         totalItems: queueItems.length,
         duplicateCount,
@@ -205,7 +233,7 @@ export async function POST(request: NextRequest) {
     // Otherwise, return list of videos (for future synchronous processing)
     return NextResponse.json({
       success: true,
-      videos: videos.map(v => ({
+      videos: videos.map((v) => ({
         id: v.id,
         name: v.name,
         size: v.size,
@@ -217,7 +245,7 @@ export async function POST(request: NextRequest) {
     console.error("[UPLOAD-DRIVE] Error:", error);
     return NextResponse.json(
       { error: error?.message || "Error processing Drive folder" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

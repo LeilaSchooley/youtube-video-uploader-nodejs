@@ -26,6 +26,7 @@ export interface BulkUploadItem {
     timeout?: number; // Optional timeout override
     // Common metadata
     title?: string;
+    video_name?: string; // For sheet update: match CSV row by video_name (unique)
     description?: string;
     privacyStatus?: "public" | "private" | "unlisted";
     publishDate?: string; // ISO date string
@@ -37,7 +38,17 @@ export interface BulkUploadItem {
     // YouTube settings
     madeForKids?: boolean; // Self-declared "Made for Kids" status (default: false)
   }>;
-  status: "pending" | "processing" | "completed" | "failed" | "paused" | "cancelled";
+  /** Dropbox CSV/XLSX path for metadata (used to update sheet after uploads) */
+  dropboxCsvPath?: string;
+  /** Sheet name for XLSX (used when updating sheet) */
+  dropboxSheetName?: string;
+  status:
+    | "pending"
+    | "processing"
+    | "completed"
+    | "failed"
+    | "paused"
+    | "cancelled";
   progress: Array<{
     index: number;
     status: string;
@@ -79,7 +90,7 @@ function writeBulkQueue(queue: BulkUploadItem[]): void {
     if (writeQueueTimeout) {
       clearTimeout(writeQueueTimeout);
     }
-    
+
     writeQueueTimeout = setTimeout(() => {
       try {
         fs.writeFileSync(BULK_QUEUE_FILE, JSON.stringify(queue, null, 2));
@@ -106,11 +117,14 @@ function writeBulkQueueImmediate(queue: BulkUploadItem[]): void {
 }
 
 export function addToBulkQueue(
-  item: Omit<BulkUploadItem, "id" | "status" | "progress" | "createdAt" | "updatedAt">
+  item: Omit<
+    BulkUploadItem,
+    "id" | "status" | "progress" | "createdAt" | "updatedAt"
+  >,
 ): string {
   const queue = readBulkQueue();
   const id = `bulk-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-  
+
   const queueItem: BulkUploadItem = {
     ...item,
     id,
@@ -119,7 +133,7 @@ export function addToBulkQueue(
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
-  
+
   queue.push(queueItem);
   writeBulkQueueImmediate(queue);
   return id;
@@ -131,17 +145,17 @@ export function getBulkQueue(): BulkUploadItem[] {
 
 export function getBulkQueueItem(id: string): BulkUploadItem | undefined {
   const queue = readBulkQueue();
-  return queue.find(item => item.id === id);
+  return queue.find((item) => item.id === id);
 }
 
 export function updateBulkQueueItem(
   id: string,
   updates: Partial<BulkUploadItem>,
-  immediate: boolean = false
+  immediate: boolean = false,
 ): void {
   const queue = readBulkQueue();
-  const index = queue.findIndex(item => item.id === id);
-  
+  const index = queue.findIndex((item) => item.id === id);
+
   if (index !== -1) {
     queue[index] = {
       ...queue[index],
@@ -158,7 +172,7 @@ export function updateBulkQueueItem(
 
 export function getNextPendingBulkItem(): BulkUploadItem | undefined {
   const queue = readBulkQueue();
-  return queue.find(item => item.status === "pending");
+  return queue.find((item) => item.status === "pending");
 }
 
 export function markBulkAsProcessing(id: string): void {
@@ -175,33 +189,42 @@ export function markBulkAsFailed(id: string, error: string): void {
 
 export function updateBulkProgress(
   id: string,
-  progress: Array<{ index: number; status: string; videoId?: string; error?: string }>,
-  immediate: boolean = false
+  progress: Array<{
+    index: number;
+    status: string;
+    videoId?: string;
+    error?: string;
+  }>,
+  immediate: boolean = false,
 ): void {
   updateBulkQueueItem(id, { progress }, immediate);
 }
 
-export function deleteAllBulkJobs(userId?: string, sessionId?: string): { deleted: number; errors: string[] } {
+export function deleteAllBulkJobs(
+  userId?: string,
+  sessionId?: string,
+): { deleted: number; errors: string[] } {
   const queue = readBulkQueue();
   const errors: string[] = [];
   let deleted = 0;
-  
+
   // Filter jobs belonging to user (if userId/sessionId provided)
-  const jobsToDelete = queue.filter(item => {
+  const jobsToDelete = queue.filter((item) => {
     if (userId || sessionId) {
-      const belongsToUser = (userId && item.userId === userId) || 
-                           (!item.userId && sessionId && item.sessionId === sessionId);
+      const belongsToUser =
+        (userId && item.userId === userId) ||
+        (!item.userId && sessionId && item.sessionId === sessionId);
       return belongsToUser;
     }
     return true; // Delete all if no filter
   });
-  
+
   // Remove jobs from queue
-  const updatedQueue = queue.filter(item => !jobsToDelete.includes(item));
+  const updatedQueue = queue.filter((item) => !jobsToDelete.includes(item));
   writeBulkQueueImmediate(updatedQueue);
   deleted = jobsToDelete.length;
-  
+
   console.log(`[BULK-QUEUE] Deleted ${deleted} job(s)`);
-  
+
   return { deleted, errors };
 }

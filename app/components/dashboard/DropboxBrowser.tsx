@@ -26,36 +26,41 @@ interface DropboxBrowserProps {
   fileFilter?: FileFilter; // Which file types to show/highlight
 }
 
-export default function DropboxBrowser({ 
-  onSelectFolder, 
+export default function DropboxBrowser({
+  onSelectFolder,
   onSelectFile,
-  onClose, 
+  onClose,
   mode = "folder",
-  fileFilter = "video"
+  fileFilter = "video",
 }: DropboxBrowserProps) {
   const [currentFolderPath, setCurrentFolderPath] = useState<string>("/");
   const [folders, setFolders] = useState<DropboxFolder[]>([]);
   const [files, setFiles] = useState<DropboxItem[]>([]);
-  const [currentFolder, setCurrentFolder] = useState<{ id: string; name: string } | null>(null);
+  const [currentFolder, setCurrentFolder] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [folderHistory, setFolderHistory] = useState<Array<{ id: string; name: string }>>([]);
+  const [folderHistory, setFolderHistory] = useState<
+    Array<{ id: string; name: string }>
+  >([]);
   const [selectedFile, setSelectedFile] = useState<DropboxItem | null>(null);
 
   const loadFolder = async (folderPath: string) => {
     setLoading(true);
     setError(null);
-    
+
     try {
       const url = `/api/browse-dropbox?folderPath=${encodeURIComponent(folderPath)}`;
-      
+
       const response = await fetch(url);
       const data = await response.json();
-      
+
       if (!response.ok) {
         throw new Error(data.error || "Failed to load folder");
       }
-      
+
       setFolders(data.folders || []);
       setFiles(data.files || []);
       setCurrentFolder(data.currentFolder || null);
@@ -73,9 +78,9 @@ export default function DropboxBrowser({
   }, [currentFolderPath]);
 
   const handleFolderClick = (folderPath: string) => {
-    // Add current folder to history before navigating (if not root and exists)
-    if (currentFolder && currentFolder.id && currentFolder.id !== "/") {
-      setFolderHistory(prev => [...prev, currentFolder]);
+    // Add current folder to history before navigating so Back works (including from root)
+    if (currentFolder) {
+      setFolderHistory((prev) => [...prev, currentFolder]);
     }
     setCurrentFolderPath(folderPath);
   };
@@ -102,7 +107,8 @@ export default function DropboxBrowser({
     if (!size) return "";
     if (size < 1024) return `${size} B`;
     if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-    if (size < 1024 * 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+    if (size < 1024 * 1024 * 1024)
+      return `${(size / (1024 * 1024)).toFixed(1)} MB`;
     return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
   };
 
@@ -116,15 +122,24 @@ export default function DropboxBrowser({
   };
 
   const isVideoFile = (fileName: string): boolean => {
-    const videoExtensions = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.flv', '.wmv', '.m4v'];
+    const videoExtensions = [
+      ".mp4",
+      ".mov",
+      ".avi",
+      ".mkv",
+      ".webm",
+      ".flv",
+      ".wmv",
+      ".m4v",
+    ];
     const lowerName = fileName.toLowerCase();
-    return videoExtensions.some(ext => lowerName.endsWith(ext));
+    return videoExtensions.some((ext) => lowerName.endsWith(ext));
   };
 
   const isSpreadsheetFile = (fileName: string): boolean => {
-    const spreadsheetExtensions = ['.csv', '.xlsx', '.xls'];
+    const spreadsheetExtensions = [".csv", ".xlsx", ".xls"];
     const lowerName = fileName.toLowerCase();
-    return spreadsheetExtensions.some(ext => lowerName.endsWith(ext));
+    return spreadsheetExtensions.some((ext) => lowerName.endsWith(ext));
   };
 
   const isMatchingFile = (fileName: string): boolean => {
@@ -141,9 +156,10 @@ export default function DropboxBrowser({
   };
 
   // Filter files based on mode and filter
-  const displayFiles = mode === "file" && fileFilter !== "all"
-    ? files.filter(f => isMatchingFile(f.name))
-    : files;
+  const displayFiles =
+    mode === "file" && fileFilter !== "all"
+      ? files.filter((f) => isMatchingFile(f.name))
+      : files;
 
   const handleFileClick = (file: DropboxItem) => {
     if (mode === "file") {
@@ -188,7 +204,9 @@ export default function DropboxBrowser({
           {loading && (
             <div className="flex items-center justify-center py-8">
               <div className="animate-spin text-2xl">⏳</div>
-              <span className="ml-3 text-gray-600 dark:text-gray-400">Loading...</span>
+              <span className="ml-3 text-gray-600 dark:text-gray-400">
+                Loading...
+              </span>
             </div>
           )}
 
@@ -236,20 +254,25 @@ export default function DropboxBrowser({
               {displayFiles.length > 0 && (
                 <div>
                   <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                    {fileFilter === "spreadsheet" ? "📊" : "📄"} Files ({displayFiles.length})
+                    {fileFilter === "spreadsheet" ? "📊" : "📄"} Files (
+                    {displayFiles.length})
                     {mode === "file" && fileFilter === "spreadsheet" && (
-                      <span className="font-normal text-gray-500 ml-2">(CSV, XLSX only)</span>
+                      <span className="font-normal text-gray-500 ml-2">
+                        (CSV, XLSX only)
+                      </span>
                     )}
                   </h3>
                   <div className="space-y-1">
                     {displayFiles.map((file) => {
                       const isSelected = selectedFile?.id === file.id;
                       const isMatching = isMatchingFile(file.name);
-                      
+
                       return (
                         <div
                           key={file.id}
-                          onClick={() => mode === "file" && handleFileClick(file)}
+                          onClick={() =>
+                            mode === "file" && handleFileClick(file)
+                          }
                           className={`p-2 rounded border transition-colors ${
                             mode === "file" ? "cursor-pointer" : ""
                           } ${
@@ -269,12 +292,18 @@ export default function DropboxBrowser({
                                 {file.name}
                               </p>
                               <div className="flex gap-3 text-xs text-gray-500 dark:text-gray-400">
-                                {file.size && <span>{formatSize(file.size)}</span>}
-                                {file.modifiedTime && <span>{formatDate(file.modifiedTime)}</span>}
+                                {file.size && (
+                                  <span>{formatSize(file.size)}</span>
+                                )}
+                                {file.modifiedTime && (
+                                  <span>{formatDate(file.modifiedTime)}</span>
+                                )}
                               </div>
                             </div>
                             {isSelected && (
-                              <span className="text-blue-600 dark:text-blue-400 text-sm font-medium">✓ Selected</span>
+                              <span className="text-blue-600 dark:text-blue-400 text-sm font-medium">
+                                ✓ Selected
+                              </span>
                             )}
                           </div>
                         </div>
@@ -284,16 +313,17 @@ export default function DropboxBrowser({
                 </div>
               )}
 
-              {folders.length === 0 && displayFiles.length === 0 && !loading && (
-                <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-                  <p>
-                    {mode === "file" && fileFilter === "spreadsheet" 
-                      ? "No CSV or XLSX files found in this folder"
-                      : "This folder is empty"
-                    }
-                  </p>
-                </div>
-              )}
+              {folders.length === 0 &&
+                displayFiles.length === 0 &&
+                !loading && (
+                  <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                    <p>
+                      {mode === "file" && fileFilter === "spreadsheet"
+                        ? "No CSV or XLSX files found in this folder"
+                        : "This folder is empty"}
+                    </p>
+                  </div>
+                )}
             </>
           )}
         </div>
@@ -311,7 +341,9 @@ export default function DropboxBrowser({
               </span>
             ) : (
               <span className="text-gray-400">
-                {mode === "file" ? "Click a file to select it" : "Navigate to a folder"}
+                {mode === "file"
+                  ? "Click a file to select it"
+                  : "Navigate to a folder"}
               </span>
             )}
           </div>

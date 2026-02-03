@@ -3,6 +3,9 @@
 import { FormEvent, RefObject, useState, useRef, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import DriveBrowser from "./DriveBrowser";
+
+// When true, hide Google Drive/Sheets from UI and use Dropbox as the only visible source (code remains in place).
+const HIDE_GOOGLE_DRIVE_SHEETS = true;
 import DropboxBrowser from "./DropboxBrowser";
 import SheetsBrowser from "./SheetsBrowser";
 import SheetPreview from "./SheetPreview";
@@ -123,14 +126,17 @@ export default function UploadForms({
 }: UploadFormsProps) {
   const [isHydrated, setIsHydrated] = useState(false);
   const isInitialLoadRef = useRef(true); // Track if we're still loading initial values
+  const hasRestoredRef = useRef(false); // Track if we've restored values after mount
   const [showDriveBrowser, setShowDriveBrowser] = useState(false);
   const [showDropboxBrowser, setShowDropboxBrowser] = useState(false);
   const [dropboxBrowserMode, setDropboxBrowserMode] = useState<
     "folder" | "file"
   >("folder");
   const [dropboxBrowserContext, setDropboxBrowserContext] = useState<
-    "bulk" | "sheets-folder" | "sheets-file"
+    "bulk" | "sheets-folder" | "sheets-file" | "thumbnails-folder"
   >("bulk");
+  const [dropboxThumbnailsFolderPath, setDropboxThumbnailsFolderPath] =
+    useState<string>("");
   const [showSheetsBrowser, setShowSheetsBrowser] = useState(false);
   const [selectedDropboxFile, setSelectedDropboxFile] = useState<string>(""); // For spreadsheet file from Dropbox
   const [csvSource, setCsvSource] = useState<"local" | "dropbox">("local");
@@ -159,9 +165,9 @@ export default function UploadForms({
   // Dropbox auth state - starts as null (unknown) until we check
   const [hasDropboxAuth, setHasDropboxAuth] = useState<boolean | null>(null);
   const [dropboxAuthLoading, setDropboxAuthLoading] = useState<boolean>(true);
-  // Unified upload source - Drive or Dropbox
+  // Unified upload source - Drive or Dropbox (default Dropbox when Drive/Sheets hidden)
   const [uploadSource, setUploadSource] = useState<"drive" | "dropbox">(
-    "drive",
+    HIDE_GOOGLE_DRIVE_SHEETS ? "dropbox" : "drive",
   );
   const [dropboxUploadFolderPath, setDropboxUploadFolderPath] =
     useState<string>("");
@@ -173,6 +179,7 @@ export default function UploadForms({
   >("drive");
   const [videosPerDay, setVideosPerDay] = useState<string>("");
   const [dropboxUploading, setDropboxUploading] = useState<boolean>(false);
+  const [skipDuplicateTitles, setSkipDuplicateTitles] = useState<boolean>(true);
 
   const handleDriveFolderSelect = (folderId: string, folderName: string) => {
     const input = document.getElementById("driveFolderId") as HTMLInputElement;
@@ -264,6 +271,12 @@ export default function UploadForms({
       if (savedDropboxUploadFolderPath) {
         setDropboxUploadFolderPath(savedDropboxUploadFolderPath);
       }
+      const savedDropboxThumbnailsFolderPath = localStorage.getItem(
+        "dropboxThumbnailsFolderPath",
+      );
+      if (savedDropboxThumbnailsFolderPath) {
+        setDropboxThumbnailsFolderPath(savedDropboxThumbnailsFolderPath);
+      }
 
       const savedCsvSource = localStorage.getItem("csvSource");
       if (savedCsvSource === "local" || savedCsvSource === "dropbox") {
@@ -283,17 +296,20 @@ export default function UploadForms({
         setSelectedDropboxSheetName(savedDropboxSheet);
       }
 
-      // Load unified upload source
+      // Load unified upload source (when Drive/Sheets hidden, always use dropbox)
       const savedFolderSource = localStorage.getItem("folderSource");
       const savedSheetsSource = localStorage.getItem("sheetsUploadSource");
-      if (savedFolderSource === "drive" || savedFolderSource === "dropbox") {
+      if (HIDE_GOOGLE_DRIVE_SHEETS) {
+        setUploadSource("dropbox");
+      } else if (
+        savedFolderSource === "drive" ||
+        savedFolderSource === "dropbox"
+      ) {
         setUploadSource(savedFolderSource);
       } else if (savedSheetsSource === "sheets") {
-        // Legacy: convert "sheets" to "drive"
         setUploadSource("drive");
         localStorage.setItem("folderSource", "drive");
       } else if (savedSheetsSource === "csv") {
-        // Legacy: convert "csv" to "drive" (CSV is now optional metadata)
         setUploadSource("drive");
         localStorage.setItem("folderSource", "drive");
       }
@@ -307,6 +323,13 @@ export default function UploadForms({
         if (videosPerDayInput && !videosPerDayInput.value) {
           videosPerDayInput.value = savedVideosPerDay;
         }
+      }
+
+      const savedSkipDuplicateTitles = localStorage.getItem(
+        "dropboxSkipDuplicateTitles",
+      );
+      if (savedSkipDuplicateTitles !== null) {
+        setSkipDuplicateTitles(savedSkipDuplicateTitles === "true");
       }
 
       // Mark as hydrated after loading all localStorage values
@@ -472,6 +495,180 @@ export default function UploadForms({
     }
     // Note: We don't remove from localStorage here - that's done explicitly by user via clear button
   }, [selectedDropboxCsvFile, isHydrated]); // Include isHydrated but check isInitialLoadRef
+
+  // Auto-save Dropbox thumbnails folder path when it changes (persist on tab switch)
+  useEffect(() => {
+    if (
+      !isHydrated ||
+      typeof window === "undefined" ||
+      isInitialLoadRef.current
+    )
+      return;
+    if (dropboxThumbnailsFolderPath && dropboxThumbnailsFolderPath.trim()) {
+      localStorage.setItem(
+        "dropboxThumbnailsFolderPath",
+        dropboxThumbnailsFolderPath,
+      );
+    }
+  }, [dropboxThumbnailsFolderPath, isHydrated]);
+
+  // On unmount (e.g. user switches tab), save all Dropbox form inputs to localStorage
+  // Read from DOM for the two path inputs so we capture the latest typed value even if state hasn't updated yet
+  useEffect(() => {
+    return () => {
+      try {
+        if (typeof window === "undefined") return;
+        const folderEl = document.getElementById(
+          "dropboxFolderPath",
+        ) as HTMLInputElement | null;
+        if (folderEl && folderEl.value !== undefined) {
+          const v = folderEl.value?.trim() ?? "";
+          if (v) localStorage.setItem("dropboxUploadFolderPath", v);
+          else localStorage.removeItem("dropboxUploadFolderPath");
+        } else {
+          localStorage.setItem(
+            "dropboxUploadFolderPath",
+            dropboxUploadFolderPath || "",
+          );
+        }
+        const thumbEl = document.getElementById(
+          "dropboxThumbnailsFolderPath",
+        ) as HTMLInputElement | null;
+        if (thumbEl && thumbEl.value !== undefined) {
+          const v = thumbEl.value?.trim() ?? "";
+          if (v) localStorage.setItem("dropboxThumbnailsFolderPath", v);
+          else localStorage.removeItem("dropboxThumbnailsFolderPath");
+        } else {
+          localStorage.setItem(
+            "dropboxThumbnailsFolderPath",
+            dropboxThumbnailsFolderPath || "",
+          );
+        }
+        if (selectedDropboxCsvFile)
+          localStorage.setItem(
+            "selectedDropboxCsvFile",
+            selectedDropboxCsvFile,
+          );
+        if (selectedDropboxSheetName)
+          localStorage.setItem(
+            "selectedDropboxSheetName",
+            selectedDropboxSheetName,
+          );
+        const recursiveEl = document.getElementById(
+          "dropboxRecursive",
+        ) as HTMLInputElement | null;
+        if (recursiveEl && recursiveEl.checked !== undefined)
+          localStorage.setItem(
+            "dropboxRecursive",
+            recursiveEl.checked ? "true" : "false",
+          );
+        const postActionEl = document.getElementById(
+          "dropboxPostAction",
+        ) as HTMLSelectElement | null;
+        if (postActionEl && postActionEl.value !== undefined)
+          localStorage.setItem("dropboxPostAction", postActionEl.value);
+        const privacyEl = document.getElementById(
+          "dropboxPrivacy",
+        ) as HTMLSelectElement | null;
+        if (privacyEl && privacyEl.value !== undefined)
+          localStorage.setItem("dropboxPrivacy", privacyEl.value);
+        const completedEl = document.getElementById(
+          "dropboxCompletedFolder",
+        ) as HTMLInputElement | null;
+        if (completedEl && completedEl.value !== undefined && completedEl.value)
+          localStorage.setItem("dropboxCompletedFolder", completedEl.value);
+      } catch (err) {
+        console.warn("[UploadForms] Error saving form state on unmount:", err);
+      }
+    };
+  });
+
+  // Restore all Dropbox inputs from localStorage when component mounts (after tab switch)
+  // This runs after hydration to ensure DOM is ready and state is initialized
+  useEffect(() => {
+    if (!isHydrated || typeof window === "undefined" || hasRestoredRef.current)
+      return;
+
+    const restoreValues = () => {
+      // Restore controlled inputs (state) - ensure they're set even if initial load missed them
+      const savedDropboxUploadFolderPath = localStorage.getItem(
+        "dropboxUploadFolderPath",
+      );
+      if (savedDropboxUploadFolderPath) {
+        setDropboxUploadFolderPath(savedDropboxUploadFolderPath);
+      }
+
+      const savedDropboxThumbnailsFolderPath = localStorage.getItem(
+        "dropboxThumbnailsFolderPath",
+      );
+      if (savedDropboxThumbnailsFolderPath) {
+        setDropboxThumbnailsFolderPath(savedDropboxThumbnailsFolderPath);
+      }
+
+      // Restore uncontrolled inputs (DOM) - retry until elements exist
+      const recursive = localStorage.getItem("dropboxRecursive");
+      const rEl = document.getElementById(
+        "dropboxRecursive",
+      ) as HTMLInputElement | null;
+      if (rEl && recursive !== null) {
+        rEl.checked = recursive === "true";
+      }
+
+      const postAction = localStorage.getItem("dropboxPostAction");
+      const pEl = document.getElementById(
+        "dropboxPostAction",
+      ) as HTMLSelectElement | null;
+      if (pEl && postAction) {
+        pEl.value = postAction;
+      }
+
+      const privacy = localStorage.getItem("dropboxPrivacy");
+      const prEl = document.getElementById(
+        "dropboxPrivacy",
+      ) as HTMLSelectElement | null;
+      if (prEl && privacy) {
+        prEl.value = privacy;
+      }
+
+      const completed = localStorage.getItem("dropboxCompletedFolder");
+      const cEl = document.getElementById(
+        "dropboxCompletedFolder",
+      ) as HTMLInputElement | null;
+      if (cEl && completed) {
+        cEl.value = completed;
+      }
+
+      // If elements don't exist yet, retry after a longer delay
+      if (!rEl || !pEl || !prEl) {
+        return false; // Indicate we need to retry
+      }
+      return true; // All elements found
+    };
+
+    // Try immediately, then retry with increasing delays if elements aren't ready
+    let attempts = 0;
+    const maxAttempts = 5;
+    const delays = [100, 200, 500, 1000, 2000]; // Progressive delays
+
+    const tryRestore = () => {
+      attempts++;
+      const success = restoreValues();
+      if (success) {
+        hasRestoredRef.current = true;
+      } else if (attempts < maxAttempts) {
+        setTimeout(tryRestore, delays[attempts - 1] || 2000);
+      } else {
+        hasRestoredRef.current = true; // Give up after max attempts
+      }
+    };
+
+    const t = setTimeout(tryRestore, 100);
+    return () => {
+      clearTimeout(t);
+      // Reset on unmount so we restore again when component remounts
+      hasRestoredRef.current = false;
+    };
+  }, [isHydrated]);
 
   useEffect(() => {
     if (
@@ -753,13 +950,16 @@ export default function UploadForms({
           onSelectFolder={(folderPath, folderName) => {
             // Handle folder selection based on context
             if (dropboxBrowserContext === "sheets-folder") {
-              // Update sheets Dropbox folder input
               setSelectedDropboxFolderPath(folderPath);
               if (typeof window !== "undefined") {
                 localStorage.setItem("sheetsDropboxFolderPath", folderPath);
               }
+            } else if (dropboxBrowserContext === "thumbnails-folder") {
+              setDropboxThumbnailsFolderPath(folderPath);
+              if (typeof window !== "undefined") {
+                localStorage.setItem("dropboxThumbnailsFolderPath", folderPath);
+              }
             } else {
-              // Update bulk upload input
               setDropboxUploadFolderPath(folderPath);
               if (typeof window !== "undefined") {
                 localStorage.setItem("dropboxUploadFolderPath", folderPath);
@@ -982,64 +1182,65 @@ export default function UploadForms({
           <div className="space-y-4">
             <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border border-blue-200 dark:border-blue-700 rounded-lg">
               <p className="text-sm text-blue-900 dark:text-blue-100">
-                <strong>📤 Upload Videos:</strong> Upload multiple videos from
-                Google Drive or Dropbox folders. Optionally provide Google
-                Sheets or CSV files for metadata. Videos stream directly to
-                YouTube - no disk storage needed! Uploads are processed in the
-                background.
+                <strong>📤 Upload Videos:</strong>{" "}
+                {HIDE_GOOGLE_DRIVE_SHEETS
+                  ? "Upload multiple videos from Dropbox folders. Optionally provide CSV or XLSX files for metadata. Videos stream directly to YouTube - no disk storage needed! Uploads are processed in the background."
+                  : "Upload multiple videos from Google Drive or Dropbox folders. Optionally provide Google Sheets or CSV files for metadata. Videos stream directly to YouTube - no disk storage needed! Uploads are processed in the background."}
               </p>
             </div>
 
-            {/* Unified Upload Source Selector */}
-            <div className="p-4 bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20 border border-purple-200 dark:border-purple-700 rounded-lg">
-              <label className="text-sm font-semibold text-purple-900 dark:text-purple-100 block mb-3">
-                Select Upload Source:
-              </label>
-              <div className="flex gap-4 flex-wrap">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="uploadSource"
-                    value="drive"
-                    checked={uploadSource === "drive"}
-                    onChange={(e) => {
-                      setUploadSource("drive");
-                      if (typeof window !== "undefined") {
-                        localStorage.setItem("folderSource", "drive");
-                        localStorage.removeItem("sheetsUploadSource");
-                      }
-                    }}
-                    className="w-4 h-4 text-green-600"
-                  />
-                  <span className="text-sm text-purple-800 dark:text-purple-200">
-                    📁 Google Drive
-                  </span>
+            {/* Unified Upload Source Selector (hidden when Drive/Sheets integration is hidden) */}
+            {!HIDE_GOOGLE_DRIVE_SHEETS && (
+              <div className="p-4 bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20 border border-purple-200 dark:border-purple-700 rounded-lg">
+                <label className="text-sm font-semibold text-purple-900 dark:text-purple-100 block mb-3">
+                  Select Upload Source:
                 </label>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="uploadSource"
-                    value="dropbox"
-                    checked={uploadSource === "dropbox"}
-                    onChange={(e) => {
-                      setUploadSource("dropbox");
-                      if (typeof window !== "undefined") {
-                        localStorage.setItem("folderSource", "dropbox");
-                        localStorage.removeItem("sheetsUploadSource");
-                      }
-                    }}
-                    className="w-4 h-4 text-blue-600"
-                  />
-                  <span className="text-sm text-purple-800 dark:text-purple-200">
-                    📦 Dropbox
-                  </span>
-                </label>
+                <div className="flex gap-4 flex-wrap">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="uploadSource"
+                      value="drive"
+                      checked={uploadSource === "drive"}
+                      onChange={(e) => {
+                        setUploadSource("drive");
+                        if (typeof window !== "undefined") {
+                          localStorage.setItem("folderSource", "drive");
+                          localStorage.removeItem("sheetsUploadSource");
+                        }
+                      }}
+                      className="w-4 h-4 text-green-600"
+                    />
+                    <span className="text-sm text-purple-800 dark:text-purple-200">
+                      📁 Google Drive
+                    </span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="uploadSource"
+                      value="dropbox"
+                      checked={uploadSource === "dropbox"}
+                      onChange={(e) => {
+                        setUploadSource("dropbox");
+                        if (typeof window !== "undefined") {
+                          localStorage.setItem("folderSource", "dropbox");
+                          localStorage.removeItem("sheetsUploadSource");
+                        }
+                      }}
+                      className="w-4 h-4 text-blue-600"
+                    />
+                    <span className="text-sm text-purple-800 dark:text-purple-200">
+                      📦 Dropbox
+                    </span>
+                  </label>
+                </div>
               </div>
-            </div>
+            )}
 
             <form onSubmit={handleBulkUpload} className="flex flex-col gap-5">
-              {/* Google Drive Folder Upload */}
-              {uploadSource === "drive" && (
+              {/* Google Drive Folder Upload (hidden when Drive/Sheets integration is hidden) */}
+              {!HIDE_GOOGLE_DRIVE_SHEETS && uploadSource === "drive" && (
                 <>
                   <div className="p-4 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 border border-green-200 dark:border-green-700 rounded-lg">
                     <div className="flex items-start gap-2 mb-3">
@@ -1174,11 +1375,13 @@ export default function UploadForms({
                                   });
                                   setDriveUploadFolderId("");
                                   setDriveUploadFolderName("");
-                                  (
+                                  const driveFolderInput =
                                     document.getElementById(
                                       "driveFolderId",
-                                    ) as HTMLInputElement
-                                  ).value = "";
+                                    ) as HTMLInputElement | null;
+                                  if (driveFolderInput) {
+                                    driveFolderInput.value = "";
+                                  }
                                   if (typeof window !== "undefined") {
                                     localStorage.removeItem(
                                       "driveUploadFolderId",
@@ -1441,7 +1644,7 @@ export default function UploadForms({
               )}
 
               {/* Dropbox Folder Upload */}
-              {uploadSource === "dropbox" && (
+              {(uploadSource === "dropbox" || HIDE_GOOGLE_DRIVE_SHEETS) && (
                 <>
                   <div className="p-4 bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-900/20 dark:to-cyan-900/20 border border-blue-200 dark:border-blue-700 rounded-lg">
                     <div className="flex items-start gap-2 mb-3">
@@ -1622,6 +1825,24 @@ export default function UploadForms({
                                 className="input-field text-sm font-mono"
                               />
                             </div>
+                            <label className="flex items-center gap-2 text-sm text-blue-800 dark:text-blue-200 mt-2">
+                              <input
+                                type="checkbox"
+                                checked={skipDuplicateTitles}
+                                onChange={(e) => {
+                                  const v = e.target.checked;
+                                  setSkipDuplicateTitles(v);
+                                  if (typeof window !== "undefined") {
+                                    localStorage.setItem(
+                                      "dropboxSkipDuplicateTitles",
+                                      String(v),
+                                    );
+                                  }
+                                }}
+                                className="rounded"
+                              />
+                              Skip videos already on channel (by title)
+                            </label>
                           </div>
                           <p className="text-xs text-blue-700 dark:text-blue-300 mt-2">
                             💡 Enter Dropbox folder path starting with{" "}
@@ -1638,6 +1859,103 @@ export default function UploadForms({
                             </code>
                             )
                           </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Thumbnails folder (optional) */}
+                  <div className="p-4 bg-gradient-to-r from-violet-50 to-purple-50 dark:from-violet-900/20 dark:to-purple-900/20 border border-violet-200 dark:border-violet-700 rounded-lg">
+                    <div className="flex items-start gap-2 mb-3">
+                      <span className="text-xl">🖼️</span>
+                      <div className="flex-1">
+                        <strong className="text-violet-900 dark:text-violet-100 block mb-1">
+                          Thumbnails folder (optional)
+                        </strong>
+                        <p className="text-sm text-violet-800 dark:text-violet-200 mb-3">
+                          Pick a Dropbox folder with thumbnail images (JPG, PNG,
+                          GIF, WebP). Thumbnails are matched to videos by
+                          filename without extension (e.g.{" "}
+                          <code className="bg-violet-100 dark:bg-violet-800 px-1 rounded text-xs">
+                            intro.mp4
+                          </code>{" "}
+                          →{" "}
+                          <code className="bg-violet-100 dark:bg-violet-800 px-1 rounded text-xs">
+                            intro.jpg
+                          </code>
+                          ).
+                        </p>
+                        <div
+                          className={
+                            hasDropboxAuth !== true
+                              ? "opacity-50 pointer-events-none"
+                              : ""
+                          }
+                        >
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              id="dropboxThumbnailsFolderPath"
+                              name="dropboxThumbnailsFolderPath"
+                              placeholder="/Thumbnails or leave empty"
+                              value={dropboxThumbnailsFolderPath}
+                              onChange={(e) => {
+                                setDropboxThumbnailsFolderPath(e.target.value);
+                                if (typeof window !== "undefined") {
+                                  if (e.target.value) {
+                                    localStorage.setItem(
+                                      "dropboxThumbnailsFolderPath",
+                                      e.target.value,
+                                    );
+                                  } else {
+                                    localStorage.removeItem(
+                                      "dropboxThumbnailsFolderPath",
+                                    );
+                                  }
+                                }
+                              }}
+                              className="input-field flex-1 font-mono text-sm"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDropboxBrowserMode("folder");
+                                setDropboxBrowserContext("thumbnails-folder");
+                                setShowDropboxBrowser(true);
+                              }}
+                              className="px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white font-semibold rounded-lg transition-colors"
+                              disabled={hasDropboxAuth !== true}
+                            >
+                              📂 Browse
+                            </button>
+                            {dropboxThumbnailsFolderPath && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setDropboxThumbnailsFolderPath("");
+                                  const input = document.getElementById(
+                                    "dropboxThumbnailsFolderPath",
+                                  ) as HTMLInputElement;
+                                  if (input) input.value = "";
+                                  if (typeof window !== "undefined") {
+                                    localStorage.removeItem(
+                                      "dropboxThumbnailsFolderPath",
+                                    );
+                                  }
+                                }}
+                                className="px-3 py-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                                title="Clear"
+                              >
+                                ✕
+                              </button>
+                            )}
+                          </div>
+                          {dropboxThumbnailsFolderPath && (
+                            <p className="text-xs text-violet-600 dark:text-violet-400 mt-1">
+                              ✓ Thumbnails folder:{" "}
+                              <strong>{dropboxThumbnailsFolderPath}</strong>
+                            </p>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1867,8 +2185,13 @@ export default function UploadForms({
                               videosPerDayNum && videosPerDayNum > 0
                                 ? videosPerDayNum
                                 : undefined,
-                            dropboxCsvPath: selectedDropboxCsvFile || undefined, // Include CSV file path if provided
+                            dropboxCsvPath: selectedDropboxCsvFile || undefined,
+                            dropboxSheetName:
+                              selectedDropboxSheetName || undefined,
+                            dropboxThumbnailsFolderPath:
+                              dropboxThumbnailsFolderPath || undefined,
                             useWorker: true,
+                            skipDuplicateTitles,
                           }),
                         });
                         const data = await response.json();
@@ -1880,15 +2203,20 @@ export default function UploadForms({
                           setDropboxUploadFolderPath("");
                           setSelectedDropboxCsvFile("");
                           setSelectedDropboxSheetName("");
-                          (
-                            document.getElementById(
-                              "dropboxFolderPath",
-                            ) as HTMLInputElement
-                          ).value = "";
+                          setDropboxThumbnailsFolderPath("");
+                          const dropboxFolderInput = document.getElementById(
+                            "dropboxFolderPath",
+                          ) as HTMLInputElement | null;
+                          if (dropboxFolderInput) {
+                            dropboxFolderInput.value = "";
+                          }
                           if (typeof window !== "undefined") {
                             localStorage.removeItem("dropboxUploadFolderPath");
                             localStorage.removeItem("selectedDropboxCsvFile");
                             localStorage.removeItem("selectedDropboxSheetName");
+                            localStorage.removeItem(
+                              "dropboxThumbnailsFolderPath",
+                            );
                           }
                           if (data.jobId && setSelectedJobId) {
                             setSelectedJobId(data.jobId);
@@ -2011,7 +2339,9 @@ export default function UploadForms({
                 </div>
               )}
 
-              {(uploadSource === "drive" || uploadSource === "dropbox") && (
+              {(uploadSource === "drive" ||
+                uploadSource === "dropbox" ||
+                HIDE_GOOGLE_DRIVE_SHEETS) && (
                 <button
                   type="submit"
                   disabled={

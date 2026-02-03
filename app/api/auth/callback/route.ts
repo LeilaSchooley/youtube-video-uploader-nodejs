@@ -77,7 +77,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Step 2: Get user info
+    // Step 2: Get user info (or from id_token when minimal scopes / userinfo disabled)
     let userId: string | undefined;
     try {
       const oAuthClient = getOAuthClient();
@@ -94,11 +94,29 @@ export async function GET(request: NextRequest) {
         `[AUTH CALLBACK] User info retrieved: ${userId?.substring(0, 10)}...`,
       );
     } catch (userInfoError: any) {
-      console.error(
-        "[AUTH CALLBACK] Failed to get user info:",
-        userInfoError?.message || userInfoError,
-      );
-      // Continue without userId - not critical
+      // When DISABLE_GOOGLE_SCOPES / minimal scopes, userinfo scope is not requested; use id_token sub
+      const idToken = (tokens as { id_token?: string }).id_token;
+      if (idToken) {
+        try {
+          const payload = JSON.parse(
+            Buffer.from(idToken.split(".")[1], "base64url").toString(),
+          );
+          userId = payload.sub || payload.email || undefined;
+          if (userId) {
+            console.log(
+              `[AUTH CALLBACK] User ID from id_token: ${userId.substring(0, 10)}...`,
+            );
+          }
+        } catch (_) {
+          // ignore decode errors
+        }
+      }
+      if (!userId) {
+        console.error(
+          "[AUTH CALLBACK] Failed to get user info:",
+          userInfoError?.message || userInfoError,
+        );
+      }
     }
 
     // Step 3: Create or update session

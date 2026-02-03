@@ -29,7 +29,15 @@ export async function GET(request: NextRequest) {
       auth: oAuthClient,
     });
 
-    const response = await oauth2.userinfo.get();
+    let name: string | null = null;
+    let picture: string | null = null;
+    try {
+      const response = await oauth2.userinfo.get();
+      name = response.data.name ?? null;
+      picture = response.data.picture ?? null;
+    } catch (_) {
+      // When Google scopes are minimal (DISABLE_GOOGLE_SCOPES), userinfo is not available
+    }
 
     const dropboxToken = await getDropboxToken(
       session.dropboxToken,
@@ -39,8 +47,8 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       authenticated: true,
-      name: response.data.name,
-      picture: response.data.picture,
+      name,
+      picture,
       hasDropbox: !!dropboxToken,
     });
   } catch (error: any) {

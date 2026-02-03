@@ -481,8 +481,13 @@ async function uploadVideo(
   }
 }
 
+/** Delay between starting each Dropbox-backed task to avoid rate limits (no parallel Dropbox calls). */
+const DROPBOX_TASK_STAGGER_MS = 5000;
+
 /**
- * Process a batch of uploads
+ * Process a batch of uploads.
+ * When any task uses Dropbox (video or thumbnail), process sequentially to avoid
+ * bombarding Dropbox with simultaneous requests (429). Otherwise process in parallel.
  */
 async function processBatch(
   youtube: ReturnType<typeof google.youtube>,
@@ -498,24 +503,56 @@ async function processBatch(
   sessionId?: string,
   sessionRefreshToken?: string | null,
 ): Promise<void> {
-  const results = await Promise.allSettled(
-    batch.map((task) =>
-      uploadVideo(
-        youtube,
-        task,
-        sendProgress,
-        oAuthClient,
-        dropboxToken,
-        sessionId,
-        sessionRefreshToken,
-      ),
-    ),
+  const usesDropbox = batch.some(
+    (t) => t.item.dropboxFileId || t.item.dropboxThumbnailId,
   );
 
-  const batchResults = {
-    success: 0,
-    failed: 0,
-  };
+  let results: PromiseSettledResult<{
+    success: boolean;
+    videoId?: string;
+    error?: string;
+  }>[];
+
+  if (usesDropbox) {
+    // Sequential: one video at a time to avoid Dropbox 429 (no simultaneous requests).
+    results = [];
+    for (let i = 0; i < batch.length; i++) {
+      if (i > 0) {
+        await new Promise((r) => setTimeout(r, DROPBOX_TASK_STAGGER_MS));
+      }
+      const task = batch[i];
+      try {
+        const value = await uploadVideo(
+          youtube,
+          task,
+          sendProgress,
+          oAuthClient,
+          dropboxToken,
+          sessionId,
+          sessionRefreshToken,
+        );
+        results.push({ status: "fulfilled", value });
+      } catch (reason) {
+        results.push({ status: "rejected", reason });
+      }
+    }
+  } else {
+    results = await Promise.allSettled(
+      batch.map((task) =>
+        uploadVideo(
+          youtube,
+          task,
+          sendProgress,
+          oAuthClient,
+          dropboxToken,
+          sessionId,
+          sessionRefreshToken,
+        ),
+      ),
+    );
+  }
+
+  const batchResults = { success: 0, failed: 0 };
 
   results.forEach((result, i) => {
     const task = batch[i];
@@ -538,12 +575,9 @@ async function processBatch(
       }
     } else {
       batchResults.failed++;
-      sendProgress(
-        task.index,
-        `Failed: ${result.reason?.message || "Unknown error"}`,
-        undefined,
-        result.reason?.message || "Unknown error",
-      );
+      const reason = (result as PromiseRejectedResult).reason;
+      const message = reason?.message ?? String(reason);
+      sendProgress(task.index, `Failed: ${message}`, undefined, message);
     }
   });
 

@@ -1,8 +1,9 @@
 import { google } from "googleapis";
 
 // Environment variable to disable duplicate checking
-const DISABLE_DUPLICATE_CHECK = process.env.DISABLE_DUPLICATE_CHECK === 'true' || 
-                                 process.env.DISABLE_DUPLICATE_CHECK === '1';
+const DISABLE_DUPLICATE_CHECK =
+  process.env.DISABLE_DUPLICATE_CHECK === "true" ||
+  process.env.DISABLE_DUPLICATE_CHECK === "1";
 
 // Cache for channel ID and existing video titles
 let channelIdCache: string | null = null;
@@ -16,7 +17,7 @@ const CACHE_TTL = 5 * 60 * 1000; // 5 minutes cache
  * @returns Promise<string | null> - Channel ID or null if not found
  */
 async function getChannelId(
-  youtube: ReturnType<typeof google.youtube>
+  youtube: ReturnType<typeof google.youtube>,
 ): Promise<string | null> {
   if (channelIdCache) {
     return channelIdCache;
@@ -28,7 +29,10 @@ async function getChannelId(
       mine: true,
     });
 
-    if (!channelResponse.data.items || channelResponse.data.items.length === 0) {
+    if (
+      !channelResponse.data.items ||
+      channelResponse.data.items.length === 0
+    ) {
       console.log("[YOUTUBE-UTILS] Could not get channel ID");
       return null;
     }
@@ -41,7 +45,9 @@ async function getChannelId(
 
     return null;
   } catch (error: any) {
-    console.warn(`[YOUTUBE-UTILS] Error getting channel ID: ${error?.message || error}`);
+    console.warn(
+      `[YOUTUBE-UTILS] Error getting channel ID: ${error?.message || error}`,
+    );
     return null;
   }
 }
@@ -54,7 +60,7 @@ async function getChannelId(
  */
 async function fetchAllChannelVideoTitles(
   youtube: ReturnType<typeof google.youtube>,
-  channelId: string
+  channelId: string,
 ): Promise<Set<string>> {
   const titles = new Set<string>();
   let nextPageToken: string | undefined = undefined;
@@ -88,10 +94,14 @@ async function fetchAllChannelVideoTitles(
       nextPageToken = response.data.nextPageToken || undefined;
     } while (nextPageToken);
 
-    console.log(`[YOUTUBE-UTILS] Fetched ${totalVideos} existing videos from channel (${pageCount} API requests)`);
+    console.log(
+      `[YOUTUBE-UTILS] Fetched ${totalVideos} existing videos from channel (${pageCount} API requests)`,
+    );
     return titles;
   } catch (error: any) {
-    console.warn(`[YOUTUBE-UTILS] Error fetching channel videos: ${error?.message || error}`);
+    console.warn(
+      `[YOUTUBE-UTILS] Error fetching channel videos: ${error?.message || error}`,
+    );
     return titles; // Return whatever we got so far
   }
 }
@@ -104,13 +114,13 @@ async function fetchAllChannelVideoTitles(
  */
 export async function videoAlreadyExists(
   youtube: ReturnType<typeof google.youtube>,
-  title: string
+  title: string,
 ): Promise<boolean> {
   // Check if duplicate checking is disabled via environment variable
   if (DISABLE_DUPLICATE_CHECK) {
     return false; // Return false (no duplicate found) if disabled
   }
-  
+
   try {
     const channelId = await getChannelId(youtube);
     if (!channelId) {
@@ -122,7 +132,9 @@ export async function videoAlreadyExists(
     return duplicates.has(title.toLowerCase().trim());
   } catch (error: any) {
     // If duplicate check fails, log but don't block upload
-    console.warn(`[YOUTUBE-UTILS] Error checking for duplicate video: ${error?.message || error}`);
+    console.warn(
+      `[YOUTUBE-UTILS] Error checking for duplicate video: ${error?.message || error}`,
+    );
     return false;
   }
 }
@@ -136,32 +148,43 @@ export async function videoAlreadyExists(
  */
 export async function checkDuplicatesBatch(
   youtube: ReturnType<typeof google.youtube>,
-  titles: string[]
+  titles: string[],
 ): Promise<Set<string>> {
   const duplicates = new Set<string>();
-  
+
   // Check if duplicate checking is disabled via environment variable
   if (DISABLE_DUPLICATE_CHECK) {
-    console.log(`[YOUTUBE-UTILS] Duplicate check is disabled via DISABLE_DUPLICATE_CHECK environment variable`);
+    console.log(
+      `[YOUTUBE-UTILS] Duplicate check is disabled via DISABLE_DUPLICATE_CHECK environment variable`,
+    );
     return duplicates; // Return empty set (no duplicates found)
   }
-  
+
   try {
     // Get channel ID (cached)
     const channelId = await getChannelId(youtube);
     if (!channelId) {
-      console.log("[YOUTUBE-UTILS] Could not get channel ID, skipping duplicate check");
+      console.log(
+        "[YOUTUBE-UTILS] Could not get channel ID, skipping duplicate check",
+      );
       return duplicates;
     }
 
     // Check if cache is still valid (5 minutes)
     const now = Date.now();
-    if (existingTitlesCache && (now - cacheTimestamp) < CACHE_TTL) {
-      console.log(`[YOUTUBE-UTILS] Using cached channel videos (${existingTitlesCache.size} videos)`);
+    if (existingTitlesCache && now - cacheTimestamp < CACHE_TTL) {
+      console.log(
+        `[YOUTUBE-UTILS] Using cached channel videos (${existingTitlesCache.size} videos)`,
+      );
     } else {
       // Fetch all videos from channel
-      console.log(`[YOUTUBE-UTILS] Fetching all videos from channel for duplicate check...`);
-      existingTitlesCache = await fetchAllChannelVideoTitles(youtube, channelId);
+      console.log(
+        `[YOUTUBE-UTILS] Fetching all videos from channel for duplicate check...`,
+      );
+      existingTitlesCache = await fetchAllChannelVideoTitles(
+        youtube,
+        channelId,
+      );
       cacheTimestamp = now;
     }
 
@@ -176,15 +199,21 @@ export async function checkDuplicatesBatch(
     }
 
     if (duplicates.size > 0) {
-      console.log(`[YOUTUBE-UTILS] Found ${duplicates.size} duplicate(s) out of ${titles.length} checked`);
+      console.log(
+        `[YOUTUBE-UTILS] Found ${duplicates.size} duplicate(s) out of ${titles.length} checked`,
+      );
     } else {
-      console.log(`[YOUTUBE-UTILS] No duplicates found among ${titles.length} videos`);
+      console.log(
+        `[YOUTUBE-UTILS] No duplicates found among ${titles.length} videos`,
+      );
     }
 
     return duplicates;
   } catch (error: any) {
     // If duplicate check fails, log but don't block upload
-    console.warn(`[YOUTUBE-UTILS] Error checking for duplicates: ${error?.message || error}`);
+    console.warn(
+      `[YOUTUBE-UTILS] Error checking for duplicates: ${error?.message || error}`,
+    );
     return duplicates; // Return empty set so upload continues
   }
 }

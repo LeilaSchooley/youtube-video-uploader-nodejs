@@ -40,9 +40,22 @@ if (!CLIENT_ID || !CLIENT_SECRET || !REDIRECT_URL) {
   );
 }
 
-const scopes =
+// When true, request only YouTube + openid (no userinfo.profile/email). User ID comes from id_token sub.
+const DISABLE_GOOGLE_EXTRA_SCOPES =
+  process.env.DISABLE_GOOGLE_SCOPES === "true" ||
+  process.env.GOOGLE_MINIMAL_SCOPES === "true";
+
+const GOOGLE_SCOPES_FULL =
   "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email";
-// "https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets.readonly"; // Disabled: Drive and Sheets
+
+const GOOGLE_SCOPES_MINIMAL =
+  "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/openid";
+
+const scopes = process.env.GOOGLE_SCOPES
+  ? process.env.GOOGLE_SCOPES
+  : DISABLE_GOOGLE_EXTRA_SCOPES
+    ? GOOGLE_SCOPES_MINIMAL
+    : GOOGLE_SCOPES_FULL;
 
 export function getOAuthClient(): OAuth2Client {
   if (!CLIENT_ID || !CLIENT_SECRET || !REDIRECT_URL) {

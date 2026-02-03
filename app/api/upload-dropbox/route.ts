@@ -7,6 +7,7 @@ import {
   listDropboxVideosRecursive,
   listDropboxVideos,
   downloadDropboxFile,
+  listDropboxItems,
 } from "@/lib/dropbox";
 import { addToBulkQueue } from "@/lib/bulk-queue";
 import { Readable } from "stream";
@@ -33,7 +34,9 @@ export const runtime = "nodejs";
  * - videosPerDay: number (optional) - Number of videos to upload per day for scheduling
  * - dropboxCsvPath: string (optional) - Path to CSV/XLSX file in Dropbox for metadata matching
  * - dropboxSheetName: string (optional) - Sheet name for XLSX (default: first sheet)
+ * - dropboxThumbnailsFolderPath: string (optional) - Folder with thumbnail images; matched by filename without extension
  * - useWorker: boolean (optional, default: true)
+ * - skipDuplicateTitles: boolean (optional, default: true) - If true, filter out rows whose title already exists on YouTube channel before scheduling
  */
 export async function POST(request: NextRequest) {
   try {
@@ -87,6 +90,8 @@ export async function POST(request: NextRequest) {
       useWorker = true,
       dropboxCsvPath, // Optional CSV file path from Dropbox for metadata
       dropboxSheetName, // Optional sheet name for XLSX
+      dropboxThumbnailsFolderPath, // Optional folder with thumbnail images
+      skipDuplicateTitles = true, // If true, filter out rows whose title already exists on channel
     } = body;
 
     if (!dropboxFolderPath) {
@@ -189,8 +194,7 @@ export async function POST(request: NextRequest) {
           // Parse XLSX/XLS file
           const workbook = XLSX.read(fileBuffer, { type: "buffer" });
           const sheetNameToUse =
-            dropboxSheetName &&
-            workbook.SheetNames.includes(dropboxSheetName)
+            dropboxSheetName && workbook.SheetNames.includes(dropboxSheetName)
               ? dropboxSheetName
               : workbook.SheetNames[0];
           const worksheet = workbook.Sheets[sheetNameToUse];
@@ -274,6 +278,44 @@ export async function POST(request: NextRequest) {
       return undefined;
     };
 
+    // Build thumbnails map from optional thumbnails folder (name without ext -> Dropbox path)
+    let thumbnailsMap = new Map<string, string>();
+    if (dropboxThumbnailsFolderPath && dropboxThumbnailsFolderPath.trim()) {
+      const normalizedThumbPath = dropboxThumbnailsFolderPath.startsWith("/")
+        ? dropboxThumbnailsFolderPath.trim()
+        : `/${dropboxThumbnailsFolderPath.trim()}`;
+      try {
+        const thumbItems = await listDropboxItems(
+          normalizedThumbPath,
+          dropboxToken,
+          sessionId,
+          session.dropboxRefreshToken,
+        );
+        const imageExts = [".jpg", ".jpeg", ".png", ".gif", ".webp"];
+        for (const item of thumbItems) {
+          if (item.type === "file" && item.name) {
+            const ext = item.name
+              .toLowerCase()
+              .slice(item.name.lastIndexOf("."));
+            if (imageExts.includes(ext)) {
+              const nameWoExt = item.name
+                .toLowerCase()
+                .replace(/\.[^/.]+$/, "");
+              thumbnailsMap.set(nameWoExt, item.id);
+            }
+          }
+        }
+        const sampleKeys = Array.from(thumbnailsMap.keys()).slice(0, 10);
+        console.log(
+          `[UPLOAD-DROPBOX] Thumbnails folder "${normalizedThumbPath}": ${thumbnailsMap.size} image(s) found. Sample keys (name without ext): ${sampleKeys.join(", ") || "(none)"}${thumbnailsMap.size > 10 ? " ..." : ""}`,
+        );
+      } catch (thumbErr: any) {
+        console.warn(
+          `[UPLOAD-DROPBOX] Thumbnails folder list failed: ${thumbErr?.message}. Continuing without thumbnails.`,
+        );
+      }
+    }
+
     // If useWorker, queue for background processing
     if (useWorker) {
       let matchedCount = 0;
@@ -292,7 +334,6 @@ export async function POST(request: NextRequest) {
 
         if (csvMetadata) {
           matchedCount++;
-          // Use CSV metadata
           // Map publishAt/scheduleTime to publishDate (expected by worker)
           const publishDate =
             csvMetadata?.publishAt ||
@@ -301,9 +342,47 @@ export async function POST(request: NextRequest) {
             csvMetadata?.scheduletime ||
             undefined;
 
+          // Resolve thumbnail: CSV thumbnail_path (full path) > CSV thumbnail_name/path matched in thumbnails folder > video name matched in thumbnails folder
+          let dropboxThumbnailId: string | undefined;
+          let thumbnailSource: string = "";
+          const csvThumbPath = (csvMetadata?.thumbnail_path ?? "")
+            .toString()
+            .trim();
+          const csvThumbName = (csvMetadata?.thumbnail_name ?? "")
+            .toString()
+            .trim();
+          if (csvThumbPath.startsWith("/")) {
+            dropboxThumbnailId = csvThumbPath;
+            thumbnailSource = "csv_full_path";
+          } else if (csvThumbName || csvThumbPath) {
+            const thumbFilename =
+              csvThumbName || csvThumbPath.split(/[/\\]/).pop() || "";
+            const thumbNameWoExt = thumbFilename
+              .toLowerCase()
+              .replace(/\.[^/.]+$/, "");
+            dropboxThumbnailId =
+              thumbnailsMap.get(thumbNameWoExt) ||
+              thumbnailsMap.get(nameWithoutExt) ||
+              undefined;
+            thumbnailSource = dropboxThumbnailId
+              ? thumbnailsMap.has(thumbNameWoExt)
+                ? "csv_name_match"
+                : "video_name_fallback"
+              : "";
+          } else {
+            dropboxThumbnailId = thumbnailsMap.get(nameWithoutExt) || undefined;
+            thumbnailSource = dropboxThumbnailId ? "video_name_match" : "";
+          }
+          if (dropboxThumbnailId) {
+            console.log(
+              `[UPLOAD-DROPBOX] Thumbnail match: "${video.name}" -> ${dropboxThumbnailId} (source: ${thumbnailSource})`,
+            );
+          }
+
           return {
             title:
               csvMetadata?.youtube_title || video.name.replace(/\.[^/.]+$/, ""),
+            video_name: video.name, // For sheet update: match CSV row by video_name (unique)
             description:
               csvMetadata?.youtube_description ||
               `Uploaded from Dropbox: ${video.name}`,
@@ -322,6 +401,7 @@ export async function POST(request: NextRequest) {
               undefined,
             publishDate: publishDate, // Worker expects publishDate, not scheduleTime
             thumbnailUrl: csvMetadata?.thumbnail_url || undefined,
+            dropboxThumbnailId,
             urlAuthHeaders: csvMetadata?.url_auth_headers || undefined,
             urlTimeout: csvMetadata?.url_timeout || undefined,
             madeForKids:
@@ -340,11 +420,20 @@ export async function POST(request: NextRequest) {
           }
 
           // No CSV provided - upload with defaults (still upload the video)
+          const dropboxThumbnailIdNoCsv =
+            thumbnailsMap.get(nameWithoutExt) || undefined;
+          if (dropboxThumbnailIdNoCsv) {
+            console.log(
+              `[UPLOAD-DROPBOX] Thumbnail match: "${video.name}" -> ${dropboxThumbnailIdNoCsv} (source: video_name_match)`,
+            );
+          }
           return {
             title: video.name.replace(/\.[^/.]+$/, ""),
+            video_name: video.name,
             description: `Uploaded from Dropbox: ${video.name}`,
             privacyStatus: privacyStatus as "public" | "private" | "unlisted",
             dropboxFileId: video.pathLower || video.id,
+            dropboxThumbnailId: dropboxThumbnailIdNoCsv,
             postUploadAction:
               postUploadAction !== "none" ? postUploadAction : undefined,
             completedFolderId: completedFolderPath || undefined,
@@ -356,6 +445,15 @@ export async function POST(request: NextRequest) {
       let queueItems = allQueueItems.filter(
         (item): item is NonNullable<typeof item> => item !== null,
       );
+
+      const thumbnailMatchCount = queueItems.filter(
+        (item) => (item as { dropboxThumbnailId?: string }).dropboxThumbnailId,
+      ).length;
+      if (thumbnailsMap.size > 0) {
+        console.log(
+          `[UPLOAD-DROPBOX] Thumbnail summary: ${thumbnailMatchCount}/${queueItems.length} videos have a matched thumbnail from folder (${thumbnailsMap.size} image(s) in thumbnails folder)`,
+        );
+      }
 
       const filteredCount = allQueueItems.length - queueItems.length;
 
@@ -399,9 +497,9 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // Check for duplicates on YouTube channel before queuing
+      // Check for duplicates on YouTube channel before queuing (only when option enabled)
       let duplicateCount = 0;
-      if (queueItems.length > 0) {
+      if (skipDuplicateTitles && queueItems.length > 0) {
         try {
           const oAuthClient = getOAuthClient();
           oAuthClient.setCredentials(session.tokens);
@@ -447,6 +545,10 @@ export async function POST(request: NextRequest) {
           );
           // Continue without duplicate check if it fails
         }
+      } else if (!skipDuplicateTitles && queueItems.length > 0) {
+        console.log(
+          `[UPLOAD-DROPBOX] Skip-duplicate-titles is off, not checking channel for existing titles`,
+        );
       }
 
       if (queueItems.length === 0) {
@@ -472,6 +574,12 @@ export async function POST(request: NextRequest) {
           videosPerDay && videosPerDay > 0
             ? new Date().toISOString()
             : undefined, // Start from today if scheduling
+        ...(dropboxCsvPath && {
+          dropboxCsvPath: dropboxCsvPath.startsWith("/")
+            ? dropboxCsvPath
+            : `/${dropboxCsvPath}`,
+          dropboxSheetName: dropboxSheetName || undefined,
+        }),
       });
 
       const warnings: string[] = [];

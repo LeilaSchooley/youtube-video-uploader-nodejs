@@ -1000,24 +1000,73 @@ export default function QueueManagement({
                     });
                   }
                   if (remainingRows.length === 0) return null;
+                  const handleDownloadPending = async () => {
+                    try {
+                      const res = await fetch(
+                        `/api/export-pending?jobId=${selectedJobId}`,
+                        { credentials: "include" },
+                      );
+                      if (!res.ok) {
+                        const data = await res.json().catch(() => ({}));
+                        setShowToast({
+                          message:
+                            data.error || "Failed to download pending sheet",
+                          type: "error",
+                        });
+                        return;
+                      }
+                      const blob = await res.blob();
+                      const disp = res.headers.get("Content-Disposition");
+                      const match = disp && disp.match(/filename="?([^";]+)"?/);
+                      const name =
+                        match?.[1]?.trim() ||
+                        `pending-videos-${selectedJobId}.csv`;
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url;
+                      a.download = name;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                      setShowToast({
+                        message: "Pending sheet downloaded",
+                        type: "success",
+                      });
+                    } catch (e) {
+                      setShowToast({
+                        message:
+                          e instanceof Error ? e.message : "Download failed",
+                        type: "error",
+                      });
+                    }
+                  };
                   return (
                     <div className="mb-6">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setIsRemainingSheetCollapsed(
-                            !isRemainingSheetCollapsed,
-                          )
-                        }
-                        className="flex items-center gap-2 w-full text-left mb-2 hover:opacity-80 transition-opacity"
-                      >
-                        <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300">
-                          📋 Remaining videos to upload ({remainingRows.length})
-                        </h4>
-                        <span className="text-gray-500 dark:text-gray-400 text-xs">
-                          {isRemainingSheetCollapsed ? "▶" : "▼"}
-                        </span>
-                      </button>
+                      <div className="flex items-center gap-2 mb-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setIsRemainingSheetCollapsed(
+                              !isRemainingSheetCollapsed,
+                            )
+                          }
+                          className="flex items-center gap-2 flex-1 text-left hover:opacity-80 transition-opacity"
+                        >
+                          <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                            📋 Remaining videos to upload (
+                            {remainingRows.length})
+                          </h4>
+                          <span className="text-gray-500 dark:text-gray-400 text-xs">
+                            {isRemainingSheetCollapsed ? "▶" : "▼"}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleDownloadPending}
+                          className="px-3 py-1.5 text-sm font-medium rounded-md bg-gray-200 dark:bg-gray-600 text-gray-800 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors"
+                        >
+                          Generate (download CSV)
+                        </button>
+                      </div>
                       {!isRemainingSheetCollapsed && (
                         <div className="border border-gray-200 dark:border-gray-600 rounded-lg overflow-hidden bg-white dark:bg-gray-800 shadow-sm">
                           <div className="max-h-80 overflow-y-auto">
