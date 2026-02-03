@@ -95,7 +95,7 @@ export async function GET(request: NextRequest) {
         Object.keys(item).forEach((k) => keySet.add(k));
       }
     }
-    const restKeys = [...keySet].filter(
+    const restKeys = Array.from(keySet).filter(
       (k) => k !== "index" && !preferredKeys.includes(k),
     );
     const headers = [
@@ -104,7 +104,7 @@ export async function GET(request: NextRequest) {
       ...restKeys,
     ];
 
-    function escapeCsvValue(val: unknown): string {
+    const escapeCsvValue = (val: unknown): string => {
       const s = val == null ? "" : String(val);
       if (
         s.includes(",") ||
@@ -115,7 +115,7 @@ export async function GET(request: NextRequest) {
         return `"${s.replace(/"/g, '""')}"`;
       }
       return s;
-    }
+    };
 
     const rows: string[] = [];
     rows.push(headers.join(","));
