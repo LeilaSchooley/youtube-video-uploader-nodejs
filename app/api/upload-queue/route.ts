@@ -537,6 +537,7 @@ export async function POST(request: NextRequest) {
   const formData = await request.formData();
   let csvFile = formData.get("csvFile") as File | null;
   const dropboxCsvPath = formData.get("dropboxCsvPath") as string | null;
+  const dropboxSheetName = (formData.get("dropboxSheetName") as string) || undefined;
   const csvSource = formData.get("csvSource") as string | null;
   const batchSize = parseInt((formData.get("batchSize") as string) || "5", 10); // Default: 5 videos per batch
 
@@ -802,32 +803,60 @@ export async function POST(request: NextRequest) {
     `[UPLOAD-QUEUE] Found ${uploadedFiles.length} video(s) and ${uploadedThumbnails.length} thumbnail(s) on server, batch size: ${batchSize}`,
   );
 
-  // Parse CSV
+  // Parse CSV or XLSX
   const csvData: CSVRow[] = [];
   const bytes = await csvFile.arrayBuffer();
   const buffer = Buffer.from(bytes);
-  const csvStream = Readable.from(buffer);
+  const fileName = (csvFile.name || "").toLowerCase();
 
-  try {
-    await new Promise<void>((resolve, reject) => {
-      csvStream
-        .pipe(csvParser())
-        .on("data", (row: CSVRow) => {
-          csvData.push(row);
-        })
-        .on("end", () => {
-          console.log(`[UPLOAD-QUEUE] CSV parsed: ${csvData.length} rows`);
-          resolve();
-        })
-        .on("error", (err) => {
-          reject(new Error(`Failed to parse CSV: ${err.message}`));
-        });
-    });
-  } catch (parseError: any) {
-    return new Response(
-      JSON.stringify({ error: `CSV parsing failed: ${parseError?.message}` }),
-      { status: 400, headers: { "Content-Type": "application/json" } },
-    );
+  if (fileName.endsWith(".xlsx") || fileName.endsWith(".xls")) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const XLSX = require("xlsx") as typeof import("xlsx");
+      const workbook = XLSX.read(buffer, { type: "buffer" });
+      const sheetNameToUse =
+        dropboxSheetName && workbook.SheetNames.includes(dropboxSheetName)
+          ? dropboxSheetName
+          : workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetNameToUse];
+      const rows = XLSX.utils.sheet_to_json(worksheet);
+      rows.forEach((row: any) => csvData.push(row as CSVRow));
+      console.log(
+        `[UPLOAD-QUEUE] XLSX parsed: ${csvData.length} rows from sheet "${sheetNameToUse}"`,
+      );
+    } catch (parseError: any) {
+      return new Response(
+        JSON.stringify({
+          error: `XLSX parsing failed: ${parseError?.message}`,
+        }),
+        { status: 400, headers: { "Content-Type": "application/json" } },
+      );
+    }
+  } else {
+    const csvStream = Readable.from(buffer);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        csvStream
+          .pipe(csvParser())
+          .on("data", (row: CSVRow) => {
+            csvData.push(row);
+          })
+          .on("end", () => {
+            console.log(`[UPLOAD-QUEUE] CSV parsed: ${csvData.length} rows`);
+            resolve();
+          })
+          .on("error", (err) => {
+            reject(new Error(`Failed to parse CSV: ${err.message}`));
+          });
+      });
+    } catch (parseError: any) {
+      return new Response(
+        JSON.stringify({
+          error: `CSV parsing failed: ${parseError?.message}`,
+        }),
+        { status: 400, headers: { "Content-Type": "application/json" } },
+      );
+    }
   }
 
   if (csvData.length === 0) {

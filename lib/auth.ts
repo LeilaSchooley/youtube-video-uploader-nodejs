@@ -197,6 +197,7 @@ export async function getDropboxToken(
         `[DROPBOX] Access token missing, attempting to refresh using refresh token...`,
       );
       const { getSession, setSession } = await import("./session");
+      const { setDropboxTokensForUser } = await import("./dropbox-by-user");
       const tokenData = await refreshDropboxToken(sessionRefreshToken);
 
       // Update session with new tokens
@@ -207,6 +208,12 @@ export async function getDropboxToken(
           dropboxToken: tokenData.access_token,
           dropboxRefreshToken: tokenData.refresh_token || sessionRefreshToken,
         });
+        if (session.userId) {
+          setDropboxTokensForUser(session.userId, {
+            dropboxToken: tokenData.access_token,
+            dropboxRefreshToken: tokenData.refresh_token || sessionRefreshToken,
+          });
+        }
         console.log(`[DROPBOX] Successfully refreshed access token`);
         return tokenData.access_token;
       }
@@ -248,6 +255,7 @@ export async function refreshDropboxTokenIfNeeded(
       `[DROPBOX] Token expired (401 error), refreshing using refresh token...`,
     );
     const { getSession, setSession } = await import("./session");
+    const { setDropboxTokensForUser } = await import("./dropbox-by-user");
     const tokenData = await refreshDropboxToken(sessionRefreshToken);
 
     // Update session with new tokens
@@ -258,6 +266,12 @@ export async function refreshDropboxTokenIfNeeded(
         dropboxToken: tokenData.access_token,
         dropboxRefreshToken: tokenData.refresh_token || sessionRefreshToken,
       });
+      if (session.userId) {
+        setDropboxTokensForUser(session.userId, {
+          dropboxToken: tokenData.access_token,
+          dropboxRefreshToken: tokenData.refresh_token || sessionRefreshToken,
+        });
+      }
       console.log(`[DROPBOX] Successfully refreshed expired token`);
       return tokenData.access_token;
     }

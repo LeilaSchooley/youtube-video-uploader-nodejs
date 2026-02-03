@@ -32,6 +32,7 @@ export const runtime = "nodejs";
  * - privacyStatus: "public" | "private" | "unlisted" (optional, default: "public")
  * - videosPerDay: number (optional) - Number of videos to upload per day for scheduling
  * - dropboxCsvPath: string (optional) - Path to CSV/XLSX file in Dropbox for metadata matching
+ * - dropboxSheetName: string (optional) - Sheet name for XLSX (default: first sheet)
  * - useWorker: boolean (optional, default: true)
  */
 export async function POST(request: NextRequest) {
@@ -85,6 +86,7 @@ export async function POST(request: NextRequest) {
       videosPerDay,
       useWorker = true,
       dropboxCsvPath, // Optional CSV file path from Dropbox for metadata
+      dropboxSheetName, // Optional sheet name for XLSX
     } = body;
 
     if (!dropboxFolderPath) {
@@ -186,8 +188,12 @@ export async function POST(request: NextRequest) {
         if (fileExtension === "xlsx" || fileExtension === "xls") {
           // Parse XLSX/XLS file
           const workbook = XLSX.read(fileBuffer, { type: "buffer" });
-          const firstSheetName = workbook.SheetNames[0];
-          const worksheet = workbook.Sheets[firstSheetName];
+          const sheetNameToUse =
+            dropboxSheetName &&
+            workbook.SheetNames.includes(dropboxSheetName)
+              ? dropboxSheetName
+              : workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[sheetNameToUse];
           csvData = XLSX.utils.sheet_to_json(worksheet);
           console.log(
             `[UPLOAD-DROPBOX] Parsed ${csvData.length} rows from XLSX/XLS`,

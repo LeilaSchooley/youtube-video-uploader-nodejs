@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { NextRequest } from "next/server";
 import { exchangeDropboxCode } from "@/lib/auth";
 import { getSession, setSession, generateSessionId } from "@/lib/session";
+import { setDropboxTokensForUser } from "@/lib/dropbox-by-user";
 import { cookies } from "next/headers";
 
 export const dynamic = "force-dynamic";
@@ -17,18 +18,20 @@ export async function GET(request: NextRequest) {
     request.headers.get("host") ||
     "zondiscounts.com";
   const host = rawHost.split(",")[0].trim();
-  
+
   const rawProtocol =
     request.headers.get("x-forwarded-proto") ||
     (request.url.startsWith("https") ? "https" : "http");
   const protocol = rawProtocol.split(",")[0].trim();
-  
+
   const baseUrl = `${protocol}://${host}`;
 
   // Check for OAuth error from Dropbox
   if (error) {
     console.error(`[DROPBOX AUTH CALLBACK] Dropbox OAuth error: ${error}`);
-    return NextResponse.redirect(new URL(`/?error=dropbox_oauth_${error}`, baseUrl));
+    return NextResponse.redirect(
+      new URL(`/?error=dropbox_oauth_${error}`, baseUrl),
+    );
   }
 
   if (!code) {
@@ -36,7 +39,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL("/?error=dropbox_no_code", baseUrl));
   }
 
-  console.log(`[DROPBOX AUTH CALLBACK] Processing callback, code length: ${code.length}`);
+  console.log(
+    `[DROPBOX AUTH CALLBACK] Processing callback, code length: ${code.length}`,
+  );
 
   try {
     // Step 1: Exchange code for tokens
@@ -46,10 +51,17 @@ export async function GET(request: NextRequest) {
       const tokenData = await exchangeDropboxCode(code);
       dropboxToken = tokenData.access_token;
       dropboxRefreshToken = tokenData.refresh_token;
-      console.log(`[DROPBOX AUTH CALLBACK] Token exchange successful, has refresh_token: ${!!dropboxRefreshToken}`);
+      console.log(
+        `[DROPBOX AUTH CALLBACK] Token exchange successful, has refresh_token: ${!!dropboxRefreshToken}`,
+      );
     } catch (tokenError: any) {
-      console.error("[DROPBOX AUTH CALLBACK] Token exchange failed:", tokenError?.message || tokenError);
-      return NextResponse.redirect(new URL(`/?error=dropbox_token_exchange_failed`, baseUrl));
+      console.error(
+        "[DROPBOX AUTH CALLBACK] Token exchange failed:",
+        tokenError?.message || tokenError,
+      );
+      return NextResponse.redirect(
+        new URL(`/?error=dropbox_token_exchange_failed`, baseUrl),
+      );
     }
 
     // Step 2: Get or create session
@@ -66,10 +78,17 @@ export async function GET(request: NextRequest) {
           maxAge: 60 * 60 * 24 * 7, // 7 days
         });
       }
-      console.log(`[DROPBOX AUTH CALLBACK] Session ID: ${sessionId.substring(0, 10)}...`);
+      console.log(
+        `[DROPBOX AUTH CALLBACK] Session ID: ${sessionId.substring(0, 10)}...`,
+      );
     } catch (cookieError: any) {
-      console.error("[DROPBOX AUTH CALLBACK] Cookie error:", cookieError?.message || cookieError);
-      return NextResponse.redirect(new URL("/?error=dropbox_cookie_failed", baseUrl));
+      console.error(
+        "[DROPBOX AUTH CALLBACK] Cookie error:",
+        cookieError?.message || cookieError,
+      );
+      return NextResponse.redirect(
+        new URL("/?error=dropbox_cookie_failed", baseUrl),
+      );
     }
 
     // Step 3: Update session with Dropbox token and refresh token
@@ -81,16 +100,39 @@ export async function GET(request: NextRequest) {
         dropboxToken: dropboxToken,
         dropboxRefreshToken: dropboxRefreshToken, // Store refresh token for automatic renewal
       });
-      console.log("[DROPBOX AUTH CALLBACK] Dropbox token and refresh token saved to session");
+      // Persist by userId so Dropbox survives logout/login (same Google account)
+      if (existingSession?.userId) {
+        setDropboxTokensForUser(existingSession.userId, {
+          dropboxToken,
+          dropboxRefreshToken,
+        });
+      }
+      console.log(
+        "[DROPBOX AUTH CALLBACK] Dropbox token and refresh token saved to session",
+      );
     } catch (sessionError: any) {
-      console.error("[DROPBOX AUTH CALLBACK] Session save error:", sessionError?.message || sessionError);
-      return NextResponse.redirect(new URL("/?error=dropbox_session_failed", baseUrl));
+      console.error(
+        "[DROPBOX AUTH CALLBACK] Session save error:",
+        sessionError?.message || sessionError,
+      );
+      return NextResponse.redirect(
+        new URL("/?error=dropbox_session_failed", baseUrl),
+      );
     }
 
-    console.log("[DROPBOX AUTH CALLBACK] Dropbox authentication complete, redirecting to dashboard");
-    return NextResponse.redirect(new URL("/dashboard", baseUrl));
+    console.log(
+      "[DROPBOX AUTH CALLBACK] Dropbox authentication complete, redirecting to dashboard",
+    );
+    return NextResponse.redirect(
+      new URL("/dashboard?dropbox_connected=1", baseUrl),
+    );
   } catch (error: any) {
-    console.error("[DROPBOX AUTH CALLBACK] Unexpected error:", error?.message || error);
-    return NextResponse.redirect(new URL("/?error=dropbox_auth_failed", baseUrl));
+    console.error(
+      "[DROPBOX AUTH CALLBACK] Unexpected error:",
+      error?.message || error,
+    );
+    return NextResponse.redirect(
+      new URL("/?error=dropbox_auth_failed", baseUrl),
+    );
   }
 }
