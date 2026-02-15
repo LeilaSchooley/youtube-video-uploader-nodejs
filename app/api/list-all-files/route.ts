@@ -4,6 +4,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { cookies } from "next/headers";
+import { jsonApiError } from "@/lib/api-response";
 import { getQueue } from "@/lib/queue";
 import { getOAuthClient } from "@/lib/auth";
 import { google } from "googleapis";
@@ -83,12 +84,12 @@ export async function GET(request: NextRequest) {
     const sessionId = cookieStore.get("sessionId")?.value;
 
     if (!sessionId) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+      return jsonApiError("Not authenticated", 401, "UNAUTHORIZED");
     }
 
     const session = getSession(sessionId);
     if (!session || !session.authenticated) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+      return jsonApiError("Not authenticated", 401, "UNAUTHORIZED");
     }
 
     // Check if a specific channel is requested

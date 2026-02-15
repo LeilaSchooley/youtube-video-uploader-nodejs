@@ -3,6 +3,7 @@ import { getSession } from "@/lib/session";
 import { getDropboxToken } from "@/lib/auth";
 import { listDropboxItems } from "@/lib/dropbox";
 import { cookies } from "next/headers";
+import { jsonApiError } from "@/lib/api-response";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -20,12 +21,12 @@ export async function GET(request: NextRequest) {
     const sessionId = cookieStore.get("sessionId")?.value;
 
     if (!sessionId) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+      return jsonApiError("Not authenticated", 401, "UNAUTHORIZED");
     }
 
     const session = getSession(sessionId);
     if (!session || !session.authenticated || !session.tokens) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+      return jsonApiError("Not authenticated", 401, "UNAUTHORIZED");
     }
 
     const dropboxToken = await getDropboxToken(
@@ -34,10 +35,7 @@ export async function GET(request: NextRequest) {
       sessionId,
     );
     if (!dropboxToken) {
-      return NextResponse.json(
-        { error: "Dropbox not connected" },
-        { status: 401 },
-      );
+      return jsonApiError("Dropbox not connected", 401, "UNAUTHORIZED");
     }
 
     const { searchParams } = new URL(request.url);

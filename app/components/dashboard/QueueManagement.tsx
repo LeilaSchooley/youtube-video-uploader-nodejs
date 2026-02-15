@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import WorkerStatus from "./WorkerStatus";
+import type { BulkJob, JobStatus } from "./types";
 
 interface ProgressItem {
   index: number;
@@ -13,7 +14,7 @@ interface ProgressItem {
 }
 
 interface QueueManagementProps {
-  queue: any[];
+  queue: BulkJob[];
   searchQuery: string;
   selectedJobId: string | null;
   setSelectedJobId: (jobId: string | null) => void;
@@ -23,7 +24,7 @@ interface QueueManagementProps {
     jobId: string,
     action: "pause" | "resume" | "cancel" | "delete" | "delete-all-jobs",
   ) => Promise<void>;
-  jobStatus: any;
+  jobStatus: JobStatus;
   jobFiles: any;
   loadingFiles: boolean;
   handleDeleteFile: (
@@ -36,6 +37,14 @@ interface QueueManagementProps {
     message: string;
     type: "success" | "error" | "info";
   }) => void;
+  requestConfirm: (opts: {
+    title: string;
+    message: string;
+    confirmLabel?: string;
+    cancelLabel?: string;
+    variant?: "danger" | "default";
+  }) => Promise<boolean>;
+  onGoToUpload?: () => void;
 }
 
 export default function QueueManagement({
@@ -52,6 +61,8 @@ export default function QueueManagement({
   handleDeleteFile,
   handleDeleteAllFiles,
   setShowToast,
+  requestConfirm,
+  onGoToUpload,
 }: QueueManagementProps) {
   const [isVideoDetailsCollapsed, setIsVideoDetailsCollapsed] = useState(false);
   const [isRemainingSheetCollapsed, setIsRemainingSheetCollapsed] =
@@ -100,11 +111,14 @@ export default function QueueManagement({
         <div className="mb-4 flex justify-end">
           <button
             onClick={async () => {
-              if (
-                confirm(
-                  "⚠️ WARNING: This will delete ALL jobs (pending, processing, completed, failed, cancelled).\n\nThis action cannot be undone. Are you sure?",
-                )
-              ) {
+              const ok = await requestConfirm({
+                title: "Delete all jobs",
+                message:
+                  "This will delete ALL jobs (pending, processing, completed, failed, cancelled). This action cannot be undone. Are you sure?",
+                confirmLabel: "Delete all",
+                variant: "danger",
+              });
+              if (ok) {
                 await handleQueueAction("", "delete-all-jobs");
                 setSelectedJobId(null);
               }
@@ -114,6 +128,29 @@ export default function QueueManagement({
             <span>🗑️</span>
             <span>Delete All Jobs</span>
           </button>
+        </div>
+      )}
+
+      {/* Empty state when no jobs */}
+      {queue.length === 0 && (
+        <div className="card text-center py-12">
+          <div className="text-5xl mb-4 opacity-80">📭</div>
+          <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-2">
+            No jobs yet
+          </h2>
+          <p className="text-gray-600 dark:text-gray-400 mb-6 max-w-sm mx-auto">
+            Add your first upload from the Upload tab. Your queue and progress will appear here.
+          </p>
+          {onGoToUpload && (
+            <button
+              type="button"
+              onClick={onGoToUpload}
+              className="btn-primary inline-flex items-center gap-2"
+            >
+              <span>📤</span>
+              <span>Go to Upload</span>
+            </button>
+          )}
         </div>
       )}
 
@@ -398,7 +435,7 @@ export default function QueueManagement({
                                       jobProgress[i] &&
                                       jobProgress[i].title
                                     ) {
-                                      title = jobProgress[i].title;
+                                      title = jobProgress[i].title ?? title;
                                     }
                                     // Also check progress by index match (more reliable)
                                     if (title === `Video ${i + 1}`) {
@@ -406,7 +443,7 @@ export default function QueueManagement({
                                         (p: any) => p && p.index === i,
                                       );
                                       if (progressItem && progressItem.title) {
-                                        title = progressItem.title;
+                                        title = progressItem.title ?? title;
                                       }
                                     }
 
@@ -435,7 +472,7 @@ export default function QueueManagement({
 
                                   const nextBatchDate = new Date(startDate);
                                   const batchNumber = Math.floor(
-                                    nextBatchStartIndex / job.videosPerDay,
+                                    nextBatchStartIndex / (job.videosPerDay || 1),
                                   );
                                   nextBatchDate.setDate(
                                     startDate.getDate() + batchNumber,
@@ -537,7 +574,7 @@ export default function QueueManagement({
                                       jobProgress[i] &&
                                       jobProgress[i].title
                                     ) {
-                                      title = jobProgress[i].title;
+                                      title = jobProgress[i].title ?? title;
                                     }
                                     // Also check progress by index match (more reliable)
                                     if (title === `Video ${i + 1}`) {
@@ -545,7 +582,7 @@ export default function QueueManagement({
                                         (p: any) => p && p.index === i,
                                       );
                                       if (progressItem && progressItem.title) {
-                                        title = progressItem.title;
+                                        title = progressItem.title ?? title;
                                       }
                                     }
 
@@ -680,15 +717,15 @@ export default function QueueManagement({
                             job.status === "failed" ||
                             job.status === "cancelled") && (
                             <button
-                              onClick={(e) => {
+                              onClick={async (e) => {
                                 e.stopPropagation();
-                                if (
-                                  confirm(
-                                    `Are you sure you want to delete this ${job.status} job? This will remove it from the queue and clean up associated files.`,
-                                  )
-                                ) {
-                                  handleQueueAction(job.id, "delete");
-                                }
+                                const ok = await requestConfirm({
+                                  title: "Delete job",
+                                  message: `Are you sure you want to delete this ${job.status} job? This will remove it from the queue and clean up associated files.`,
+                                  confirmLabel: "Delete",
+                                  variant: "danger",
+                                });
+                                if (ok) handleQueueAction(job.id, "delete");
                               }}
                               className="px-3 py-1.5 bg-gray-500 hover:bg-gray-600 text-white text-xs font-semibold rounded-lg transition-colors"
                               title="Delete this job"
@@ -814,11 +851,13 @@ export default function QueueManagement({
                   </button>
                   <button
                     onClick={async () => {
-                      if (
-                        confirm(
+                      const ok = await requestConfirm({
+                        title: "Copy job",
+                        message:
                           "Copy this job? This will create a duplicate with the same settings.",
-                        )
-                      ) {
+                        confirmLabel: "Copy",
+                      });
+                      if (ok) {
                         try {
                           const res = await fetch("/api/queue-copy", {
                             method: "POST",

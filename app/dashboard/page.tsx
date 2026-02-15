@@ -20,6 +20,7 @@ import {
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Toast from "@/app/components/Toast";
+import ConfirmModal from "@/app/components/ConfirmModal";
 import Header from "@/app/components/dashboard/Header";
 import Statistics from "@/app/components/dashboard/Statistics";
 import UploadForms from "@/app/components/dashboard/UploadForms";
@@ -27,6 +28,9 @@ import QueueManagement from "@/app/components/dashboard/QueueManagement";
 import UploadSummary from "@/app/components/dashboard/UploadSummary";
 import Tabs from "@/app/components/dashboard/Tabs";
 import type { User } from "@/app/components/dashboard/types";
+import { useConfirmModal } from "@/app/dashboard/hooks/useConfirmModal";
+import { useQueue } from "@/app/dashboard/hooks/useQueue";
+import { useBulkUpload } from "@/app/dashboard/hooks/useBulkUpload";
 
 // User interface moved to types.ts
 
@@ -51,16 +55,61 @@ export default function Dashboard() {
   const [showProgress, setShowProgress] = useState<boolean>(false);
   const [videosPerDay, setVideosPerDay] = useState<string>("");
   const [enableScheduling, setEnableScheduling] = useState<boolean>(false);
-  const [queue, setQueue] = useState<any[]>([]);
-  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
-  const [jobStatus, setJobStatus] = useState<any>(null);
   const [showToast, setShowToast] = useState<{
     message: string;
     type: "success" | "error" | "info";
   } | null>(null);
-  const [searchQuery, setSearchQuery] = useState<string>("");
-  const [nextUploadTime, setNextUploadTime] = useState<Date | null>(null);
-  const [timeUntilNext, setTimeUntilNext] = useState<string>("");
+  const bulkFilesInputRef = useRef<HTMLInputElement>(null);
+
+  const { confirmModal, requestConfirm, closeConfirmModal } = useConfirmModal();
+  const queueState = useQueue({
+    setShowToast: (t) => setShowToast(t),
+    requestConfirm,
+  });
+  const {
+    queue,
+    setQueue,
+    selectedJobId,
+    setSelectedJobId,
+    jobStatus,
+    setJobStatus,
+    jobFiles,
+    loadingFiles,
+    searchQuery,
+    setSearchQuery,
+    nextUploadTime,
+    timeUntilNext,
+    fetchQueue,
+    fetchJobStatus,
+    fetchJobFiles,
+    handleQueueAction,
+    handleDeleteFile,
+    handleDeleteAllFiles,
+  } = queueState;
+  const bulkUpload = useBulkUpload({
+    setShowToast: (t) => setShowToast(t),
+    setMessage,
+    bulkFilesInputRef,
+  });
+  const {
+    selectedBulkFiles,
+    setSelectedBulkFiles,
+    bulkUrls,
+    setBulkUrls,
+    urlAuthHeaders,
+    setUrlAuthHeaders,
+    urlTimeout,
+    setUrlTimeout,
+    bulkUploading,
+    bulkUploadProgress,
+    checkDuplicatesBeforeUpload,
+    setCheckDuplicatesBeforeUpload,
+    duplicateModal,
+    setDuplicateModal,
+    doBulkSubmit,
+    handleBulkUpload,
+  } = bulkUpload;
+
   const [darkMode, setDarkMode] = useState<boolean>(false);
   const [selectedVideoFile, setSelectedVideoFile] = useState<File | null>(null);
   const [selectedCsvFile, setSelectedCsvFile] = useState<File | null>(null);
@@ -95,27 +144,10 @@ export default function Dashboard() {
   const [uploadProgressInterval, setUploadProgressInterval] =
     useState<NodeJS.Timeout | null>(null);
   const [csvValidationErrors, setCsvValidationErrors] = useState<string[]>([]);
-  const [jobFiles, setJobFiles] = useState<any>(null);
-  const [loadingFiles, setLoadingFiles] = useState<boolean>(false);
   const [showSingleUpload, setShowSingleUpload] = useState<boolean>(false); // Collapsed by default
   const [showBatchUpload, setShowBatchUpload] = useState<boolean>(true); // Expanded by default
   const [showBulkUpload, setShowBulkUpload] = useState<boolean>(false);
-  const [bulkUploading, setBulkUploading] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<string>("upload");
-  const [bulkUploadProgress, setBulkUploadProgress] = useState<{
-    total: number;
-    totalBatches: number;
-    currentBatch: number;
-    completed: number;
-    failed: number;
-    currentFile?: string;
-    message?: string;
-  } | null>(null);
-  const [selectedBulkFiles, setSelectedBulkFiles] = useState<File[]>([]);
-  const [bulkUrls, setBulkUrls] = useState<string[]>([]);
-  const [urlAuthHeaders, setUrlAuthHeaders] = useState<string>("");
-  const [urlTimeout, setUrlTimeout] = useState<string>("");
-  const bulkFilesInputRef = useRef<HTMLInputElement>(null);
   const [showBatchInstructions, setShowBatchInstructions] =
     useState<boolean>(false); // Collapsed by default
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -225,112 +257,6 @@ export default function Dashboard() {
     return () => window.removeEventListener("keydown", handleKeyPress);
   }, [selectedJobId]);
 
-  // Calculate next scheduled upload batch time (when next batch of videos will start uploading)
-  const calculateNextUploadTime = useCallback(() => {
-    const now = new Date();
-    let earliestDate: Date | null = null;
-
-    // Check all scheduled jobs
-    for (const job of queue) {
-      if (
-        job.videosPerDay &&
-        job.videosPerDay > 0 &&
-        job.status !== "failed" &&
-        job.status !== "completed" &&
-        job.status !== "cancelled"
-      ) {
-        // Use startDate from job if provided, otherwise use today
-        const startDate = job.startDate ? new Date(job.startDate) : new Date();
-        startDate.setHours(12, 0, 0, 0); // Set to noon for consistency
-
-        // Count how many videos have been completed
-        const completedCount =
-          job.progress?.filter(
-            (p: ProgressItem) =>
-              p &&
-              p.status &&
-              (p.status.includes("Uploaded") ||
-                p.status.includes("scheduled") ||
-                p.status.includes("Scheduled")),
-          ).length || 0;
-
-        const totalVideos = job.items?.length || job.totalVideos || 0;
-
-        // If there are still videos to upload
-        if (completedCount < totalVideos) {
-          // Calculate which day we're on (0-indexed)
-          // dayIndex = Math.floor(videoIndex / videosPerDay)
-          const currentDayIndex = Math.floor(completedCount / job.videosPerDay);
-
-          // Calculate when the next batch should start uploading
-          // Next batch is on startDate + (currentDayIndex + 1) days at noon
-          const nextBatchStartTime = new Date(startDate);
-          nextBatchStartTime.setDate(startDate.getDate() + currentDayIndex + 1);
-          nextBatchStartTime.setHours(12, 0, 0, 0);
-
-          // Only consider future times
-          if (nextBatchStartTime > now) {
-            if (!earliestDate || nextBatchStartTime < earliestDate) {
-              earliestDate = nextBatchStartTime;
-            }
-          } else {
-            // If the next batch time is in the past, it means we should upload now
-            // Set to now + a small buffer to show "uploading now"
-            if (!earliestDate || now < earliestDate) {
-              earliestDate = new Date(now.getTime() + 1000); // 1 second from now
-            }
-          }
-        }
-      }
-    }
-
-    setNextUploadTime(earliestDate);
-  }, [queue]);
-
-  // Update countdown timer
-  useEffect(() => {
-    const updateTimer = () => {
-      if (!nextUploadTime) {
-        setTimeUntilNext("");
-        return;
-      }
-
-      const now = new Date();
-      const diff = nextUploadTime.getTime() - now.getTime();
-
-      if (diff <= 0) {
-        setTimeUntilNext("Uploading now...");
-        return;
-      }
-
-      const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-      const hours = Math.floor(
-        (diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60),
-      );
-      const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-      const seconds = Math.floor((diff % (1000 * 60)) / 1000);
-
-      if (days > 0) {
-        setTimeUntilNext(`${days}d ${hours}h ${minutes}m`);
-      } else if (hours > 0) {
-        setTimeUntilNext(`${hours}h ${minutes}m ${seconds}s`);
-      } else if (minutes > 0) {
-        setTimeUntilNext(`${minutes}m ${seconds}s`);
-      } else {
-        setTimeUntilNext(`${seconds}s`);
-      }
-    };
-
-    updateTimer();
-    const timerInterval = setInterval(updateTimer, 1000);
-    return () => clearInterval(timerInterval);
-  }, [nextUploadTime]);
-
-  // Recalculate next upload time when queue changes
-  useEffect(() => {
-    calculateNextUploadTime();
-  }, [calculateNextUploadTime]);
-
   // Dark mode effect
   useEffect(() => {
     if (darkMode) {
@@ -387,6 +313,18 @@ export default function Dashboard() {
     localStorage.setItem("showBulkUpload", String(showBulkUpload));
   }, [showBulkUpload]);
 
+  // Load "check duplicates before upload" preference
+  useEffect(() => {
+    const saved = localStorage.getItem("checkDuplicatesBeforeUpload");
+    if (saved !== null) {
+      setCheckDuplicatesBeforeUpload(saved === "true");
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("checkDuplicatesBeforeUpload", String(checkDuplicatesBeforeUpload));
+  }, [checkDuplicatesBeforeUpload]);
+
   const toggleDarkMode = () => {
     const newMode = !darkMode;
     setDarkMode(newMode);
@@ -411,176 +349,10 @@ export default function Dashboard() {
     localStorage.setItem("showBatchInstructions", String(newState));
   };
 
-  const handleQueueAction = async (
-    jobId: string,
-    action: "pause" | "resume" | "cancel" | "delete" | "delete-all-jobs",
-  ) => {
-    try {
-      // For delete-all-jobs, don't send jobId
-      const body =
-        action === "delete-all-jobs"
-          ? JSON.stringify({ action })
-          : JSON.stringify({ jobId, action });
-
-      const res = await fetch("/api/queue-manage", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body,
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setShowToast({ message: data.message, type: "success" });
-        // Immediately refresh to show updated status
-        fetchQueue();
-        // If deleting, clear selected job if it was the deleted one
-        if (action === "delete" && selectedJobId === jobId) {
-          setSelectedJobId(null);
-          setJobStatus(null);
-        } else if (selectedJobId === jobId) {
-          fetchJobStatus(jobId);
-          // Also refresh after a short delay to catch any state changes
-          setTimeout(() => {
-            fetchQueue();
-            if (selectedJobId === jobId) {
-              fetchJobStatus(jobId);
-            }
-          }, 500);
-        }
-      } else {
-        setShowToast({
-          message: data.error || "Failed to perform action",
-          type: "error",
-        });
-      }
-    } catch (error) {
-      setShowToast({ message: "An error occurred", type: "error" });
-    }
-  };
-
-  // Adaptive polling: 1s when jobs are processing/pending, 3s when idle
-  const hasActiveJobs = queue.some(
-    (j) => j.status === "processing" || j.status === "pending",
-  );
-  const pollIntervalMs = hasActiveJobs ? 1000 : 3000;
-
   useEffect(() => {
     fetchUser();
     fetchAvailableChannels();
-    fetchQueue();
-
-    const pollInterval = setInterval(() => {
-      fetchQueue();
-      if (selectedJobId) {
-        fetchJobStatus(selectedJobId);
-      }
-    }, pollIntervalMs);
-
-    return () => clearInterval(pollInterval);
-  }, [selectedJobId, pollIntervalMs]);
-
-  // Immediate fetch when selectedJobId changes
-  useEffect(() => {
-    if (selectedJobId) {
-      fetchJobStatus(selectedJobId);
-      fetchQueue(); // Also refresh queue
-      fetchJobFiles(selectedJobId); // Fetch uploaded files
-    }
-  }, [selectedJobId]);
-
-  const fetchJobFiles = async (jobId: string) => {
-    try {
-      setLoadingFiles(true);
-      const res = await fetch(`/api/delete-videos?jobId=${jobId}`);
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setJobFiles(data);
-      }
-    } catch (error) {
-      console.error("[ERROR] Error fetching job files:", error);
-    } finally {
-      setLoadingFiles(false);
-    }
-  };
-
-  const handleDeleteFile = async (
-    jobId: string,
-    filePath: string,
-    fileName: string,
-  ) => {
-    if (
-      !confirm(
-        `Are you sure you want to delete "${fileName}"? This action cannot be undone.`,
-      )
-    ) {
-      return;
-    }
-
-    try {
-      const res = await fetch(
-        `/api/delete-videos?jobId=${jobId}&filePath=${encodeURIComponent(
-          filePath,
-        )}`,
-        {
-          method: "DELETE",
-        },
-      );
-      const data = await res.json();
-      if (res.ok) {
-        setShowToast({
-          message: data.message || "File deleted successfully",
-          type: "success",
-        });
-        fetchJobFiles(jobId); // Refresh file list
-      } else {
-        setShowToast({
-          message: data.error || "Failed to delete file",
-          type: "error",
-        });
-      }
-    } catch (error) {
-      setShowToast({
-        message: "An error occurred while deleting the file",
-        type: "error",
-      });
-    }
-  };
-
-  const handleDeleteAllFiles = async (jobId: string) => {
-    if (
-      !confirm(
-        "Are you sure you want to delete ALL uploaded files for this job? This action cannot be undone.",
-      )
-    ) {
-      return;
-    }
-
-    try {
-      const res = await fetch(
-        `/api/delete-videos?jobId=${jobId}&deleteAll=true`,
-        {
-          method: "DELETE",
-        },
-      );
-      const data = await res.json();
-      if (res.ok) {
-        setShowToast({
-          message: data.message || "All files deleted successfully",
-          type: "success",
-        });
-        fetchJobFiles(jobId); // Refresh file list
-      } else {
-        setShowToast({
-          message: data.error || "Failed to delete files",
-          type: "error",
-        });
-      }
-    } catch (error) {
-      setShowToast({
-        message: "An error occurred while deleting files",
-        type: "error",
-      });
-    }
-  };
+  }, []);
 
   const fetchAvailableChannels = async () => {
     try {
@@ -619,156 +391,6 @@ export default function Dashboard() {
       router.push("/");
     } finally {
       setLoading(false);
-    }
-  };
-
-  const fetchQueue = async () => {
-    try {
-      const timestamp = Date.now();
-      // Add cache-busting to ensure fresh data
-      const res = await fetch(`/api/upload-queue?t=${timestamp}`);
-      const data = await res.json();
-      if (res.ok && data.queue) {
-        const prevQueueLength = queue.length;
-        const prevProcessingCount = queue.filter(
-          (j) => j.status === "processing",
-        ).length;
-        setQueue(data.queue);
-
-        // Debug logging
-        const newQueueLength = data.queue.length;
-        const newProcessingCount = data.queue.filter(
-          (j: any) => j.status === "processing",
-        ).length;
-
-        // Only log when there are actual changes (not just polling)
-        if (
-          newQueueLength !== prevQueueLength ||
-          newProcessingCount !== prevProcessingCount
-        ) {
-          const logMsg = `Queue updated: ${prevQueueLength}→${newQueueLength} jobs, ${prevProcessingCount}→${newProcessingCount} processing`;
-          console.log(`[DEBUG] ${logMsg}`);
-          addDebugLog(logMsg, "info");
-        }
-
-        // Check for stuck pending jobs (only log once per job to avoid spam)
-        const pendingJobs = data.queue.filter(
-          (j: any) => j.status === "pending",
-        );
-        if (pendingJobs.length > 0) {
-          pendingJobs.forEach((job: any) => {
-            const ageSeconds =
-              (Date.now() - new Date(job.createdAt).getTime()) / 1000;
-            // Log warning if stuck for more than 15 seconds, but only every 10 seconds to avoid spam
-            // Removed worker check - no longer needed
-          });
-        }
-      }
-    } catch (error) {
-      console.error("[ERROR] Error fetching queue:", error);
-    }
-  };
-
-  const fetchJobStatus = async (jobId: string) => {
-    try {
-      const timestamp = Date.now();
-      // Determine if this is a bulk job (starts with "bulk-") or regular queue job
-      const isBulkJob = jobId.startsWith("bulk-");
-      const endpoint = isBulkJob ? "/api/bulk-status" : "/api/queue-status";
-
-      // Add cache-busting to ensure fresh data
-      const res = await fetch(`${endpoint}?jobId=${jobId}&t=${timestamp}`);
-      const data = await res.json();
-
-      if (res.ok) {
-        // Handle both bulk-status and queue-status response formats
-        const job = data.job || data; // queue-status returns {job: {...}}, bulk-status returns {...}
-        const jobData = job || data;
-
-        if (jobData) {
-          const prevStatus = jobStatus?.status;
-          const prevProgressCount = jobStatus?.progress?.length || 0;
-          const prevCompletedCount =
-            jobStatus?.progress?.filter(
-              (p: ProgressItem) =>
-                p &&
-                p.status &&
-                (p.status.includes("Uploaded") ||
-                  p.status.includes("Scheduled")),
-            ).length || 0;
-
-          // Normalize bulk job data to match queue job format
-          const normalizedJob = isBulkJob
-            ? {
-                id: jobData.jobId || jobData.id,
-                status: jobData.status,
-                progress: jobData.progress || [],
-                totalVideos:
-                  jobData.totalItems || jobData.progress?.length || 0,
-                items: jobData.items || [], // Include items for title display
-                videosPerDay: jobData.videosPerDay,
-                startDate: jobData.startDate,
-                createdAt: jobData.createdAt,
-                updatedAt: jobData.updatedAt,
-                error: jobData.error,
-              }
-            : jobData;
-
-          setJobStatus(normalizedJob);
-
-          // Debug logging for progress changes
-          const newProgressCount = normalizedJob.progress?.length || 0;
-          const newCompletedCount =
-            normalizedJob.progress?.filter(
-              (p: ProgressItem) =>
-                p &&
-                p.status &&
-                (p.status.includes("Uploaded") ||
-                  p.status.includes("Scheduled") ||
-                  p.status.includes("scheduled")),
-            ).length || 0;
-
-          // Only log meaningful changes
-          if (
-            normalizedJob.status !== prevStatus ||
-            newProgressCount !== prevProgressCount ||
-            newCompletedCount !== prevCompletedCount
-          ) {
-            const statusChange =
-              prevStatus && prevStatus !== normalizedJob.status
-                ? `Status: ${prevStatus}→${normalizedJob.status}`
-                : "";
-            const progressChange =
-              newCompletedCount !== prevCompletedCount
-                ? `Completed: ${prevCompletedCount}→${newCompletedCount}`
-                : "";
-            const logMsg = `Job ${jobId.substring(
-              0,
-              20,
-            )}... ${statusChange} ${progressChange}`.trim();
-            if (logMsg.length > 20) {
-              // Only log if there's actual content
-              console.log(`[DEBUG] ${logMsg}`);
-              addDebugLog(
-                logMsg,
-                newCompletedCount > prevCompletedCount
-                  ? "success"
-                  : normalizedJob.status === "processing"
-                    ? "info"
-                    : "info",
-              );
-            }
-          }
-        }
-      } else {
-        // If job not found, clear the status
-        if (res.status === 404) {
-          console.log(`[DEBUG] Job ${jobId} not found, clearing status`);
-          setJobStatus(null);
-        }
-      }
-    } catch (error) {
-      console.error("[ERROR] Error fetching job status:", error);
     }
   };
 
@@ -830,223 +452,6 @@ export default function Dashboard() {
         fileInputRef.current.value = "";
         setSelectedVideoFile(null);
       }
-    }
-  };
-
-  const handleBulkUpload = async (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setBulkUploading(true);
-    setBulkUploadProgress(null);
-    setMessage({ type: null, text: null });
-
-    if (selectedBulkFiles.length === 0 && bulkUrls.length === 0) {
-      setShowToast({
-        message: "Please select video files or enter URLs to upload.",
-        type: "error",
-      });
-      setBulkUploading(false);
-      return;
-    }
-
-    const formData = new FormData();
-
-    // Add files
-    selectedBulkFiles.forEach((file) => {
-      formData.append("files", file);
-    });
-
-    // Add URLs
-    bulkUrls.forEach((url) => {
-      if (url.trim()) {
-        formData.append("urls", url.trim());
-      }
-    });
-
-    // Add auth headers if provided
-    if (urlAuthHeaders.trim()) {
-      formData.append("urlAuthHeaders", urlAuthHeaders.trim());
-    }
-
-    // Add timeout if provided
-    if (urlTimeout.trim()) {
-      formData.append("urlTimeout", urlTimeout.trim());
-    }
-
-    // Use worker by default
-    formData.append("useWorker", "true");
-
-    try {
-      const res = await fetch("/api/upload-bulk", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!res.ok) {
-        const errorData = await res
-          .json()
-          .catch(() => ({ error: "Bulk upload failed" }));
-        throw new Error(errorData.error || "Bulk upload failed");
-      }
-
-      // Check if job was queued (202 status)
-      if (res.status === 202) {
-        const data = await res.json();
-        setShowToast({
-          message: `✅ Upload queued! Job ID: ${data.jobId}. Processing ${data.totalItems} items in background.`,
-          type: "success",
-        });
-        setMessage({
-          type: "success",
-          text: `Upload queued: ${data.totalItems} items. Check status below.`,
-        });
-        setBulkUploading(false);
-        // Reset form
-        setSelectedBulkFiles([]);
-        setBulkUrls([]);
-        setUrlAuthHeaders("");
-        setUrlTimeout("");
-        if (bulkFilesInputRef.current) {
-          bulkFilesInputRef.current.value = "";
-        }
-        return;
-      }
-
-      if (!res.body) {
-        throw new Error("No response body for bulk upload");
-      }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      let totalCompleted = 0;
-      let totalFailed = 0;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            try {
-              const data = JSON.parse(line.slice(6));
-
-              switch (data.type) {
-                case "start":
-                  setBulkUploadProgress({
-                    total: data.total,
-                    totalBatches: data.totalBatches,
-                    currentBatch: 0,
-                    completed: 0,
-                    failed: 0,
-                    message: `Starting bulk upload: ${data.total} videos in ${data.totalBatches} batches`,
-                  });
-                  break;
-
-                case "batch_start":
-                  setBulkUploadProgress((prev) => ({
-                    ...prev!,
-                    currentBatch: data.batchNumber,
-                    totalBatches: data.totalBatches,
-                    message: `Processing batch ${data.batchNumber}/${data.totalBatches}`,
-                  }));
-                  break;
-
-                case "upload_start":
-                  setBulkUploadProgress((prev) => ({
-                    ...prev!,
-                    currentFile: data.filename,
-                    message: `Uploading: ${data.filename}`,
-                  }));
-                  break;
-
-                case "upload_success":
-                  totalCompleted++;
-                  setBulkUploadProgress((prev) => ({
-                    ...prev!,
-                    completed: totalCompleted,
-                    message: `✅ ${data.filename} uploaded (${totalCompleted}/${prev!.total})`,
-                  }));
-                  break;
-
-                case "upload_failed":
-                  totalFailed++;
-                  setBulkUploadProgress((prev) => ({
-                    ...prev!,
-                    failed: totalFailed,
-                    message: `❌ ${data.filename} failed: ${data.error}`,
-                  }));
-                  break;
-
-                case "batch_complete":
-                  setBulkUploadProgress((prev) => ({
-                    ...prev!,
-                    completed: data.completed,
-                    failed: data.failed,
-                    message: `Batch ${data.batchNumber}/${data.totalBatches} complete: ${data.completed} succeeded, ${data.failed} failed`,
-                  }));
-                  break;
-
-                case "progress":
-                  setBulkUploadProgress((prev) => ({
-                    ...prev!,
-                    completed: data.totalCompleted,
-                    failed: data.totalFailed,
-                    total: data.total || prev?.total || 0,
-                    message: `Progress: ${data.totalCompleted} succeeded, ${data.totalFailed} failed`,
-                  }));
-                  break;
-
-                case "complete":
-                  totalCompleted = data.totalCompleted;
-                  totalFailed = data.totalFailed;
-                  let finalMessage = `✅ Bulk Upload Complete!\n\n`;
-                  finalMessage += `📊 ${totalCompleted} videos uploaded successfully`;
-                  if (totalFailed > 0) {
-                    finalMessage += `\n⚠️ ${totalFailed} videos failed`;
-                  }
-                  setShowToast({
-                    message: finalMessage.trim(),
-                    type: totalFailed > 0 ? "info" : "success",
-                  });
-                  setMessage({
-                    type: totalFailed > 0 ? "info" : "success",
-                    text: `✅ Bulk upload complete: ${totalCompleted} succeeded${totalFailed > 0 ? `, ${totalFailed} failed` : ""}`,
-                  });
-                  break;
-
-                case "error":
-                  throw new Error(data.error);
-              }
-            } catch (parseError) {
-              console.error(
-                "Error parsing SSE data for bulk upload:",
-                parseError,
-                line,
-              );
-            }
-          }
-        }
-      }
-
-      // Reset form
-      if (bulkFilesInputRef.current) {
-        bulkFilesInputRef.current.value = "";
-      }
-      setSelectedBulkFiles([]);
-    } catch (error: any) {
-      console.error("=== BULK UPLOAD EXCEPTION (Client) ===");
-      console.error("Error:", error);
-      const errorMsg =
-        error?.message || "An error occurred during bulk upload.";
-      setShowToast({ message: errorMsg, type: "error" });
-      setMessage({ type: "error", text: errorMsg });
-    } finally {
-      setBulkUploading(false);
     }
   };
 
@@ -1259,13 +664,14 @@ export default function Dashboard() {
   };
 
   const handleDeleteAccount = async () => {
-    if (
-      !confirm(
+    const ok = await requestConfirm({
+      title: "Delete account",
+      message:
         "Are you sure you want to delete your account data and revoke access? This action can be undone by reauthorizing the app.",
-      )
-    ) {
-      return;
-    }
+      confirmLabel: "Delete account",
+      variant: "danger",
+    });
+    if (!ok) return;
 
     try {
       const res = await fetch("/api/delete-account", { method: "POST" });
@@ -1324,6 +730,17 @@ export default function Dashboard() {
           handleDeleteAccount={handleDeleteAccount}
         />
 
+        <ConfirmModal
+          open={confirmModal.open}
+          title={confirmModal.title}
+          message={confirmModal.message}
+          confirmLabel={confirmModal.confirmLabel}
+          cancelLabel={confirmModal.cancelLabel}
+          variant={confirmModal.variant}
+          onConfirm={() => closeConfirmModal(true)}
+          onCancel={() => closeConfirmModal(false)}
+        />
+
         {/* Toast Notification */}
         {showToast && (
           <Toast
@@ -1332,6 +749,74 @@ export default function Dashboard() {
             onClose={() => setShowToast(null)}
             duration={showToast.type === "info" ? 8000 : 5000}
           />
+        )}
+
+        {/* Duplicate titles modal (when "Check for duplicates" found matches) */}
+        {duplicateModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-lg w-full max-h-[80vh] flex flex-col">
+              <div className="p-5 border-b border-gray-200 dark:border-gray-700">
+                <h3 className="text-lg font-bold text-gray-800 dark:text-white">
+                  Some titles already uploaded
+                </h3>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                  {duplicateModal.duplicateTitles.length} of your items match titles in your uploaded list (by name). You can add them anyway or add only the new ones.
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                  Matching is by title (case-insensitive) against your local uploaded list, not the YouTube API.
+                </p>
+              </div>
+              <div className="p-5 overflow-y-auto flex-1">
+                <ul className="text-sm text-gray-700 dark:text-gray-300 space-y-1">
+                  {duplicateModal.duplicateTitles.slice(0, 15).map((t, i) => (
+                    <li key={i} className="truncate" title={t}>
+                      • {t}
+                    </li>
+                  ))}
+                  {duplicateModal.duplicateTitles.length > 15 && (
+                    <li className="text-gray-500">
+                      … and {duplicateModal.duplicateTitles.length - 15} more
+                    </li>
+                  )}
+                </ul>
+              </div>
+              <div className="p-5 border-t border-gray-200 dark:border-gray-700 flex flex-wrap gap-2 justify-end">
+                <button
+                  type="button"
+                  onClick={() => setDuplicateModal(null)}
+                  className="px-4 py-2 rounded-lg font-medium bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-600"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const dupSet = new Set(
+                      duplicateModal.duplicateTitles.map((t) => t.toLowerCase().trim()),
+                    );
+                    const filtered = duplicateModal.pendingFiles.filter(
+                      (f) => !dupSet.has(f.name.toLowerCase().trim()),
+                    );
+                    doBulkSubmit(filtered, duplicateModal.pendingUrls);
+                    setDuplicateModal(null);
+                  }}
+                  className="px-4 py-2 rounded-lg font-medium bg-emerald-600 text-white hover:bg-emerald-700"
+                >
+                  Add only new
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    doBulkSubmit(duplicateModal.pendingFiles, duplicateModal.pendingUrls);
+                    setDuplicateModal(null);
+                  }}
+                  className="px-4 py-2 rounded-lg font-medium bg-indigo-600 text-white hover:bg-indigo-700"
+                >
+                  Add all anyway
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* Keyboard shortcuts (Debug only in development) */}
@@ -1493,6 +978,8 @@ export default function Dashboard() {
                 setUrlAuthHeaders={setUrlAuthHeaders}
                 urlTimeout={urlTimeout}
                 setUrlTimeout={setUrlTimeout}
+                checkDuplicatesBeforeUpload={checkDuplicatesBeforeUpload}
+                setCheckDuplicatesBeforeUpload={setCheckDuplicatesBeforeUpload}
                 setShowToast={setShowToast}
                 setSelectedJobId={setSelectedJobId}
                 fetchJobStatus={fetchJobStatus}
@@ -1549,6 +1036,8 @@ export default function Dashboard() {
                 handleDeleteFile={handleDeleteFile}
                 handleDeleteAllFiles={handleDeleteAllFiles}
                 setShowToast={setShowToast}
+                requestConfirm={requestConfirm}
+                onGoToUpload={() => setActiveTab("upload")}
               />
             </div>
           )}
@@ -1559,6 +1048,7 @@ export default function Dashboard() {
                 queue={queue}
                 nextUploadTime={nextUploadTime}
                 timeUntilNext={timeUntilNext}
+                isActive={activeTab === "statistics"}
               />
             </div>
           )}

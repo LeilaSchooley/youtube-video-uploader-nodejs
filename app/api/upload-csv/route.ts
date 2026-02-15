@@ -8,6 +8,7 @@ import { Readable } from "stream";
 import fs from "fs";
 import { fetchFileAsStream, isValidUrl } from "@/lib/url-stream";
 import { downloadDriveFile, isDriveFileId, renameDriveFile, moveDriveFile, deleteDriveFile, getDriveFileMetadata } from "@/lib/drive";
+import { getUploadedTitlesSet } from "@/lib/uploaded-videos";
 
 // csv-parser is a CommonJS module
 const csvParser = require("csv-parser");
@@ -32,64 +33,6 @@ interface CSVRow {
 interface ProgressItem {
   index: number;
   status: string;
-}
-
-/**
- * Check if a video with the given title already exists on the user's YouTube channel
- * @param youtube - YouTube API client
- * @param title - Video title to search for
- * @returns Promise<boolean> - true if video exists, false otherwise
- */
-async function videoAlreadyExists(
-  youtube: ReturnType<typeof google.youtube>,
-  title: string
-): Promise<boolean> {
-  try {
-    // First, get the user's channel ID
-    const channelResponse = await youtube.channels.list({
-      part: ["id"],
-      mine: true,
-    });
-
-    if (!channelResponse.data.items || channelResponse.data.items.length === 0) {
-      console.log("Could not get channel ID, skipping duplicate check");
-      return false;
-    }
-
-    const channelId = channelResponse.data.items[0].id;
-    if (!channelId) {
-      return false;
-    }
-
-    // Search for videos with the exact title on the user's channel
-    const searchResponse = await youtube.search.list({
-      part: ["snippet"],
-      q: title,
-      channelId: channelId,
-      type: ["video"],
-      maxResults: 10,
-    });
-
-    if (!searchResponse.data.items || searchResponse.data.items.length === 0) {
-      return false;
-    }
-
-    // Check if any video has an exact title match (case-insensitive)
-    const exactMatch = searchResponse.data.items.some(
-      (item: any) =>
-        item.snippet?.title?.toLowerCase().trim() === title.toLowerCase().trim()
-    );
-
-    if (exactMatch) {
-      console.log(`Video with title "${title.substring(0, 50)}..." already exists on channel`);
-    }
-
-    return exactMatch;
-  } catch (error: any) {
-    // If there's an error checking, log it but don't block the upload
-    console.error("Error checking for existing video:", error?.message);
-    return false; // Assume video doesn't exist if check fails
-  }
 }
 
 export const dynamic = 'force-dynamic';
@@ -200,17 +143,17 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
-      // Check if video already exists on YouTube before uploading
-      progress[i] = { index: i, status: "Checking for existing video..." };
-      const alreadyExists = await videoAlreadyExists(youtube, youtube_title);
-      
+      // Check if title already in uploaded list (no YouTube API)
+      progress[i] = { index: i, status: "Checking duplicates..." };
+      const uploadedSet = getUploadedTitlesSet();
+      const alreadyExists = uploadedSet.has(youtube_title.toLowerCase().trim());
       if (alreadyExists) {
         progress[i] = {
           index: i,
           status: "Already uploaded - Skipped",
         };
-        console.log(`Video ${i + 1}: Already exists on YouTube, skipping upload`);
-        continue; // Skip to next video
+        console.log(`Video ${i + 1}: Already in uploaded list, skipping`);
+        continue;
       }
 
       // Determine publish date

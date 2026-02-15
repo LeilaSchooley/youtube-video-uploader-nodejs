@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 
 interface WorkerStatusProps {
-  queue: any[];
+  queue: import("./types").BulkJob[];
 }
 
 export default function WorkerStatus({ queue }: WorkerStatusProps) {

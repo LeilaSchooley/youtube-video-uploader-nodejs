@@ -11,7 +11,8 @@ import {
 import { addToBulkQueue } from "@/lib/bulk-queue";
 import { listDriveVideos } from "@/lib/drive";
 import { listDropboxVideos } from "@/lib/dropbox";
-import { checkDuplicatesBatch } from "@/lib/youtube-utils";
+import { getUploadedTitlesSet } from "@/lib/uploaded-videos";
+import { jsonApiError } from "@/lib/api-response";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -60,12 +61,12 @@ export async function POST(request: NextRequest) {
     const sessionId = cookieStore.get("sessionId")?.value;
 
     if (!sessionId) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+      return jsonApiError("Not authenticated", 401, "UNAUTHORIZED");
     }
 
     const session = getSession(sessionId);
     if (!session || !session.authenticated || !session.tokens) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+      return jsonApiError("Not authenticated", 401, "UNAUTHORIZED");
     }
 
     const body = await request.json();
@@ -555,53 +556,30 @@ export async function POST(request: NextRequest) {
     // Use only valid items
     let queueItems = validQueueItems.map(({ originalIndex, ...item }) => item); // Remove originalIndex before queuing
 
-    // Check for duplicates on YouTube channel before queuing
+    // Check for duplicates against local uploaded-videos list (no YouTube API)
     let duplicateCount = 0;
-    const duplicateTitles: string[] = [];
     if (queueItems.length > 0) {
-      try {
-        const youtube = google.youtube({
-          version: "v3",
-          auth: oAuthClient,
-        });
-
-        const titles = queueItems
-          .map((item) => item.title || "")
-          .filter((t) => t.trim());
-        console.log(
-          `[UPLOAD-SHEETS] Checking ${titles.length} videos for duplicates on YouTube channel...`,
-        );
-
-        const duplicates = await checkDuplicatesBatch(youtube, titles);
-        duplicateCount = duplicates.size;
-
-        if (duplicateCount > 0) {
-          duplicateTitles.push(...Array.from(duplicates));
+      const uploadedSet = getUploadedTitlesSet();
+      const before = queueItems.length;
+      queueItems = queueItems.filter((item) => {
+        const t = (item.title || "").trim();
+        const isDuplicate = t && uploadedSet.has(t.toLowerCase());
+        if (isDuplicate) {
           console.log(
-            `[UPLOAD-SHEETS] Found ${duplicateCount} duplicate video(s) already on channel, filtering them out`,
-          );
-
-          // Filter out duplicates
-          queueItems = queueItems.filter((item) => {
-            const title = item.title || "";
-            const isDuplicate = duplicates.has(title.trim());
-            if (isDuplicate) {
-              console.log(
-                `[UPLOAD-SHEETS] Skipping duplicate: "${title.substring(0, 50)}..."`,
-              );
-            }
-            return !isDuplicate;
-          });
-        } else {
-          console.log(
-            `[UPLOAD-SHEETS] No duplicates found, all ${queueItems.length} videos are new`,
+            `[UPLOAD-SHEETS] Skipping duplicate: "${t.substring(0, 50)}..."`,
           );
         }
-      } catch (error: any) {
-        console.warn(
-          `[UPLOAD-SHEETS] Error checking for duplicates: ${error?.message || error}. Continuing without duplicate check.`,
+        return !isDuplicate;
+      });
+      duplicateCount = before - queueItems.length;
+      if (duplicateCount > 0) {
+        console.log(
+          `[UPLOAD-SHEETS] Filtered out ${duplicateCount} duplicate(s) from uploaded list`,
         );
-        // Continue without duplicate check if it fails
+      } else {
+        console.log(
+          `[UPLOAD-SHEETS] No duplicates found, all ${queueItems.length} videos are new`,
+        );
       }
     }
 
@@ -616,7 +594,7 @@ export async function POST(request: NextRequest) {
           duplicateCount,
           matchedCount,
           unmatchedCount,
-          message: `All ${normalizedData.length} rows were filtered out. ${filteredCount} lacked video sources, ${duplicateCount} were duplicates already on channel.`,
+          message: `All ${normalizedData.length} rows were filtered out. ${filteredCount} lacked video sources, ${duplicateCount} were duplicates in uploaded list.`,
         },
         { status: 400 },
       );
@@ -644,7 +622,7 @@ export async function POST(request: NextRequest) {
     }
     if (duplicateCount > 0) {
       warnings.push(
-        `${duplicateCount} video(s) were skipped because they already exist on your YouTube channel`,
+        `${duplicateCount} video(s) were skipped (already in uploaded list)`,
       );
     }
     if (warnings.length > 0) {

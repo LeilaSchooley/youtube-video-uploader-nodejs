@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { cookies } from "next/headers";
+import { jsonApiError } from "@/lib/api-response";
 import fs from "fs";
 import path from "path";
 
@@ -16,12 +17,12 @@ export async function GET(request: NextRequest) {
     const sessionId = cookieStore.get("sessionId")?.value;
 
     if (!sessionId) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+      return jsonApiError("Not authenticated", 401, "UNAUTHORIZED");
     }
 
     const session = getSession(sessionId);
     if (!session || !session.authenticated) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+      return jsonApiError("Not authenticated", 401, "UNAUTHORIZED");
     }
 
     const uploadsDir = path.join(process.cwd(), "uploads");
@@ -120,11 +121,11 @@ export async function GET(request: NextRequest) {
       channels,
       currentChannel: currentSafeUserId,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("[CHANNELS] Error listing channels:", error);
-    return NextResponse.json(
-      { error: error?.message || "Failed to list channels" },
-      { status: 500 }
+    return jsonApiError(
+      error instanceof Error ? error.message : "Failed to list channels",
+      500,
     );
   }
 }

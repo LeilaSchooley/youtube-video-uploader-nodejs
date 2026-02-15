@@ -65,4 +65,37 @@ export interface UploadProgress {
   };
 }
 
+/** Progress entry for one item in a bulk job */
+export interface BulkJobProgressItem {
+  index: number;
+  status: string;
+  videoId?: string;
+  error?: string;
+  title?: string;
+}
+
+/** Bulk queue job (matches lib/bulk-queue BulkUploadItem) */
+export interface BulkJob {
+  id: string;
+  sessionId: string;
+  userId?: string;
+  type: "files" | "urls";
+  videosPerDay?: number;
+  startDate?: string;
+  items: Array<Record<string, unknown>>;
+  dropboxCsvPath?: string;
+  dropboxSheetName?: string;
+  status: "pending" | "processing" | "completed" | "failed" | "paused" | "cancelled";
+  progress: BulkJobProgressItem[];
+  createdAt: string;
+  updatedAt: string;
+  error?: string;
+  /** Derived or API-provided total video count */
+  totalVideos?: number;
+  /** Optional notes (queue-notes) */
+  notes?: string;
+}
+
+export type JobStatus = BulkJob | null;
+
 

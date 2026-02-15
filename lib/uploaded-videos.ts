@@ -1,0 +1,128 @@
+/**
+ * Persistent list of all videos ever uploaded (across all jobs).
+ * Appended by the worker on each successful upload; used for history and optional duplicate check.
+ */
+
+import fs from "fs";
+import path from "path";
+import { getBulkQueue } from "./bulk-queue";
+
+const DATA_DIR = path.join(process.cwd(), "data");
+const UPLOADED_VIDEOS_FILE = path.join(DATA_DIR, "uploaded-videos.json");
+
+export interface UploadedVideoRecord {
+  videoId: string;
+  title: string;
+  jobId: string;
+  uploadedAt: string; // ISO
+}
+
+function ensureDataDir(): void {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+}
+
+function readRecords(): UploadedVideoRecord[] {
+  try {
+    ensureDataDir();
+    if (fs.existsSync(UPLOADED_VIDEOS_FILE)) {
+      const data = fs.readFileSync(UPLOADED_VIDEOS_FILE, "utf8");
+      const parsed = JSON.parse(data);
+      return Array.isArray(parsed) ? parsed : [];
+    }
+  } catch (error) {
+    console.error("[UPLOADED-VIDEOS] Error reading file:", error);
+  }
+  return [];
+}
+
+function writeRecords(records: UploadedVideoRecord[]): void {
+  try {
+    ensureDataDir();
+    fs.writeFileSync(
+      UPLOADED_VIDEOS_FILE,
+      JSON.stringify(records, null, 2),
+      "utf8",
+    );
+  } catch (error) {
+    console.error("[UPLOADED-VIDEOS] Error writing file:", error);
+  }
+}
+
+/**
+ * Append a successful upload. Dedupes by videoId (keeps latest record per videoId).
+ */
+export function appendUploadedVideo(record: UploadedVideoRecord): void {
+  const list = readRecords();
+  const without = list.filter((r) => r.videoId !== record.videoId);
+  without.push(record);
+  writeRecords(without);
+}
+
+/**
+ * Return all uploaded video records (newest first).
+ */
+export function getUploadedVideos(): UploadedVideoRecord[] {
+  const list = readRecords();
+  list.sort(
+    (a, b) =>
+      new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime(),
+  );
+  return list;
+}
+
+/**
+ * Return set of titles (lowercase) that have been uploaded. For duplicate check without API.
+ */
+export function getUploadedTitlesSet(): Set<string> {
+  const list = readRecords();
+  const set = new Set<string>();
+  for (const r of list) {
+    if (r.title && r.title.trim()) {
+      set.add(r.title.toLowerCase().trim());
+    }
+  }
+  return set;
+}
+
+/**
+ * Backfill uploaded-videos.json from existing bulk queue jobs.
+ * Adds any progress entry that has a videoId and is not already in the list (deduped by videoId).
+ * Does not overwrite existing records.
+ * @returns number of new records added
+ */
+export function backfillFromBulkQueue(): number {
+  const queue = getBulkQueue();
+  const existing = readRecords();
+  const byVideoId = new Map<string, UploadedVideoRecord>();
+  for (const r of existing) {
+    byVideoId.set(r.videoId, r);
+  }
+  let added = 0;
+  for (const job of queue) {
+    const progress = job.progress || [];
+    const items = job.items || [];
+    for (const p of progress) {
+      if (!p?.videoId) continue;
+      if (byVideoId.has(p.videoId)) continue;
+      const title =
+        p.title ||
+        items[p.index]?.title ||
+        (items[p.index] as { video_name?: string })?.video_name ||
+        `Video ${p.index + 1}`;
+      const record: UploadedVideoRecord = {
+        videoId: p.videoId,
+        title: String(title ?? ""),
+        jobId: job.id,
+        uploadedAt: job.updatedAt || job.createdAt || new Date().toISOString(),
+      };
+      byVideoId.set(p.videoId, record);
+      added++;
+    }
+  }
+  if (added > 0) {
+    writeRecords(Array.from(byVideoId.values()));
+  }
+  return added;
+}

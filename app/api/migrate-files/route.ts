@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { cookies } from "next/headers";
+import { jsonApiError } from "@/lib/api-response";
 import fs from "fs";
 import path from "path";
 
@@ -20,12 +21,12 @@ export async function GET(request: NextRequest) {
     const sessionId = cookieStore.get("sessionId")?.value;
 
     if (!sessionId) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+      return jsonApiError("Not authenticated", 401, "UNAUTHORIZED");
     }
 
     const session = getSession(sessionId);
     if (!session || !session.authenticated) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+      return jsonApiError("Not authenticated", 401, "UNAUTHORIZED");
     }
 
     const uploadsDir = path.join(process.cwd(), "uploads");
@@ -104,11 +105,11 @@ export async function GET(request: NextRequest) {
       currentUserId: session.userId,
       currentSafeUserId: session.userId?.replace(/[^a-zA-Z0-9._-]/g, "_"),
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("[MIGRATE-FILES] Error listing directories:", error);
-    return NextResponse.json(
-      { error: error?.message || "Failed to list directories" },
-      { status: 500 },
+    return jsonApiError(
+      error instanceof Error ? error.message : "Failed to list directories",
+      500,
     );
   }
 }
@@ -123,22 +124,19 @@ export async function POST(request: NextRequest) {
     const sessionId = cookieStore.get("sessionId")?.value;
 
     if (!sessionId) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+      return jsonApiError("Not authenticated", 401, "UNAUTHORIZED");
     }
 
     const session = getSession(sessionId);
     if (!session || !session.authenticated) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+      return jsonApiError("Not authenticated", 401, "UNAUTHORIZED");
     }
 
     const body = await request.json();
     const { sourceDir, destDir, deleteSource } = body;
 
     if (!sourceDir || !destDir) {
-      return NextResponse.json(
-        { error: "sourceDir and destDir are required" },
-        { status: 400 },
-      );
+      return jsonApiError("sourceDir and destDir are required", 400, "BAD_REQUEST");
     }
 
     if (sourceDir === destDir) {

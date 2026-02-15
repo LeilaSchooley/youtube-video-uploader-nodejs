@@ -13,6 +13,7 @@ import {
   markBulkAsFailed,
   updateBulkProgress,
 } from "./lib/bulk-queue";
+import { appendUploadedVideo } from "./lib/uploaded-videos";
 import { getSession, loadSessions } from "./lib/session";
 import { getOAuthClient, getDropboxToken } from "./lib/auth";
 import { google } from "googleapis";
@@ -35,6 +36,9 @@ import {
 } from "./lib/dropbox";
 import { Readable } from "stream";
 import fs from "fs";
+import { workerLog } from "./lib/worker-logger";
+import { writeHeartbeat } from "./lib/worker-health";
+import { withRetry } from "./lib/youtube-retry";
 
 const WORKER_INTERVAL = 5000; // Check for new jobs every 5 seconds
 const BATCH_SIZE = 3; // Process 3 videos at a time
@@ -270,23 +274,33 @@ async function uploadVideo(
 
     sendProgress(index, `Fetching video ${sourceInfo}...`);
 
-    // Get video stream
-    const videoStream = await getVideoStream(
-      task,
-      oAuthClient,
-      dropboxToken,
-      sessionId,
-      sessionRefreshToken,
-    );
-
     sendProgress(index, `Uploading "${title}" to YouTube...`);
 
     const uploadStartTime = Date.now();
-    const result = await youtube.videos.insert({
-      part: ["snippet", "status"],
-      requestBody,
-      media: { body: videoStream },
-    });
+    const result = await withRetry(
+      async () => {
+        const videoStream = await getVideoStream(
+          task,
+          oAuthClient,
+          dropboxToken,
+          sessionId,
+          sessionRefreshToken,
+        );
+        return youtube.videos.insert({
+          part: ["snippet", "status"],
+          requestBody,
+          media: { body: videoStream },
+        });
+      },
+      (attempt, status, delayMs) => {
+        workerLog.warn("YouTube API rate/quota limit, retrying", {
+          index,
+          status,
+          attempt,
+          delayMs,
+        });
+      },
+    );
 
     const videoId = result.data.id;
     const uploadDuration = (Date.now() - uploadStartTime) / 1000;
@@ -499,9 +513,10 @@ async function processBatch(
     error?: string,
   ) => void,
   oAuthClient: ReturnType<typeof getOAuthClient>,
-  dropboxToken?: string,
-  sessionId?: string,
-  sessionRefreshToken?: string | null,
+  dropboxToken: string | undefined,
+  sessionId: string | undefined,
+  sessionRefreshToken: string | null | undefined,
+  jobId: string,
 ): Promise<void> {
   const usesDropbox = batch.some(
     (t) => t.item.dropboxFileId || t.item.dropboxThumbnailId,
@@ -559,11 +574,20 @@ async function processBatch(
     if (result.status === "fulfilled") {
       if (result.value.success) {
         batchResults.success++;
+        const videoId = result.value.videoId;
         sendProgress(
           task.index,
-          `Completed: ${result.value.videoId}`,
-          result.value.videoId,
+          `Completed: ${videoId}`,
+          videoId,
         );
+        if (videoId) {
+          appendUploadedVideo({
+            videoId,
+            title: task.item.title || `Video ${task.index + 1}`,
+            jobId,
+            uploadedAt: new Date().toISOString(),
+          });
+        }
       } else {
         batchResults.failed++;
         sendProgress(
@@ -940,6 +964,7 @@ async function processBulkJob(jobId: string): Promise<void> {
         dropboxToken,
         job.sessionId,
         session.dropboxRefreshToken,
+        jobId,
       );
     }
 
@@ -1082,33 +1107,36 @@ function getNextJobToProcess(): { id: string; status: string } | null {
  * Main worker loop
  */
 async function workerLoop(): Promise<void> {
+  let jobId: string | undefined;
   try {
     const jobToProcess = getNextJobToProcess();
+    jobId = jobToProcess?.id;
+    writeHeartbeat(jobId);
     if (jobToProcess) {
       await processBulkJob(jobToProcess.id);
     }
-  } catch (error: any) {
-    console.error("[WORKER] Error in worker loop:", error);
+  } catch (error: unknown) {
+    workerLog.error("Error in worker loop", {
+      error: error instanceof Error ? error.message : String(error),
+      jobId,
+    });
   }
 
-  // Schedule next check
   setTimeout(workerLoop, WORKER_INTERVAL);
 }
 
 // Start worker
-console.log("[WORKER] Starting bulk upload worker...");
-console.log(
-  `[WORKER] Checking for jobs every ${WORKER_INTERVAL / 1000} seconds`,
-);
+workerLog.info("Starting bulk upload worker", {
+  intervalSeconds: WORKER_INTERVAL / 1000,
+});
 workerLoop();
 
-// Handle graceful shutdown
 process.on("SIGINT", () => {
-  console.log("[WORKER] Shutting down gracefully...");
+  workerLog.info("Shutting down gracefully (SIGINT)");
   process.exit(0);
 });
 
 process.on("SIGTERM", () => {
-  console.log("[WORKER] Shutting down gracefully...");
+  workerLog.info("Shutting down gracefully (SIGTERM)");
   process.exit(0);
 });

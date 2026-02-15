@@ -3,6 +3,7 @@ import { getSession } from "@/lib/session";
 import { getDropboxToken } from "@/lib/auth";
 import { downloadDropboxFile } from "@/lib/dropbox";
 import { cookies } from "next/headers";
+import { jsonApiError } from "@/lib/api-response";
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const XLSX = require("xlsx") as typeof import("xlsx");
@@ -20,20 +21,21 @@ export async function GET(request: NextRequest) {
     const sessionId = cookieStore.get("sessionId")?.value;
 
     if (!sessionId) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+      return jsonApiError("Not authenticated", 401, "UNAUTHORIZED");
     }
 
     const session = getSession(sessionId);
     if (!session?.authenticated || !session.tokens) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+      return jsonApiError("Not authenticated", 401, "UNAUTHORIZED");
     }
 
     const { searchParams } = new URL(request.url);
     const filePath = searchParams.get("filePath");
     if (!filePath || !filePath.startsWith("/")) {
-      return NextResponse.json(
-        { error: "filePath query parameter (Dropbox path) is required" },
-        { status: 400 },
+      return jsonApiError(
+        "filePath query parameter (Dropbox path) is required",
+        400,
+        "BAD_REQUEST",
       );
     }
 

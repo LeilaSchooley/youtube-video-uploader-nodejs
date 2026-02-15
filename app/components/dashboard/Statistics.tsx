@@ -1,17 +1,93 @@
 "use client";
 
+import { useState, useCallback, useEffect } from "react";
+
 interface ProgressItem {
   index: number;
   status: string;
 }
 
-interface StatisticsProps {
-  queue: any[];
-  nextUploadTime: Date | null;
-  timeUntilNext: string;
+interface UploadedVideoRecord {
+  videoId: string;
+  title: string;
+  jobId: string;
+  uploadedAt: string;
 }
 
-export default function Statistics({ queue, nextUploadTime, timeUntilNext }: StatisticsProps) {
+interface StatisticsProps {
+  queue: import("./types").BulkJob[];
+  nextUploadTime: Date | null;
+  timeUntilNext: string;
+  /** When true (Statistics tab is active), auto-load uploaded videos list once if not yet loaded */
+  isActive?: boolean;
+}
+
+export default function Statistics({ queue, nextUploadTime, timeUntilNext, isActive }: StatisticsProps) {
+  const [uploadedVideos, setUploadedVideos] = useState<UploadedVideoRecord[] | null>(null);
+  const [loadingUploadedVideos, setLoadingUploadedVideos] = useState(false);
+  const [syncingFromQueue, setSyncingFromQueue] = useState(false);
+  const [uploadedVideosError, setUploadedVideosError] = useState<string | null>(null);
+
+  const loadUploadedVideos = useCallback(async (backfill = false) => {
+    setLoadingUploadedVideos(true);
+    setUploadedVideosError(null);
+    try {
+      const url = backfill ? "/api/uploaded-videos?backfill=1" : "/api/uploaded-videos";
+      const res = await fetch(url, { credentials: "include" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      setUploadedVideos(data.videos || []);
+    } catch (e) {
+      setUploadedVideosError(e instanceof Error ? e.message : "Failed to load");
+      setUploadedVideos(null);
+    } finally {
+      setLoadingUploadedVideos(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isActive && uploadedVideos === null && !loadingUploadedVideos) {
+      loadUploadedVideos(false);
+    }
+  }, [isActive, uploadedVideos, loadingUploadedVideos, loadUploadedVideos]);
+
+  const syncFromQueue = useCallback(async () => {
+    setSyncingFromQueue(true);
+    setUploadedVideosError(null);
+    try {
+      const res = await fetch("/api/uploaded-videos?backfill=1", { credentials: "include" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      setUploadedVideos(data.videos || []);
+    } catch (e) {
+      setUploadedVideosError(e instanceof Error ? e.message : "Sync failed");
+    } finally {
+      setSyncingFromQueue(false);
+    }
+  }, []);
+
+  const downloadUploadedVideosCsv = useCallback(async () => {
+    try {
+      const res = await fetch("/api/uploaded-videos?format=csv", { credentials: "include" });
+      if (!res.ok) throw new Error("Export failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `uploaded-videos-${new Date().toISOString().split("T")[0]}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setUploadedVideosError("Failed to download CSV");
+    }
+  }, []);
+
   const allProgress = queue.flatMap((job) => job.progress || []);
   const totalVideos = queue.reduce((sum, job) => {
     return sum + (job.totalVideos || job.progress?.length || 0);
@@ -64,10 +140,111 @@ export default function Statistics({ queue, nextUploadTime, timeUntilNext }: Sta
   
   const remaining = totalVideos > 0 ? totalVideos - completed - failed : 0;
 
-  if (queue.length === 0) return null;
+  const exportStats = useCallback(async (format: "json" | "csv") => {
+    try {
+      const res = await fetch(`/api/export-stats?format=${format}`, {
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Export failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `youtube-uploader-stats-${new Date().toISOString().split("T")[0]}.${format}`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      // Silent fail or could set error state
+    }
+  }, []);
 
   return (
     <>
+      {/* All uploaded videos (persistent list) */}
+      <div className="card border border-gray-100 dark:border-gray-700 mb-8">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
+          <h2 className="text-xl font-bold text-gray-800 dark:text-white">
+            📋 All uploaded videos
+          </h2>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => loadUploadedVideos(false)}
+              disabled={loadingUploadedVideos}
+              className="px-4 py-2 rounded-lg font-medium bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm"
+            >
+              {loadingUploadedVideos ? "Loading…" : "Load list"}
+            </button>
+            <button
+              type="button"
+              onClick={syncFromQueue}
+              disabled={syncingFromQueue}
+              title="Add any completed videos from the queue that aren’t in the list yet"
+              className="px-4 py-2 rounded-lg font-medium bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm"
+            >
+              {syncingFromQueue ? "Syncing…" : "Sync from queue"}
+            </button>
+            {uploadedVideos && uploadedVideos.length > 0 && (
+              <button
+                type="button"
+                onClick={downloadUploadedVideosCsv}
+                className="px-4 py-2 rounded-lg font-medium bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-white text-sm"
+              >
+                Export CSV
+              </button>
+            )}
+          </div>
+        </div>
+        {uploadedVideosError && (
+          <p className="text-red-600 dark:text-red-400 text-sm mb-3">{uploadedVideosError}</p>
+        )}
+        {uploadedVideos && (
+          <div className="overflow-x-auto">
+            {uploadedVideos.length === 0 ? (
+              <p className="text-gray-500 dark:text-gray-400 text-sm">No uploaded videos recorded yet.</p>
+            ) : (
+              <table className="w-full text-sm border border-gray-200 dark:border-gray-600 rounded-lg overflow-hidden">
+                <thead>
+                  <tr className="bg-gray-50 dark:bg-gray-800 text-left">
+                    <th className="p-2 font-semibold">Title</th>
+                    <th className="p-2 font-semibold">Video ID</th>
+                    <th className="p-2 font-semibold">Job ID</th>
+                    <th className="p-2 font-semibold">Uploaded at</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {uploadedVideos.map((v, i) => (
+                    <tr key={`${v.videoId}-${i}`} className="border-t border-gray-200 dark:border-gray-600">
+                      <td className="p-2 max-w-xs truncate" title={v.title}>{v.title}</td>
+                      <td className="p-2 font-mono text-xs">
+                        <a
+                          href={`https://www.youtube.com/watch?v=${v.videoId}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-indigo-600 dark:text-indigo-400 hover:underline"
+                        >
+                          {v.videoId}
+                        </a>
+                      </td>
+                      <td className="p-2 font-mono text-xs text-gray-600 dark:text-gray-400">{v.jobId}</td>
+                      <td className="p-2 text-gray-600 dark:text-gray-400">{new Date(v.uploadedAt).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+      </div>
+
+      {queue.length === 0 && (
+        <div className="card border border-gray-100 dark:border-gray-700 p-6 text-center text-gray-500 dark:text-gray-400">
+          No jobs in the queue yet. Upload statistics will appear here when you add and run jobs.
+        </div>
+      )}
+
+      {queue.length > 0 && (
+        <>
       {/* Next Upload Timer - Enhanced Countdown */}
       {nextUploadTime && timeUntilNext && (
         <div className="mb-8 p-6 bg-gradient-to-r from-blue-500 via-indigo-600 to-purple-600 rounded-2xl shadow-xl text-white relative overflow-hidden animate-fade-in">
@@ -114,14 +291,31 @@ export default function Statistics({ queue, nextUploadTime, timeUntilNext }: Sta
           <h2 className="text-2xl sm:text-3xl font-bold text-gray-800 dark:text-white">
             📊 Upload Statistics
           </h2>
-          <div
-            className={`px-4 py-2 rounded-full text-sm font-semibold ${
-              processing > 0
-                ? "bg-yellow-100 text-yellow-800"
-                : "bg-green-100 text-green-800"
-            }`}
-          >
-            {processing > 0 ? "⚡ Processing" : "✓ Ready"}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              title="Export statistics as JSON"
+              onClick={() => exportStats("json")}
+              className="px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-white"
+            >
+              Export (JSON)
+            </button>
+            <button
+              type="button"
+              onClick={() => exportStats("csv")}
+              className="px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-white"
+            >
+              Export (CSV)
+            </button>
+            <div
+              className={`px-4 py-2 rounded-full text-sm font-semibold ${
+                processing > 0
+                  ? "bg-yellow-100 text-yellow-800"
+                  : "bg-green-100 text-green-800"
+              }`}
+            >
+              {processing > 0 ? "⚡ Processing" : "✓ Ready"}
+            </div>
           </div>
         </div>
         
@@ -283,6 +477,8 @@ export default function Statistics({ queue, nextUploadTime, timeUntilNext }: Sta
           </div>
         )}
       </div>
+        </>
+      )}
     </>
   );
 }

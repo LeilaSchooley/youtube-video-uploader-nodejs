@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getBulkQueueItem } from "@/lib/bulk-queue";
+import { jsonApiError } from "@/lib/api-response";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -16,27 +17,27 @@ export async function GET(request: NextRequest) {
     const sessionId = cookieStore.get("sessionId")?.value;
 
     if (!sessionId) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+      return jsonApiError("Not authenticated", 401, "UNAUTHORIZED");
     }
 
     const session = getSession(sessionId);
     if (!session || !session.authenticated) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+      return jsonApiError("Not authenticated", 401, "UNAUTHORIZED");
     }
 
     const { searchParams } = new URL(request.url);
     const jobId = searchParams.get("jobId");
     if (!jobId) {
-      return NextResponse.json({ error: "jobId is required" }, { status: 400 });
+      return jsonApiError("jobId is required", 400, "BAD_REQUEST");
     }
 
     const job = getBulkQueueItem(jobId);
     if (!job) {
-      return NextResponse.json({ error: "Job not found" }, { status: 404 });
+      return jsonApiError("Job not found", 404, "NOT_FOUND");
     }
 
     if (job.sessionId !== sessionId && job.userId !== session.userId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+      return jsonApiError("Unauthorized", 403, "FORBIDDEN");
     }
 
     const progress = job.progress || [];

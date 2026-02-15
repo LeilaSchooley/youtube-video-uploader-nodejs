@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
+import { readHeartbeat } from '@/lib/worker-health';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,20 +10,11 @@ export async function GET() {
     const dataDir = path.join(process.cwd(), 'data');
     const uploadsDir = path.join(process.cwd(), 'uploads');
     const logsDir = path.join(process.cwd(), 'logs');
-    
-    // Check disk space (basic check)
-    let diskSpace: { free?: number; total?: number } = {};
-    try {
-      const stats = fs.statSync(dataDir);
-      // Note: fs.statSync doesn't give disk space, but we can check if directories exist
-    } catch (e) {
-      // Directory might not exist yet
-    }
-    
-    // Check critical files
+
     const queueFile = path.join(dataDir, 'queue.json');
     const sessionsFile = path.join(dataDir, 'sessions.json');
-    
+    const workerHeartbeat = readHeartbeat();
+
     const checks = {
       status: 'ok',
       timestamp: new Date().toISOString(),
@@ -39,6 +31,13 @@ export async function GET() {
         uploads: fs.existsSync(uploadsDir),
         logs: fs.existsSync(logsDir),
       },
+      worker: workerHeartbeat
+        ? {
+            lastRunAt: workerHeartbeat.lastRunAt,
+            pid: workerHeartbeat.pid,
+            jobId: workerHeartbeat.jobId,
+          }
+        : null,
       environment: {
         nodeEnv: process.env.NODE_ENV || 'development',
         hasGoogleClientId: !!process.env.GOOGLE_CLIENT_ID,
@@ -46,14 +45,14 @@ export async function GET() {
         hasRedirectUri: !!process.env.GOOGLE_REDIRECT_URI,
       },
     };
-    
+
     return NextResponse.json(checks, { status: 200 });
-  } catch (error: any) {
+  } catch (error: unknown) {
     return NextResponse.json(
       {
         status: 'error',
         timestamp: new Date().toISOString(),
-        error: error?.message || 'Health check failed',
+        error: error instanceof Error ? error.message : 'Health check failed',
       },
       { status: 500 }
     );
