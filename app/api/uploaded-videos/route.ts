@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { getUploadedVideos, backfillFromBulkQueue, getUploadedTitlesSet } from "@/lib/uploaded-videos";
+import { getUploadedVideos, backfillFromBulkQueue, getUploadedTitlesSet, clearUploadedVideos } from "@/lib/uploaded-videos";
 import { jsonApiError } from "@/lib/api-response";
 
 export const dynamic = "force-dynamic";
@@ -96,5 +96,33 @@ export async function POST(request: NextRequest) {
     const message = error instanceof Error ? error.message : String(error);
     console.error("[UPLOADED-VIDEOS] check-duplicates error:", message);
     return jsonApiError(message || "Check failed", 500);
+  }
+}
+
+/**
+ * DELETE /api/uploaded-videos
+ * Clears the local upload history (data/uploaded-videos.json). Does not delete videos on YouTube.
+ * Export first if you want to keep a copy.
+ */
+export async function DELETE(request: NextRequest) {
+  try {
+    const cookieStore = await cookies();
+    const sessionId = cookieStore.get("sessionId")?.value;
+
+    if (!sessionId) {
+      return jsonApiError("Not authenticated", 401, "UNAUTHORIZED");
+    }
+
+    const session = getSession(sessionId);
+    if (!session || !session.authenticated) {
+      return jsonApiError("Not authenticated", 401, "UNAUTHORIZED");
+    }
+
+    clearUploadedVideos();
+    return NextResponse.json({ success: true, message: "Upload history cleared" });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[UPLOADED-VIDEOS] DELETE error:", message);
+    return jsonApiError(message || "Failed to clear", 500);
   }
 }

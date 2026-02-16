@@ -53,19 +53,23 @@ export async function POST(request: NextRequest) {
       return jsonApiError("Not authenticated", 401, "UNAUTHORIZED");
     }
 
-    // Ensure userId is set on session (for display/queue)
+    // Ensure userId is set on session (for display/queue). Skip if userinfo scope not granted or token invalid.
     if (!session.userId) {
-      const oAuthClient = getOAuthClient();
-      oAuthClient.setCredentials(session.tokens);
-      const oauth2 = google.oauth2({
-        version: "v2",
-        auth: oAuthClient,
-      });
-      const userInfo = await oauth2.userinfo.get();
-      session.userId = (userInfo.data.email ||
-        userInfo.data.id ||
-        undefined) as string;
-      setSession(sessionId, session);
+      try {
+        const oAuthClient = getOAuthClient();
+        oAuthClient.setCredentials(session.tokens);
+        const oauth2 = google.oauth2({
+          version: "v2",
+          auth: oAuthClient,
+        });
+        const userInfo = await oauth2.userinfo.get();
+        session.userId = (userInfo.data.email ||
+          userInfo.data.id ||
+          undefined) as string;
+        if (session.userId) setSession(sessionId, session);
+      } catch (err) {
+        console.warn("[UPLOAD-DROPBOX] Could not fetch Google userinfo (missing scope or expired token). Proceeding without userId.", err);
+      }
     }
 
     const dropboxToken = await getDropboxToken(

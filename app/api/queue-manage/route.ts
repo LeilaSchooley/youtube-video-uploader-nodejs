@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { cookies } from "next/headers";
 import { pauseJob, resumeJob, cancelJob, deleteJob, deleteAllCompletedJobs, deleteAllJobs, getQueueItem, getQueue } from "@/lib/queue";
-import { deleteAllBulkJobs, getBulkQueue } from "@/lib/bulk-queue";
+import { deleteAllBulkJobs, deleteBulkJob, getBulkQueue, getBulkQueueItem } from "@/lib/bulk-queue";
 import { deleteUploadDir } from "@/lib/storage";
 
 export const dynamic = "force-dynamic";
@@ -126,19 +126,58 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const job = getQueueItem(jobId);
-    if (!job) {
+    const userId = session?.userId;
+
+    // Bulk jobs (id starts with "bulk-") are in the bulk queue
+    const isBulkJob = jobId.startsWith("bulk-");
+    const bulkJob = isBulkJob ? getBulkQueueItem(jobId) : undefined;
+    const job = isBulkJob ? undefined : getQueueItem(jobId);
+
+    if (isBulkJob) {
+      if (!bulkJob) {
+        return NextResponse.json({ error: "Job not found" }, { status: 404 });
+      }
+      const isAuthorized =
+        (userId && bulkJob.userId === userId) ||
+        (!bulkJob.userId && sessionId && bulkJob.sessionId === sessionId);
+      if (!isAuthorized) {
+        return NextResponse.json(
+          { error: "Job not found or unauthorized" },
+          { status: 403 }
+        );
+      }
+      // Only cancel and delete are supported for bulk jobs (no pause/resume in worker)
+      if (action === "cancel" || action === "delete") {
+        try {
+          deleteUploadDir(bulkJob.userId, jobId, bulkJob.sessionId);
+        } catch (cleanupError) {
+          console.error("Error cleaning up files for bulk job:", cleanupError);
+        }
+        const removed = deleteBulkJob(jobId);
+        if (!removed) {
+          return NextResponse.json(
+            { error: "Failed to remove job from queue" },
+            { status: 500 }
+          );
+        }
+        return NextResponse.json({
+          success: true,
+          message: action === "cancel" ? "Job cancelled and removed" : "Job deleted",
+        });
+      }
       return NextResponse.json(
-        { error: "Job not found" },
-        { status: 404 }
+        { error: "Bulk jobs only support 'cancel' or 'delete'" },
+        { status: 400 }
       );
     }
 
-    // Check authorization - match by userId (preferred) or sessionId (backward compatibility)
-    const userId = session?.userId;
-    const isAuthorized = (userId && job.userId === userId) || 
-                        (!job.userId && job.sessionId === sessionId);
-    
+    if (!job) {
+      return NextResponse.json({ error: "Job not found" }, { status: 404 });
+    }
+
+    const isAuthorized =
+      (userId && job.userId === userId) ||
+      (!job.userId && sessionId && job.sessionId === sessionId);
     if (!isAuthorized) {
       return NextResponse.json(
         { error: "Job not found or unauthorized" },
@@ -154,24 +193,18 @@ export async function POST(request: NextRequest) {
         resumeJob(jobId);
         return NextResponse.json({ success: true, message: "Job resumed" });
       case "cancel":
-        // Clean up uploaded files before cancelling
         try {
-          // Use userId if available, fallback to sessionId for backward compatibility
           deleteUploadDir(job.userId, jobId, job.sessionId);
         } catch (cleanupError) {
           console.error("Error cleaning up files:", cleanupError);
-          // Continue with cancellation even if cleanup fails
         }
         cancelJob(jobId);
         return NextResponse.json({ success: true, message: "Job cancelled and removed" });
       case "delete":
-        // Clean up uploaded files before deleting
         try {
-          // Use userId if available, fallback to sessionId for backward compatibility
           deleteUploadDir(job.userId, jobId, job.sessionId);
         } catch (cleanupError) {
           console.error("Error cleaning up files:", cleanupError);
-          // Continue with deletion even if cleanup fails
         }
         deleteJob(jobId);
         return NextResponse.json({ success: true, message: "Job deleted" });

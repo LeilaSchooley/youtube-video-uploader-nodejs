@@ -48,21 +48,25 @@ export async function POST(request: NextRequest) {
       return jsonApiError("Not authenticated", 401, "UNAUTHORIZED");
     }
 
-    // Get userId from session
+    // Get userId from session (optional; skip if userinfo scope not granted or token invalid)
     let userId = session.userId;
     if (!userId) {
-      const oAuthClient = getOAuthClient();
-      oAuthClient.setCredentials(session.tokens);
-      const oauth2 = google.oauth2({
-        version: "v2",
-        auth: oAuthClient,
-      });
-      const userInfo = await oauth2.userinfo.get();
-      userId = (userInfo.data.email || userInfo.data.id || undefined) as
-        | string
-        | undefined;
-      session.userId = userId;
-      setSession(sessionId, session);
+      try {
+        const oAuthClient = getOAuthClient();
+        oAuthClient.setCredentials(session.tokens);
+        const oauth2 = google.oauth2({
+          version: "v2",
+          auth: oAuthClient,
+        });
+        const userInfo = await oauth2.userinfo.get();
+        userId = (userInfo.data.email || userInfo.data.id || undefined) as string | undefined;
+        if (userId) {
+          session.userId = userId;
+          setSession(sessionId, session);
+        }
+      } catch (err) {
+        console.warn("[UPLOAD-DRIVE] Could not fetch Google userinfo. Proceeding without userId.", err);
+      }
     }
 
     const body = await request.json();

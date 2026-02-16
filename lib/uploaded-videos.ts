@@ -73,6 +73,13 @@ export function getUploadedVideos(): UploadedVideoRecord[] {
 }
 
 /**
+ * Clear the uploaded-videos list (e.g. to start fresh). Does not affect videos on YouTube.
+ */
+export function clearUploadedVideos(): void {
+  writeRecords([]);
+}
+
+/**
  * Return set of titles (lowercase) that have been uploaded. For duplicate check without API.
  */
 export function getUploadedTitlesSet(): Set<string> {

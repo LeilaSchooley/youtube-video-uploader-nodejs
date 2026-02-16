@@ -20,9 +20,12 @@ interface StatisticsProps {
   timeUntilNext: string;
   /** When true (Statistics tab is active), auto-load uploaded videos list once if not yet loaded */
   isActive?: boolean;
+  /** Optional: for "Clear upload history" confirmation and toast */
+  requestConfirm?: (opts: { title: string; message: string; confirmLabel?: string; variant?: "danger" | "default" }) => Promise<boolean>;
+  setShowToast?: (t: { message: string; type: "success" | "error" | "info" }) => void;
 }
 
-export default function Statistics({ queue, nextUploadTime, timeUntilNext, isActive }: StatisticsProps) {
+export default function Statistics({ queue, nextUploadTime, timeUntilNext, isActive, requestConfirm, setShowToast }: StatisticsProps) {
   const [uploadedVideos, setUploadedVideos] = useState<UploadedVideoRecord[] | null>(null);
   const [loadingUploadedVideos, setLoadingUploadedVideos] = useState(false);
   const [syncingFromQueue, setSyncingFromQueue] = useState(false);
@@ -185,13 +188,45 @@ export default function Statistics({ queue, nextUploadTime, timeUntilNext, isAct
               {syncingFromQueue ? "Syncing…" : "Sync from queue"}
             </button>
             {uploadedVideos && uploadedVideos.length > 0 && (
-              <button
-                type="button"
-                onClick={downloadUploadedVideosCsv}
-                className="px-4 py-2 rounded-lg font-medium bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-white text-sm"
-              >
-                Export CSV
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={downloadUploadedVideosCsv}
+                  className="px-4 py-2 rounded-lg font-medium bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-white text-sm"
+                >
+                  Export CSV
+                </button>
+                {requestConfirm && setShowToast && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const ok = await requestConfirm({
+                        title: "Clear upload history",
+                        message: "This will clear the local list of uploaded videos only. Videos on your YouTube channel are not affected. Export CSV first if you want to keep a copy.",
+                        confirmLabel: "Clear list",
+                        variant: "danger",
+                      });
+                      if (!ok) return;
+                      try {
+                        const res = await fetch("/api/uploaded-videos", { method: "DELETE", credentials: "include" });
+                        const data = await res.json().catch(() => ({}));
+                        if (res.ok) {
+                          setUploadedVideos([]);
+                          setUploadedVideosError(null);
+                          setShowToast({ message: data.message || "Upload history cleared", type: "success" });
+                        } else {
+                          setShowToast({ message: data.error || "Failed to clear", type: "error" });
+                        }
+                      } catch {
+                        setShowToast({ message: "Failed to clear upload history", type: "error" });
+                      }
+                    }}
+                    className="px-4 py-2 rounded-lg font-medium bg-red-100 dark:bg-red-900/30 hover:bg-red-200 dark:hover:bg-red-900/50 text-red-700 dark:text-red-300 text-sm"
+                  >
+                    Clear upload history
+                  </button>
+                )}
+              </>
             )}
           </div>
         </div>

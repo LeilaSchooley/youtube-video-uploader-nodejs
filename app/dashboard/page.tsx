@@ -1049,6 +1049,8 @@ export default function Dashboard() {
                 nextUploadTime={nextUploadTime}
                 timeUntilNext={timeUntilNext}
                 isActive={activeTab === "statistics"}
+                requestConfirm={requestConfirm}
+                setShowToast={(t) => setShowToast(t)}
               />
             </div>
           )}

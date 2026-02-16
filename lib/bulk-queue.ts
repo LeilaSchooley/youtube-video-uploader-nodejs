@@ -200,6 +200,18 @@ export function updateBulkProgress(
   updateBulkQueueItem(id, { progress }, immediate);
 }
 
+/**
+ * Delete a single bulk job by id. Returns true if the job was found and removed.
+ */
+export function deleteBulkJob(jobId: string): boolean {
+  const queue = readBulkQueue();
+  const index = queue.findIndex((item) => item.id === jobId);
+  if (index === -1) return false;
+  queue.splice(index, 1);
+  writeBulkQueueImmediate(queue);
+  return true;
+}
+
 export function deleteAllBulkJobs(
   userId?: string,
   sessionId?: string,
