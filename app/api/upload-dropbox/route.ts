@@ -68,7 +68,10 @@ export async function POST(request: NextRequest) {
           undefined) as string;
         if (session.userId) setSession(sessionId, session);
       } catch (err) {
-        console.warn("[UPLOAD-DROPBOX] Could not fetch Google userinfo (missing scope or expired token). Proceeding without userId.", err);
+        console.warn(
+          "[UPLOAD-DROPBOX] Could not fetch Google userinfo (missing scope or expired token). Proceeding without userId.",
+          err,
+        );
       }
     }
 
@@ -172,6 +175,41 @@ export async function POST(request: NextRequest) {
 
     // Parse CSV/XLSX metadata if provided
     let csvMetadataMap: Map<string, any> = new Map();
+    let csvData: any[] = [];
+    // Auto-detect column that holds the video filename
+    // Populated after CSV is parsed; used by getVideoNameFromRow and the queue builder
+    let videoNameColumn: string | null = null;
+    const KNOWN_VIDEO_NAME_COLUMNS = [
+      "video_name",
+      "videoname",
+      "video name",
+      "filename",
+      "file_name",
+      "file name",
+      "name",
+      "video",
+      "file",
+    ];
+    const getVideoNameFromRow = (row: any): string | undefined => {
+      if (videoNameColumn && row[videoNameColumn] !== undefined) {
+        const s =
+          typeof row[videoNameColumn] === "string"
+            ? row[videoNameColumn].trim()
+            : String(row[videoNameColumn] ?? "").trim();
+        return s || undefined;
+      }
+      // Fallback: try known names
+      for (const col of KNOWN_VIDEO_NAME_COLUMNS) {
+        if (row[col] !== undefined) {
+          const s =
+            typeof row[col] === "string"
+              ? row[col].trim()
+              : String(row[col] ?? "").trim();
+          return s || undefined;
+        }
+      }
+      return undefined;
+    };
     if (dropboxCsvPath) {
       try {
         console.log(
@@ -193,7 +231,6 @@ export async function POST(request: NextRequest) {
 
         // Check file extension to determine parser
         const fileExtension = dropboxCsvPath.toLowerCase().split(".").pop();
-        let csvData: any[] = [];
 
         if (fileExtension === "xlsx" || fileExtension === "xls") {
           // Parse XLSX/XLS file
@@ -227,17 +264,71 @@ export async function POST(request: NextRequest) {
           });
         }
 
+        // Log CSV structure so we can debug column names
+        if (csvData.length > 0) {
+          const firstRow = csvData[0] as Record<string, unknown>;
+          const columnNames = Object.keys(firstRow);
+          console.log(
+            `[UPLOAD-DROPBOX] CSV columns (${columnNames.length}): ${columnNames.join(", ")}`,
+          );
+          const sampleValues = columnNames
+            .slice(0, 8)
+            .map((k) => `${k}=${JSON.stringify(firstRow[k]).slice(0, 50)}`)
+            .join("; ");
+          console.log(`[UPLOAD-DROPBOX] First row sample: ${sampleValues}`);
+
+          // Auto-detect the video name column (case-insensitive match against known names)
+          for (const col of columnNames) {
+            const lower = col.toLowerCase().trim();
+            if (KNOWN_VIDEO_NAME_COLUMNS.includes(lower)) {
+              videoNameColumn = col;
+              break;
+            }
+          }
+          if (!videoNameColumn) {
+            // Fallback: look for any column whose name contains "video" or "file" or "name"
+            for (const col of columnNames) {
+              const lower = col.toLowerCase().trim();
+              if (
+                lower.includes("video") ||
+                lower.includes("file") ||
+                lower === "name"
+              ) {
+                videoNameColumn = col;
+                break;
+              }
+            }
+          }
+          console.log(
+            `[UPLOAD-DROPBOX] Auto-detected video name column: "${videoNameColumn || "(none)"}" from columns: [${columnNames.join(", ")}]`,
+          );
+        }
+
         // Create map of video_name -> CSV row metadata
         csvData.forEach((row) => {
-          const videoName = row.video_name?.toLowerCase().trim();
+          const videoName = getVideoNameFromRow(row)?.toLowerCase();
           if (videoName) {
             csvMetadataMap.set(videoName, row);
           }
         });
 
+        const rowsWithName = csvData.filter(
+          (r) => getVideoNameFromRow(r),
+        ).length;
         console.log(
-          `[UPLOAD-DROPBOX] Created metadata map with ${csvMetadataMap.size} entries`,
+          `[UPLOAD-DROPBOX] Created metadata map with ${csvMetadataMap.size} entries (${rowsWithName}/${csvData.length} rows had a video name)`,
         );
+        if (csvMetadataMap.size > 0) {
+          const sampleKeys = Array.from(csvMetadataMap.keys()).slice(0, 5);
+          console.log(
+            `[UPLOAD-DROPBOX] Sample metadata keys: ${sampleKeys.join(", ")}`,
+          );
+        }
+        if (csvMetadataMap.size === 0 && csvData.length > 0) {
+          console.warn(
+            `[UPLOAD-DROPBOX] WARNING: 0 entries in metadata map despite ${csvData.length} CSV rows. Column "${videoNameColumn || "(none)"}" did not yield any values. Check CSV columns above.`,
+          );
+        }
       } catch (error: any) {
         console.error(`[UPLOAD-DROPBOX] Error parsing spreadsheet:`, error);
         return NextResponse.json(
@@ -327,104 +418,167 @@ export async function POST(request: NextRequest) {
       let unmatchedCount = 0;
       const unmatchedVideos: string[] = [];
 
-      // If CSV is provided, ONLY queue videos that match CSV entries (like Google Sheets)
-      // If no CSV is provided, upload all videos with default metadata
-      const hasCsvMetadata = csvMetadataMap.size > 0;
+      // If a CSV was provided and parsed, use CSV-driven queueing (total/pending = CSV length).
+      // hasCsvMetadata is true when we have a CSV file, even if the metadata map is empty
+      // (an empty map means no video_name column was found; we still don't want folder-driven).
+      const hasCsvMetadata = csvData.length > 0;
 
-      const allQueueItems = videos.map((video) => {
+      const buildItemFromCsvRow = (
+        video: (typeof videos)[0],
+        csvMetadata: any,
+      ) => {
         const videoName = video.name.toLowerCase();
         const nameWithoutExt = videoName.replace(/\.[^/.]+$/, "");
-        const csvMetadata =
-          matchCsvMetadata(videoName) || matchCsvMetadata(nameWithoutExt);
-
-        if (csvMetadata) {
-          matchedCount++;
-          // Map publishAt/scheduleTime to publishDate (expected by worker)
-          const publishDate =
-            csvMetadata?.publishAt ||
-            csvMetadata?.publishat ||
-            csvMetadata?.scheduleTime ||
-            csvMetadata?.scheduletime ||
+        const publishDate =
+          csvMetadata?.publishAt ||
+          csvMetadata?.publishat ||
+          csvMetadata?.scheduleTime ||
+          csvMetadata?.scheduletime ||
+          undefined;
+        let dropboxThumbnailId: string | undefined;
+        let thumbnailSource: string = "";
+        const csvThumbPath = (csvMetadata?.thumbnail_path ?? "")
+          .toString()
+          .trim();
+        const csvThumbName = (csvMetadata?.thumbnail_name ?? "")
+          .toString()
+          .trim();
+        if (csvThumbPath.startsWith("/")) {
+          dropboxThumbnailId = csvThumbPath;
+          thumbnailSource = "csv_full_path";
+        } else if (csvThumbName || csvThumbPath) {
+          const thumbFilename =
+            csvThumbName || csvThumbPath.split(/[/\\]/).pop() || "";
+          const thumbNameWoExt = thumbFilename
+            .toLowerCase()
+            .replace(/\.[^/.]+$/, "");
+          dropboxThumbnailId =
+            thumbnailsMap.get(thumbNameWoExt) ||
+            thumbnailsMap.get(nameWithoutExt) ||
             undefined;
-
-          // Resolve thumbnail: CSV thumbnail_path (full path) > CSV thumbnail_name/path matched in thumbnails folder > video name matched in thumbnails folder
-          let dropboxThumbnailId: string | undefined;
-          let thumbnailSource: string = "";
-          const csvThumbPath = (csvMetadata?.thumbnail_path ?? "")
-            .toString()
-            .trim();
-          const csvThumbName = (csvMetadata?.thumbnail_name ?? "")
-            .toString()
-            .trim();
-          if (csvThumbPath.startsWith("/")) {
-            dropboxThumbnailId = csvThumbPath;
-            thumbnailSource = "csv_full_path";
-          } else if (csvThumbName || csvThumbPath) {
-            const thumbFilename =
-              csvThumbName || csvThumbPath.split(/[/\\]/).pop() || "";
-            const thumbNameWoExt = thumbFilename
-              .toLowerCase()
-              .replace(/\.[^/.]+$/, "");
-            dropboxThumbnailId =
-              thumbnailsMap.get(thumbNameWoExt) ||
-              thumbnailsMap.get(nameWithoutExt) ||
-              undefined;
-            thumbnailSource = dropboxThumbnailId
-              ? thumbnailsMap.has(thumbNameWoExt)
-                ? "csv_name_match"
-                : "video_name_fallback"
-              : "";
-          } else {
-            dropboxThumbnailId = thumbnailsMap.get(nameWithoutExt) || undefined;
-            thumbnailSource = dropboxThumbnailId ? "video_name_match" : "";
-          }
-          if (dropboxThumbnailId) {
-            console.log(
-              `[UPLOAD-DROPBOX] Thumbnail match: "${video.name}" -> ${dropboxThumbnailId} (source: ${thumbnailSource})`,
-            );
-          }
-
-          return {
-            title:
-              csvMetadata?.youtube_title || video.name.replace(/\.[^/.]+$/, ""),
-            video_name: video.name, // For sheet update: match CSV row by video_name (unique)
-            description:
-              csvMetadata?.youtube_description ||
-              `Uploaded from Dropbox: ${video.name}`,
-            privacyStatus: (csvMetadata?.privacyStatus ||
-              csvMetadata?.privacystatus ||
-              privacyStatus) as "public" | "private" | "unlisted",
-            dropboxFileId: video.pathLower || video.id,
-            postUploadAction:
-              csvMetadata?.post_upload_action ||
-              csvMetadata?.postuploadaction ||
-              (postUploadAction !== "none" ? postUploadAction : undefined),
-            completedFolderId:
-              csvMetadata?.completed_folder_id ||
-              csvMetadata?.completedfolderid ||
-              completedFolderPath ||
-              undefined,
-            publishDate: publishDate, // Worker expects publishDate, not scheduleTime
-            thumbnailUrl: csvMetadata?.thumbnail_url || undefined,
-            dropboxThumbnailId,
-            urlAuthHeaders: csvMetadata?.url_auth_headers || undefined,
-            urlTimeout: csvMetadata?.url_timeout || undefined,
-            madeForKids:
-              csvMetadata?.made_for_kids ||
-              csvMetadata?.madeforkids ||
-              csvMetadata?.selfDeclaredMadeForKids ||
-              undefined,
-          };
+          thumbnailSource = dropboxThumbnailId
+            ? thumbnailsMap.has(thumbNameWoExt)
+              ? "csv_name_match"
+              : "video_name_fallback"
+            : "";
         } else {
+          dropboxThumbnailId = thumbnailsMap.get(nameWithoutExt) || undefined;
+          thumbnailSource = dropboxThumbnailId ? "video_name_match" : "";
+        }
+        if (dropboxThumbnailId) {
+          console.log(
+            `[UPLOAD-DROPBOX] Thumbnail match: "${video.name}" -> ${dropboxThumbnailId} (source: ${thumbnailSource})`,
+          );
+        }
+        return {
+          title:
+            csvMetadata?.youtube_title || video.name.replace(/\.[^/.]+$/, ""),
+          video_name: video.name,
+          description:
+            csvMetadata?.youtube_description ||
+            `Uploaded from Dropbox: ${video.name}`,
+          privacyStatus: (csvMetadata?.privacyStatus ||
+            csvMetadata?.privacystatus ||
+            privacyStatus) as "public" | "private" | "unlisted",
+          dropboxFileId: video.pathLower || video.id,
+          postUploadAction:
+            csvMetadata?.post_upload_action ||
+            csvMetadata?.postuploadaction ||
+            (postUploadAction !== "none" ? postUploadAction : undefined),
+          completedFolderId:
+            csvMetadata?.completed_folder_id ||
+            csvMetadata?.completedfolderid ||
+            completedFolderPath ||
+            undefined,
+          publishDate,
+          thumbnailUrl: csvMetadata?.thumbnail_url || undefined,
+          dropboxThumbnailId,
+          urlAuthHeaders: csvMetadata?.url_auth_headers || undefined,
+          urlTimeout: csvMetadata?.url_timeout || undefined,
+          madeForKids:
+            csvMetadata?.made_for_kids ||
+            csvMetadata?.madeforkids ||
+            csvMetadata?.selfDeclaredMadeForKids ||
+            undefined,
+        };
+      };
+
+      let queueItems: ReturnType<typeof buildItemFromCsvRow>[];
+      if (hasCsvMetadata && csvData.length > 0) {
+        // One item per CSV row – total/pending will match CSV row count
+        queueItems = [];
+        console.log(
+          `[UPLOAD-DROPBOX] Using CSV-driven queue: ${csvData.length} rows, metadata map has ${csvMetadataMap.size} entries`,
+        );
+
+        // Build a lookup of folder videos by lowercase name (with and without extension)
+        const videosByName = new Map<string, (typeof videos)[0]>();
+        for (const v of videos) {
+          const lower = v.name.toLowerCase().trim();
+          const lowerNoExt = lower.replace(/\.[^/.]+$/, "");
+          if (!videosByName.has(lower)) videosByName.set(lower, v);
+          if (!videosByName.has(lowerNoExt)) videosByName.set(lowerNoExt, v);
+        }
+
+        let csvRowsSkipped = 0;
+        for (const row of csvData) {
+          const rawVideoName = getVideoNameFromRow(row);
+          if (!rawVideoName) {
+            csvRowsSkipped++;
+            continue;
+          }
+          const videoName = rawVideoName.toLowerCase().trim();
+          const videoNameNoExt = videoName.replace(/\.[^/.]+$/, "");
+
+          // Match CSV row to a folder video by name
+          const video =
+            videosByName.get(videoName) ||
+            videosByName.get(videoNameNoExt) ||
+            // Partial match fallback
+            videos.find((v) => {
+              const vn = v.name.toLowerCase();
+              return vn.includes(videoName) || videoName.includes(vn);
+            });
+
+          if (!video) {
+            unmatchedCount++;
+            unmatchedVideos.push(rawVideoName);
+            continue;
+          }
+          matchedCount++;
+          queueItems.push(buildItemFromCsvRow(video, row));
+        }
+        if (csvRowsSkipped > 0) {
+          console.log(
+            `[UPLOAD-DROPBOX] Skipped ${csvRowsSkipped} CSV rows with no video name value`,
+          );
+        }
+        // No matches: do not add anything to the queue; return error immediately
+        if (matchedCount === 0) {
+          return NextResponse.json(
+            {
+              error: `No videos matched CSV entries. Found ${videos.length} videos in folder, but none matched the ${csvData.length} entries in the CSV. Auto-detected video name column: "${videoNameColumn || "(none)"}". Nothing was added to the queue.`,
+              totalVideos: videos.length,
+              csvEntries: csvData.length,
+              matchedCount: 0,
+              filteredCount: unmatchedCount,
+            },
+            { status: 400 },
+          );
+        }
+      } else {
+        // No CSV: one item per folder video
+        const allQueueItems = videos.map((video) => {
+          const videoName = video.name.toLowerCase();
+          const nameWithoutExt = videoName.replace(/\.[^/.]+$/, "");
+          const csvMetadata =
+            matchCsvMetadata(videoName) || matchCsvMetadata(nameWithoutExt);
+          if (csvMetadata) {
+            matchedCount++;
+            return buildItemFromCsvRow(video, csvMetadata);
+          }
           unmatchedCount++;
           unmatchedVideos.push(video.name);
-
-          // If CSV is provided, skip videos without matches (filter them out)
-          if (hasCsvMetadata) {
-            return null; // Will be filtered out
-          }
-
-          // No CSV provided - upload with defaults (still upload the video)
           const dropboxThumbnailIdNoCsv =
             thumbnailsMap.get(nameWithoutExt) || undefined;
           if (dropboxThumbnailIdNoCsv) {
@@ -443,14 +597,16 @@ export async function POST(request: NextRequest) {
               postUploadAction !== "none" ? postUploadAction : undefined,
             completedFolderId: completedFolderPath || undefined,
           };
-        }
-      });
+        });
+        queueItems = allQueueItems;
+        console.log(
+          `[UPLOAD-DROPBOX] Using folder-driven queue: ${queueItems.length} videos (no CSV or metadata map empty)`,
+        );
+      }
 
-      // Filter out null entries (videos without CSV matches when CSV is provided)
-      let queueItems = allQueueItems.filter(
-        (item): item is NonNullable<typeof item> => item !== null,
+      console.log(
+        `[UPLOAD-DROPBOX] Queue size: ${queueItems.length} items (max pending will match this)`,
       );
-
       const thumbnailMatchCount = queueItems.filter(
         (item) => (item as { dropboxThumbnailId?: string }).dropboxThumbnailId,
       ).length;
@@ -460,14 +616,14 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const filteredCount = allQueueItems.length - queueItems.length;
+      const filteredCount = hasCsvMetadata ? unmatchedCount : 0;
 
       console.log(
         `[UPLOAD-DROPBOX] Processing ${videos.length} videos from folder`,
       );
       if (hasCsvMetadata) {
         console.log(
-          `[UPLOAD-DROPBOX] CSV provided: ${matchedCount} matched CSV entries, ${filteredCount} filtered out (no CSV match)`,
+          `[UPLOAD-DROPBOX] CSV provided: ${matchedCount} CSV rows with matching video, ${filteredCount} CSV rows with no matching file`,
         );
         if (unmatchedCount > 0) {
           console.log(
@@ -484,9 +640,9 @@ export async function POST(request: NextRequest) {
         if (hasCsvMetadata) {
           return NextResponse.json(
             {
-              error: `No videos matched CSV entries. Found ${videos.length} videos in folder, but none matched the ${csvMetadataMap.size} video_name entries in the CSV.`,
+              error: `No videos matched CSV entries. Found ${videos.length} videos in folder, but none matched the ${csvData.length} entries in the CSV. Auto-detected video name column: "${videoNameColumn || "(none)"}".`,
               totalVideos: videos.length,
-              csvEntries: csvMetadataMap.size,
+              csvEntries: csvData.length,
               matchedCount: 0,
               filteredCount: unmatchedCount,
             },

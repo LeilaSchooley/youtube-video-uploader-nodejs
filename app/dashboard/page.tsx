@@ -69,6 +69,7 @@ export default function Dashboard() {
   const {
     queue,
     setQueue,
+    workerBusy,
     selectedJobId,
     setSelectedJobId,
     jobStatus,
@@ -322,7 +323,10 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem("checkDuplicatesBeforeUpload", String(checkDuplicatesBeforeUpload));
+    localStorage.setItem(
+      "checkDuplicatesBeforeUpload",
+      String(checkDuplicatesBeforeUpload),
+    );
   }, [checkDuplicatesBeforeUpload]);
 
   const toggleDarkMode = () => {
@@ -760,10 +764,13 @@ export default function Dashboard() {
                   Some titles already uploaded
                 </h3>
                 <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                  {duplicateModal.duplicateTitles.length} of your items match titles in your uploaded list (by name). You can add them anyway or add only the new ones.
+                  {duplicateModal.duplicateTitles.length} of your items match
+                  titles in your uploaded list (by name). You can add them
+                  anyway or add only the new ones.
                 </p>
                 <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
-                  Matching is by title (case-insensitive) against your local uploaded list, not the YouTube API.
+                  Matching is by title (case-insensitive) against your local
+                  uploaded list, not the YouTube API.
                 </p>
               </div>
               <div className="p-5 overflow-y-auto flex-1">
@@ -792,7 +799,9 @@ export default function Dashboard() {
                   type="button"
                   onClick={() => {
                     const dupSet = new Set(
-                      duplicateModal.duplicateTitles.map((t) => t.toLowerCase().trim()),
+                      duplicateModal.duplicateTitles.map((t) =>
+                        t.toLowerCase().trim(),
+                      ),
                     );
                     const filtered = duplicateModal.pendingFiles.filter(
                       (f) => !dupSet.has(f.name.toLowerCase().trim()),
@@ -807,7 +816,10 @@ export default function Dashboard() {
                 <button
                   type="button"
                   onClick={() => {
-                    doBulkSubmit(duplicateModal.pendingFiles, duplicateModal.pendingUrls);
+                    doBulkSubmit(
+                      duplicateModal.pendingFiles,
+                      duplicateModal.pendingUrls,
+                    );
                     setDuplicateModal(null);
                   }}
                   className="px-4 py-2 rounded-lg font-medium bg-indigo-600 text-white hover:bg-indigo-700"
@@ -1024,6 +1036,7 @@ export default function Dashboard() {
               {/* Queue Management - Extracted to QueueManagement component */}
               <QueueManagement
                 queue={queue}
+                workerBusy={workerBusy}
                 searchQuery={searchQuery}
                 selectedJobId={selectedJobId}
                 setSelectedJobId={setSelectedJobId}

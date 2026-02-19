@@ -1161,6 +1161,9 @@ export async function GET(request: NextRequest) {
     const regularQueue = getQueue();
     const bulkQueue = getBulkQueue();
 
+    // Global worker busy: any job (any user) is in "processing" => worker is running
+    const workerBusy = bulkQueue.some((j) => j.status === "processing");
+
     // Filter jobs by session/user
     const userRegularJobs = regularQueue.filter(
       (job: QueueItem) =>
@@ -1208,9 +1211,10 @@ export async function GET(request: NextRequest) {
         new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
     );
 
-    return new Response(JSON.stringify({ queue: combinedQueue }), {
-      headers: { "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({ queue: combinedQueue, workerBusy }),
+      { headers: { "Content-Type": "application/json" } },
+    );
   } catch (error: any) {
     console.error("[UPLOAD-QUEUE] GET Error:", error);
     return new Response(

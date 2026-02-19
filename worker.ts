@@ -575,11 +575,7 @@ async function processBatch(
       if (result.value.success) {
         batchResults.success++;
         const videoId = result.value.videoId;
-        sendProgress(
-          task.index,
-          `Completed: ${videoId}`,
-          videoId,
-        );
+        sendProgress(task.index, `Completed: ${videoId}`, videoId);
         if (videoId) {
           appendUploadedVideo({
             videoId,

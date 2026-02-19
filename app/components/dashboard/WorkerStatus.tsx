@@ -4,26 +4,27 @@ import { useState, useEffect } from "react";
 
 interface WorkerStatusProps {
   queue: import("./types").BulkJob[];
+  /** When true, any user has a job in "processing" — show Worker Running even if this user's queue has none */
+  workerBusy?: boolean;
 }
 
-export default function WorkerStatus({ queue }: WorkerStatusProps) {
+export default function WorkerStatus({ queue, workerBusy }: WorkerStatusProps) {
   const [workerRunning, setWorkerRunning] = useState<boolean | null>(null);
   const [pendingJobs, setPendingJobs] = useState(0);
 
   useEffect(() => {
     const checkWorkerStatus = async () => {
-      // Count pending jobs
+      // Count pending jobs (this user's queue)
       const pending = queue.filter(
         (j) => j.status === "pending" || j.status === "processing"
       ).length;
       setPendingJobs(pending);
 
-      // Check if worker is running by looking for processing jobs
-      // If jobs are stuck in pending for too long, worker might not be running
+      // Worker is running if: this user has a processing job, OR server says workerBusy (another user's job is processing)
       const hasProcessing = queue.some((j) => j.status === "processing");
       const allPending = queue.filter((j) => j.status === "pending");
-      
-      if (hasProcessing) {
+
+      if (hasProcessing || workerBusy) {
         setWorkerRunning(true);
       } else if (allPending.length > 0) {
         // Check if pending jobs are old (more than 10 seconds)
@@ -40,7 +41,7 @@ export default function WorkerStatus({ queue }: WorkerStatusProps) {
     checkWorkerStatus();
     const interval = setInterval(checkWorkerStatus, 2000);
     return () => clearInterval(interval);
-  }, [queue]);
+  }, [queue, workerBusy]);
 
   if (workerRunning === null || pendingJobs === 0) {
     return null;

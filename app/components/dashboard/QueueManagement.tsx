@@ -15,6 +15,7 @@ interface ProgressItem {
 
 interface QueueManagementProps {
   queue: BulkJob[];
+  workerBusy?: boolean;
   searchQuery: string;
   selectedJobId: string | null;
   setSelectedJobId: (jobId: string | null) => void;
@@ -49,6 +50,7 @@ interface QueueManagementProps {
 
 export default function QueueManagement({
   queue,
+  workerBusy,
   searchQuery,
   selectedJobId,
   setSelectedJobId,
@@ -104,7 +106,7 @@ export default function QueueManagement({
   return (
     <>
       {/* Worker Status Indicator */}
-      <WorkerStatus queue={queue} />
+      <WorkerStatus queue={queue} workerBusy={workerBusy} />
 
       {/* Delete All Jobs Button */}
       {queue.length > 0 && (

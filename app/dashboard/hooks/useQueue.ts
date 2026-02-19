@@ -26,6 +26,7 @@ export function useQueue({
   addDebugLog = () => {},
 }: UseQueueOptions) {
   const [queue, setQueue] = useState<BulkJob[]>([]);
+  const [workerBusy, setWorkerBusy] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [jobStatus, setJobStatus] = useState<JobStatus>(null);
   const [jobFiles, setJobFiles] = useState<unknown>(null);
@@ -111,7 +112,10 @@ export function useQueue({
     try {
       const res = await fetch(`/api/upload-queue?t=${Date.now()}`);
       const data = await res.json();
-      if (res.ok && data.queue) setQueue(data.queue);
+      if (res.ok) {
+        if (data.queue) setQueue(data.queue);
+        setWorkerBusy(!!data.workerBusy);
+      }
     } catch (err) {
       console.error("[ERROR] Error fetching queue:", err);
     }
@@ -287,6 +291,7 @@ export function useQueue({
   return {
     queue,
     setQueue,
+    workerBusy,
     selectedJobId,
     setSelectedJobId,
     jobStatus,
