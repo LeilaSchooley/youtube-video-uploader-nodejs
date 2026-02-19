@@ -596,6 +596,11 @@ export async function POST(request: NextRequest) {
             postUploadAction:
               postUploadAction !== "none" ? postUploadAction : undefined,
             completedFolderId: completedFolderPath || undefined,
+            publishDate: undefined,
+            thumbnailUrl: undefined,
+            urlAuthHeaders: undefined,
+            urlTimeout: undefined,
+            madeForKids: undefined,
           };
         });
         queueItems = allQueueItems;
