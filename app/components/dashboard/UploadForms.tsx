@@ -2203,7 +2203,8 @@ export default function UploadForms({
                             dropboxThumbnailsFolderPath:
                               dropboxThumbnailsFolderPath || undefined,
                             useWorker: true,
-                            skipDuplicateTitles,
+                            // Use the "Check for duplicates before adding" checkbox (checkDuplicatesBeforeUpload)
+                            skipDuplicateTitles: checkDuplicatesBeforeUpload,
                           }),
                         });
                         const data = await response.json();
