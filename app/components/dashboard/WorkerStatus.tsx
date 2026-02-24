@@ -6,9 +6,24 @@ interface WorkerStatusProps {
   queue: import("./types").BulkJob[];
   /** When true, any user has a job in "processing" — show Worker Running even if this user's queue has none */
   workerBusy?: boolean;
+  /** Worker heartbeat from server; used to show "last seen X min ago" when stale */
+  workerHeartbeat?: { lastRunAt: string; jobId?: string } | null;
 }
 
-export default function WorkerStatus({ queue, workerBusy }: WorkerStatusProps) {
+function formatTimeAgo(iso: string): string {
+  const sec = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (sec < 60) return "just now";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min} min ago`;
+  const hr = Math.floor(min / 60);
+  return `${hr}h ago`;
+}
+
+export default function WorkerStatus({
+  queue,
+  workerBusy,
+  workerHeartbeat,
+}: WorkerStatusProps) {
   const [workerRunning, setWorkerRunning] = useState<boolean | null>(null);
   const [pendingJobs, setPendingJobs] = useState(0);
 
@@ -74,17 +89,29 @@ export default function WorkerStatus({ queue, workerBusy }: WorkerStatusProps) {
     );
   }
 
+  const heartbeatStale =
+    workerHeartbeat &&
+    Date.now() - new Date(workerHeartbeat.lastRunAt).getTime() > 2 * 60 * 1000; // 2 min
+
   return (
     <div className="mb-6 p-4 bg-gradient-to-r from-green-500 to-emerald-600 rounded-xl shadow-lg text-white">
       <div className="flex items-center gap-3">
         <div className="text-3xl animate-pulse-slow">✅</div>
         <div>
-          <div className="font-bold text-lg mb-1">
-            Worker Running
-          </div>
+          <div className="font-bold text-lg mb-1">Worker Running</div>
           <div className="text-sm opacity-90">
             Processing {pendingJobs} job{pendingJobs !== 1 ? "s" : ""}
+            {workerHeartbeat?.jobId && (
+              <span className="ml-2 opacity-75">
+                (job {workerHeartbeat.jobId.slice(-8)})
+              </span>
+            )}
           </div>
+          {heartbeatStale && workerHeartbeat && (
+            <div className="text-xs opacity-75 mt-1">
+              Last activity: {formatTimeAgo(workerHeartbeat.lastRunAt)}
+            </div>
+          )}
         </div>
       </div>
     </div>

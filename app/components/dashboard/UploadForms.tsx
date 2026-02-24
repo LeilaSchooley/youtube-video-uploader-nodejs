@@ -1043,8 +1043,12 @@ export default function UploadForms({
               name="title"
               placeholder="Enter video title"
               required
+              maxLength={100}
               className="input-field"
             />
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Max 100 characters (YouTube limit)
+            </p>
 
             <label htmlFor="description" className="label">
               Description
@@ -1054,8 +1058,12 @@ export default function UploadForms({
               name="description"
               placeholder="Enter video description"
               required
+              maxLength={5000}
               className="input-field min-h-[100px] resize-y"
             />
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Max 5000 characters (YouTube limit)
+            </p>
 
             <label htmlFor="video" className="label">
               Choose File

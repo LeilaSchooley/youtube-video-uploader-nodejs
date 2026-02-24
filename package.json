@@ -35,7 +35,8 @@
     "react-dom": "19.2.3",
     "tailwindcss": "^3.4.19",
     "tsx": "^4.19.2",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/adm-zip": "^0.5.7",

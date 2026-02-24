@@ -27,6 +27,10 @@ export function useQueue({
 }: UseQueueOptions) {
   const [queue, setQueue] = useState<BulkJob[]>([]);
   const [workerBusy, setWorkerBusy] = useState(false);
+  const [workerHeartbeat, setWorkerHeartbeat] = useState<{
+    lastRunAt: string;
+    jobId?: string;
+  } | null>(null);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [jobStatus, setJobStatus] = useState<JobStatus>(null);
   const [jobFiles, setJobFiles] = useState<unknown>(null);
@@ -115,10 +119,23 @@ export function useQueue({
       if (res.ok) {
         if (data.queue) setQueue(data.queue);
         setWorkerBusy(!!data.workerBusy);
+        setWorkerHeartbeat(data.workerHeartbeat ?? null);
       }
     } catch (err) {
       console.error("[ERROR] Error fetching queue:", err);
     }
+  }, []);
+
+  const removeJobFromQueue = useCallback((jobId: string) => {
+    setQueue((prev) => prev.filter((j) => j.id !== jobId));
+    setSelectedJobId((prev) => {
+      if (prev === jobId) {
+        setJobStatus(null);
+        setJobFiles(null);
+        return null;
+      }
+      return prev;
+    });
   }, []);
 
   const fetchJobStatus = useCallback(
@@ -150,12 +167,13 @@ export function useQueue({
           }
         } else if (res.status === 404) {
           setJobStatus(null);
+          removeJobFromQueue(jobId);
         }
       } catch (err) {
         console.error("[ERROR] Error fetching job status:", err);
       }
     },
-    [],
+    [removeJobFromQueue],
   );
 
   const fetchJobFiles = useCallback(async (jobId: string) => {
@@ -174,7 +192,13 @@ export function useQueue({
   const handleQueueAction = useCallback(
     async (
       jobId: string,
-      action: "pause" | "resume" | "cancel" | "delete" | "delete-all-jobs",
+      action:
+        | "pause"
+        | "resume"
+        | "cancel"
+        | "delete"
+        | "delete-all-jobs"
+        | "retry-failed",
     ) => {
       try {
         const body =
@@ -190,7 +214,10 @@ export function useQueue({
         if (res.ok) {
           setShowToast({ message: data.message, type: "success" });
           await fetchQueue();
-          if (action === "delete" && selectedJobId === jobId) {
+          if (action === "retry-failed" && data.jobId) {
+            setSelectedJobId(data.jobId);
+            fetchJobStatus(data.jobId);
+          } else if (action === "delete" && selectedJobId === jobId) {
             setSelectedJobId(null);
             setJobStatus(null);
           } else if (selectedJobId === jobId) {
@@ -269,7 +296,15 @@ export function useQueue({
   const hasActiveJobs = queue.some(
     (j) => j.status === "processing" || j.status === "pending",
   );
-  const pollIntervalMs = hasActiveJobs ? 1000 : 3000;
+  const selectedJobIsActive =
+    selectedJobId &&
+    queue.some(
+      (j) =>
+        j.id === selectedJobId &&
+        (j.status === "processing" || j.status === "pending"),
+    );
+  // Poll faster (500ms) when user is watching an active job for more real-time updates
+  const pollIntervalMs = selectedJobIsActive ? 500 : hasActiveJobs ? 1000 : 3000;
 
   useEffect(() => {
     fetchQueue();
@@ -292,6 +327,7 @@ export function useQueue({
     queue,
     setQueue,
     workerBusy,
+    workerHeartbeat,
     selectedJobId,
     setSelectedJobId,
     jobStatus,

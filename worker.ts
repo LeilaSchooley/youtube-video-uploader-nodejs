@@ -39,6 +39,11 @@ import fs from "fs";
 import { workerLog } from "./lib/worker-logger";
 import { writeHeartbeat } from "./lib/worker-health";
 import { withRetry } from "./lib/youtube-retry";
+import {
+  sanitizeYoutubeTitle,
+  sanitizeYoutubeDescription,
+} from "./lib/youtube-utils";
+import { getVideoDurationSeconds } from "./lib/video-duration";
 
 const WORKER_INTERVAL = 5000; // Check for new jobs every 5 seconds
 const BATCH_SIZE = 3; // Process 3 videos at a time
@@ -186,6 +191,7 @@ async function uploadVideo(
     status: string,
     videoId?: string,
     error?: string,
+    duration?: number,
   ) => void,
   oAuthClient: ReturnType<typeof getOAuthClient>,
   dropboxToken?: string,
@@ -193,11 +199,19 @@ async function uploadVideo(
   sessionRefreshToken?: string | null,
 ): Promise<{ success: boolean; videoId?: string; error?: string }> {
   const { index, item } = task;
+  let videoDuration: number | null = null;
 
   try {
-    // Get title and description
-    const title = item.title || `Video ${index + 1}`;
-    const description = item.description || `Uploaded video ${index + 1}`;
+    // Get video duration from local file path when available (requires ffprobe)
+    if (item.file?.path) {
+      videoDuration = await getVideoDurationSeconds(item.file.path);
+    }
+
+    // Get title and description; sanitize for YouTube limits (100 title, 5000 description)
+    const rawTitle = item.title || `Video ${index + 1}`;
+    const rawDesc = item.description || `Uploaded video ${index + 1}`;
+    const title = sanitizeYoutubeTitle(rawTitle);
+    const description = sanitizeYoutubeDescription(rawDesc);
     const privacyStatus = item.privacyStatus || "public";
 
     // Prepare request body
@@ -316,6 +330,8 @@ async function uploadVideo(
       index,
       `Uploaded successfully (${uploadDuration.toFixed(1)}s)`,
       videoId,
+      undefined,
+      videoDuration ?? undefined,
     );
 
     // Upload thumbnail if available
@@ -877,6 +893,7 @@ async function processBulkJob(jobId: string): Promise<void> {
     status: string,
     videoId?: string,
     error?: string,
+    duration?: number,
   ) => {
     const item = job.items[index];
     const title = item?.title || `Video ${index + 1}`;
@@ -889,6 +906,7 @@ async function processBulkJob(jobId: string): Promise<void> {
       status: statusWithTitle,
       videoId,
       error,
+      ...(duration != null && { duration }),
       title,
     };
 

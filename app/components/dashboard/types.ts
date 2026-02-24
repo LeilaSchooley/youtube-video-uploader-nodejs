@@ -65,35 +65,36 @@ export interface UploadProgress {
   };
 }
 
-/** Progress entry for one item in a bulk job */
-export interface BulkJobProgressItem {
-  index: number;
-  status: string;
-  videoId?: string;
-  error?: string;
-  title?: string;
-}
+import type { BulkUploadItem } from "@/lib/bulk-queue";
 
-/** Bulk queue job (matches lib/bulk-queue BulkUploadItem) */
-export interface BulkJob {
-  id: string;
-  sessionId: string;
-  userId?: string;
-  type: "files" | "urls";
-  videosPerDay?: number;
-  startDate?: string;
-  items: Array<Record<string, unknown>>;
-  dropboxCsvPath?: string;
-  dropboxSheetName?: string;
-  status: "pending" | "processing" | "completed" | "failed" | "paused" | "cancelled";
-  progress: BulkJobProgressItem[];
-  createdAt: string;
-  updatedAt: string;
-  error?: string;
+/** Progress entry for one item in a bulk job (shared with lib/bulk-queue) */
+export type BulkJobProgressItem = BulkUploadItem["progress"][number];
+
+/** Bulk queue job - extends server BulkUploadItem with API response fields */
+export interface BulkJob
+  extends Pick<
+    BulkUploadItem,
+    | "id"
+    | "sessionId"
+    | "userId"
+    | "type"
+    | "videosPerDay"
+    | "startDate"
+    | "items"
+    | "dropboxCsvPath"
+    | "dropboxSheetName"
+    | "status"
+    | "progress"
+    | "createdAt"
+    | "updatedAt"
+    | "error"
+  > {
   /** Derived or API-provided total video count */
   totalVideos?: number;
   /** Optional notes (queue-notes) */
   notes?: string;
+  /** Number of jobs ahead in the worker queue (0 = next to run) */
+  positionAhead?: number;
 }
 
 export type JobStatus = BulkJob | null;

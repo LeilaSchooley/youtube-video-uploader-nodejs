@@ -38,12 +38,15 @@ export async function GET() {
             jobId: workerHeartbeat.jobId,
           }
         : null,
-      environment: {
-        nodeEnv: process.env.NODE_ENV || 'development',
-        hasGoogleClientId: !!process.env.GOOGLE_CLIENT_ID,
-        hasGoogleClientSecret: !!process.env.GOOGLE_CLIENT_SECRET,
-        hasRedirectUri: !!process.env.GOOGLE_REDIRECT_URI,
-      },
+      environment:
+        process.env.NODE_ENV === "production"
+          ? { nodeEnv: "production" }
+          : {
+              nodeEnv: process.env.NODE_ENV || "development",
+              hasGoogleClientId: !!process.env.GOOGLE_CLIENT_ID,
+              hasGoogleClientSecret: !!process.env.GOOGLE_CLIENT_SECRET,
+              hasRedirectUri: !!process.env.GOOGLE_REDIRECT_URI,
+            },
     };
 
     return NextResponse.json(checks, { status: 200 });

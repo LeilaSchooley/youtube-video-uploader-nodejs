@@ -55,10 +55,19 @@ export default function Dashboard() {
   const [showProgress, setShowProgress] = useState<boolean>(false);
   const [videosPerDay, setVideosPerDay] = useState<string>("");
   const [enableScheduling, setEnableScheduling] = useState<boolean>(false);
-  const [showToast, setShowToast] = useState<{
-    message: string;
-    type: "success" | "error" | "info";
-  } | null>(null);
+  const [toastState, setToastState] = useState<{
+    current: { message: string; type: "success" | "error" | "info" } | null;
+    queue: Array<{ message: string; type: "success" | "error" | "info" }>;
+  }>({ current: null, queue: [] });
+  const setShowToast = useCallback(
+    (t: { message: string; type: "success" | "error" | "info" }) => {
+      setToastState((prev) => {
+        if (!prev.current) return { current: t, queue: prev.queue };
+        return { ...prev, queue: [...prev.queue, t] };
+      });
+    },
+    [],
+  );
   const bulkFilesInputRef = useRef<HTMLInputElement>(null);
 
   const { confirmModal, requestConfirm, closeConfirmModal } = useConfirmModal();
@@ -70,6 +79,7 @@ export default function Dashboard() {
     queue,
     setQueue,
     workerBusy,
+    workerHeartbeat,
     selectedJobId,
     setSelectedJobId,
     jobStatus,
@@ -203,9 +213,17 @@ export default function Dashboard() {
 
         if (!row.youtube_title || !row.youtube_title.trim()) {
           errors.push(`Row ${i + 1}: Missing youtube_title`);
+        } else if (row.youtube_title.length > 100) {
+          errors.push(
+            `Row ${i + 1}: youtube_title too long (${row.youtube_title.length} chars, max 100)`,
+          );
         }
         if (!row.youtube_description || !row.youtube_description.trim()) {
           errors.push(`Row ${i + 1}: Missing youtube_description`);
+        } else if (row.youtube_description.length > 5000) {
+          errors.push(
+            `Row ${i + 1}: youtube_description too long (${row.youtube_description.length} chars, max 5000)`,
+          );
         }
         // Check for video source: path, video_url, or drive_file_id
         if (
@@ -746,12 +764,27 @@ export default function Dashboard() {
         />
 
         {/* Toast Notification */}
-        {showToast && (
+        {toastState.current && (
           <Toast
-            message={showToast.message}
-            type={showToast.type}
-            onClose={() => setShowToast(null)}
-            duration={showToast.type === "info" ? 8000 : 5000}
+            message={
+              toastState.queue.length > 0
+                ? `${toastState.current.message} (+${toastState.queue.length} more)`
+                : toastState.current.message
+            }
+            type={toastState.current.type}
+            onClose={() => {
+              setToastState((prev) =>
+                prev.queue.length > 0
+                  ? { current: prev.queue[0], queue: prev.queue.slice(1) }
+                  : { current: null, queue: [] },
+              );
+            }}
+            duration={
+              toastState.current.type === "error" ||
+              toastState.current.type === "info"
+                ? 8000
+                : 5000
+            }
           />
         )}
 
@@ -1037,6 +1070,7 @@ export default function Dashboard() {
               <QueueManagement
                 queue={queue}
                 workerBusy={workerBusy}
+                workerHeartbeat={workerHeartbeat}
                 searchQuery={searchQuery}
                 selectedJobId={selectedJobId}
                 setSelectedJobId={setSelectedJobId}

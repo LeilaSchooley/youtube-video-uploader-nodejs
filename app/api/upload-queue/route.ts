@@ -17,8 +17,13 @@ import {
   moveDriveFile,
   deleteDriveFile,
 } from "@/lib/drive";
+import {
+  sanitizeYoutubeTitle,
+  sanitizeYoutubeDescription,
+} from "@/lib/youtube-utils";
 import { getQueue } from "@/lib/queue";
 import { getBulkQueue } from "@/lib/bulk-queue";
+import { readHeartbeat } from "@/lib/worker-health";
 import type { QueueItem } from "@/lib/queue";
 import type { BulkUploadItem } from "@/lib/bulk-queue";
 
@@ -167,8 +172,8 @@ async function uploadVideo(
       };
     } = {
       snippet: {
-        title: youtube_title,
-        description: youtube_description,
+        title: sanitizeYoutubeTitle(youtube_title),
+        description: sanitizeYoutubeDescription(youtube_description),
       },
       status: {
         privacyStatus: uploadPrivacyStatus,
@@ -1163,6 +1168,7 @@ export async function GET(request: NextRequest) {
 
     // Global worker busy: any job (any user) is in "processing" => worker is running
     const workerBusy = bulkQueue.some((j) => j.status === "processing");
+    const workerHeartbeat = readHeartbeat();
 
     // Filter jobs by session/user
     const userRegularJobs = regularQueue.filter(
@@ -1174,6 +1180,16 @@ export async function GET(request: NextRequest) {
       (job: BulkUploadItem) =>
         job.sessionId === sessionId || job.userId === session.userId,
     );
+
+    // Compute position ahead for each bulk job (how many jobs before it in queue)
+    const positionAheadByJobId = new Map<string, number>();
+    let aheadCount = 0;
+    for (const j of bulkQueue) {
+      if (j.status === "pending" || j.status === "processing") {
+        positionAheadByJobId.set(j.id, aheadCount);
+        aheadCount++;
+      }
+    }
 
     // Combine and normalize both queues
     const combinedQueue = [
@@ -1188,6 +1204,7 @@ export async function GET(request: NextRequest) {
         videosPerDay: job.videosPerDay,
         startDate: job.startDate,
         notes: job.notes,
+        positionAhead: 0, // Regular queue not used by worker
       })),
       ...userBulkJobs.map((job: BulkUploadItem) => ({
         id: job.id,
@@ -1205,6 +1222,7 @@ export async function GET(request: NextRequest) {
         error: job.error,
         videosPerDay: job.videosPerDay,
         startDate: job.startDate,
+        positionAhead: positionAheadByJobId.get(job.id) ?? 0,
       })),
     ].sort(
       (a, b) =>
@@ -1212,7 +1230,16 @@ export async function GET(request: NextRequest) {
     );
 
     return new Response(
-      JSON.stringify({ queue: combinedQueue, workerBusy }),
+      JSON.stringify({
+        queue: combinedQueue,
+        workerBusy,
+        workerHeartbeat: workerHeartbeat
+          ? {
+              lastRunAt: workerHeartbeat.lastRunAt,
+              jobId: workerHeartbeat.jobId,
+            }
+          : null,
+      }),
       { headers: { "Content-Type": "application/json" } },
     );
   } catch (error: any) {

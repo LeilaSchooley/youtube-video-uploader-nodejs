@@ -55,6 +55,7 @@ export interface BulkUploadItem {
     videoId?: string;
     error?: string;
     title?: string;
+    duration?: number; // Video duration in seconds (from ffprobe, when available)
   }>;
   createdAt: string;
   updatedAt: string;

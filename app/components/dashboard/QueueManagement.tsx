@@ -16,6 +16,7 @@ interface ProgressItem {
 interface QueueManagementProps {
   queue: BulkJob[];
   workerBusy?: boolean;
+  workerHeartbeat?: { lastRunAt: string; jobId?: string } | null;
   searchQuery: string;
   selectedJobId: string | null;
   setSelectedJobId: (jobId: string | null) => void;
@@ -23,7 +24,13 @@ interface QueueManagementProps {
   fetchQueue: () => Promise<void>;
   handleQueueAction: (
     jobId: string,
-    action: "pause" | "resume" | "cancel" | "delete" | "delete-all-jobs",
+    action:
+      | "pause"
+      | "resume"
+      | "cancel"
+      | "delete"
+      | "delete-all-jobs"
+      | "retry-failed",
   ) => Promise<void>;
   jobStatus: JobStatus;
   jobFiles: any;
@@ -51,6 +58,7 @@ interface QueueManagementProps {
 export default function QueueManagement({
   queue,
   workerBusy,
+  workerHeartbeat,
   searchQuery,
   selectedJobId,
   setSelectedJobId,
@@ -106,7 +114,11 @@ export default function QueueManagement({
   return (
     <>
       {/* Worker Status Indicator */}
-      <WorkerStatus queue={queue} workerBusy={workerBusy} />
+      <WorkerStatus
+        queue={queue}
+        workerBusy={workerBusy}
+        workerHeartbeat={workerHeartbeat}
+      />
 
       {/* Delete All Jobs Button */}
       {queue.length > 0 && (
@@ -193,7 +205,13 @@ export default function QueueManagement({
                           p.status.includes("Already uploaded")))),
                 ).length;
                 const failedCount = jobProgress.filter(
-                  (p: any) => p && p.status && p.status.includes("Failed"),
+                  (p: any) =>
+                    p &&
+                    (p.error ||
+                      (p.status &&
+                        (p.status.includes("Failed") ||
+                          p.status.includes("Missing") ||
+                          p.status.includes("Invalid")))),
                 ).length;
                 const totalVideos =
                   displayJob.totalVideos || jobProgress.length || 0;
@@ -266,6 +284,15 @@ export default function QueueManagement({
                             {displayStatus === "paused" && "⏸ "}
                             {displayStatus.toUpperCase()}
                           </span>
+                          {(job.status === "pending" ||
+                            job.status === "processing") &&
+                            typeof job.positionAhead === "number" &&
+                            job.positionAhead > 0 && (
+                              <span className="px-2 py-0.5 rounded bg-gray-200 dark:bg-gray-600 text-xs text-gray-600 dark:text-gray-300">
+                                {job.positionAhead} job
+                                {job.positionAhead !== 1 ? "s" : ""} ahead
+                              </span>
+                            )}
                         </div>
 
                         {/* Progress Bar */}
@@ -718,22 +745,42 @@ export default function QueueManagement({
                           {(job.status === "completed" ||
                             job.status === "failed" ||
                             job.status === "cancelled") && (
-                            <button
-                              onClick={async (e) => {
-                                e.stopPropagation();
-                                const ok = await requestConfirm({
-                                  title: "Delete job",
-                                  message: `Are you sure you want to delete this ${job.status} job? This will remove it from the queue and clean up associated files.`,
-                                  confirmLabel: "Delete",
-                                  variant: "danger",
-                                });
-                                if (ok) handleQueueAction(job.id, "delete");
-                              }}
-                              className="px-3 py-1.5 bg-gray-500 hover:bg-gray-600 text-white text-xs font-semibold rounded-lg transition-colors"
-                              title="Delete this job"
-                            >
-                              🗑️ Delete
-                            </button>
+                            <>
+                              {failedCount > 0 && (
+                                <button
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    const ok = await requestConfirm({
+                                      title: "Retry failed",
+                                      message: `Create a new job with ${failedCount} failed item(s) to retry?`,
+                                      confirmLabel: "Retry",
+                                    });
+                                    if (ok)
+                                      handleQueueAction(job.id, "retry-failed");
+                                  }}
+                                  className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold rounded-lg transition-colors"
+                                  title="Retry failed items only"
+                                >
+                                  🔄 Retry failed
+                                </button>
+                              )}
+                              <button
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  const ok = await requestConfirm({
+                                    title: "Delete job",
+                                    message: `Are you sure you want to delete this ${job.status} job? This will remove it from the queue and clean up associated files.`,
+                                    confirmLabel: "Delete",
+                                    variant: "danger",
+                                  });
+                                  if (ok) handleQueueAction(job.id, "delete");
+                                }}
+                                className="px-3 py-1.5 bg-gray-500 hover:bg-gray-600 text-white text-xs font-semibold rounded-lg transition-colors"
+                                title="Delete this job"
+                              >
+                                🗑️ Delete
+                              </button>
+                            </>
                           )}
                         </div>
                       </div>
@@ -893,6 +940,20 @@ export default function QueueManagement({
                     title="Copy this job"
                   >
                     📋 Copy
+                  </button>
+                  <button
+                    onClick={() => {
+                      const url = `/api/export-job?jobId=${encodeURIComponent(selectedJob.id)}&format=csv`;
+                      window.open(url, "_blank");
+                      setShowToast({
+                        message: "Export started",
+                        type: "info",
+                      });
+                    }}
+                    className="px-3 py-1.5 bg-teal-500 hover:bg-teal-600 text-white text-xs font-semibold rounded-lg transition-colors"
+                    title="Export job report (CSV)"
+                  >
+                    📥 Export
                   </button>
                   <button
                     onClick={() => setSelectedJobId(null)}

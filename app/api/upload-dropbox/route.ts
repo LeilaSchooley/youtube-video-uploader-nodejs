@@ -13,6 +13,10 @@ import { addToBulkQueue } from "@/lib/bulk-queue";
 import { Readable } from "stream";
 import { getUploadedTitlesSet } from "@/lib/uploaded-videos";
 import { jsonApiError } from "@/lib/api-response";
+import {
+  sanitizeYoutubeTitle,
+  sanitizeYoutubeDescription,
+} from "@/lib/youtube-utils";
 const csvParser = require("csv-parser");
 // Use require for xlsx to avoid TypeScript module resolution issues
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -470,13 +474,15 @@ export async function POST(request: NextRequest) {
             `[UPLOAD-DROPBOX] Thumbnail match: "${video.name}" -> ${dropboxThumbnailId} (source: ${thumbnailSource})`,
           );
         }
+        const rawTitle =
+          csvMetadata?.youtube_title || video.name.replace(/\.[^/.]+$/, "");
+        const rawDesc =
+          csvMetadata?.youtube_description ||
+          `Uploaded from Dropbox: ${video.name}`;
         return {
-          title:
-            csvMetadata?.youtube_title || video.name.replace(/\.[^/.]+$/, ""),
+          title: sanitizeYoutubeTitle(rawTitle),
           video_name: video.name,
-          description:
-            csvMetadata?.youtube_description ||
-            `Uploaded from Dropbox: ${video.name}`,
+          description: sanitizeYoutubeDescription(rawDesc),
           privacyStatus: (csvMetadata?.privacyStatus ||
             csvMetadata?.privacystatus ||
             privacyStatus) as "public" | "private" | "unlisted",
@@ -587,9 +593,11 @@ export async function POST(request: NextRequest) {
             );
           }
           return {
-            title: video.name.replace(/\.[^/.]+$/, ""),
+            title: sanitizeYoutubeTitle(video.name.replace(/\.[^/.]+$/, "")),
             video_name: video.name,
-            description: `Uploaded from Dropbox: ${video.name}`,
+            description: sanitizeYoutubeDescription(
+              `Uploaded from Dropbox: ${video.name}`,
+            ),
             privacyStatus: privacyStatus as "public" | "private" | "unlisted",
             dropboxFileId: video.pathLower || video.id,
             dropboxThumbnailId: dropboxThumbnailIdNoCsv,

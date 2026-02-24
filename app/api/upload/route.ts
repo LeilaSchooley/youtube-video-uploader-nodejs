@@ -4,6 +4,10 @@ import { getSession } from "@/lib/session";
 import { google } from "googleapis";
 import { cookies } from "next/headers";
 import { Readable } from "stream";
+import {
+  sanitizeYoutubeTitle,
+  sanitizeYoutubeDescription,
+} from "@/lib/youtube-utils";
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300; // 5 minutes for large video uploads
@@ -73,7 +77,10 @@ export async function POST(request: NextRequest) {
         selfDeclaredMadeForKids?: boolean;
       };
     } = {
-      snippet: { title, description },
+      snippet: {
+        title: sanitizeYoutubeTitle(title),
+        description: sanitizeYoutubeDescription(description),
+      },
       status: { 
         privacyStatus,
         selfDeclaredMadeForKids: false, // Default to false (not made for kids)

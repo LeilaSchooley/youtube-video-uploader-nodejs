@@ -2,8 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { cookies } from "next/headers";
 import { pauseJob, resumeJob, cancelJob, deleteJob, deleteAllCompletedJobs, deleteAllJobs, getQueueItem, getQueue } from "@/lib/queue";
-import { deleteAllBulkJobs, deleteBulkJob, getBulkQueue, getBulkQueueItem } from "@/lib/bulk-queue";
+import {
+  deleteAllBulkJobs,
+  deleteBulkJob,
+  getBulkQueue,
+  getBulkQueueItem,
+  addToBulkQueue,
+} from "@/lib/bulk-queue";
 import { deleteUploadDir } from "@/lib/storage";
+import { parseBodyOr400, queueManageBodySchema } from "@/lib/api-validation";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +35,9 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { jobId, action } = body;
+    const parsed = parseBodyOr400(body, queueManageBodySchema);
+    if (parsed instanceof Response) return parsed;
+    const { jobId, action } = parsed;
 
     // Handle "delete-all" action (doesn't require jobId) - deletes only completed/failed/cancelled
     if (action === "delete-all") {
@@ -146,6 +155,48 @@ export async function POST(request: NextRequest) {
           { status: 403 }
         );
       }
+      // Retry failed: create new job with only failed items
+      if (action === "retry-failed") {
+        const progress = bulkJob.progress || [];
+        const failedIndices = new Set<number>();
+        progress.forEach((p) => {
+          if (
+            p &&
+            typeof p.index === "number" &&
+            (p.status?.includes("Failed") ||
+              p.status?.includes("Missing") ||
+              p.status?.includes("Invalid") ||
+              p.error)
+          ) {
+            failedIndices.add(p.index);
+          }
+        });
+        if (failedIndices.size === 0) {
+          return NextResponse.json(
+            { error: "No failed items to retry" },
+            { status: 400 },
+          );
+        }
+        const failedItems = bulkJob.items.filter((_, idx) =>
+          failedIndices.has(idx),
+        );
+        const newJobId = addToBulkQueue({
+          sessionId: bulkJob.sessionId,
+          userId: bulkJob.userId,
+          type: bulkJob.type,
+          videosPerDay: bulkJob.videosPerDay,
+          startDate: bulkJob.startDate,
+          items: failedItems,
+          dropboxCsvPath: bulkJob.dropboxCsvPath,
+          dropboxSheetName: bulkJob.dropboxSheetName,
+        });
+        return NextResponse.json({
+          success: true,
+          message: `Created retry job with ${failedItems.length} failed item(s)`,
+          jobId: newJobId,
+        });
+      }
+
       // Only cancel and delete are supported for bulk jobs (no pause/resume in worker)
       if (action === "cancel" || action === "delete") {
         try {
@@ -166,8 +217,8 @@ export async function POST(request: NextRequest) {
         });
       }
       return NextResponse.json(
-        { error: "Bulk jobs only support 'cancel' or 'delete'" },
-        { status: 400 }
+        { error: "Bulk jobs support 'cancel', 'delete', or 'retry-failed'" },
+        { status: 400 },
       );
     }
 
