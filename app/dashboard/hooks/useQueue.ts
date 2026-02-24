@@ -176,18 +176,28 @@ export function useQueue({
     [removeJobFromQueue],
   );
 
-  const fetchJobFiles = useCallback(async (jobId: string) => {
-    try {
-      setLoadingFiles(true);
-      const res = await fetch(`/api/delete-videos?jobId=${jobId}`);
-      const data = await res.json();
-      if (res.ok && data.success) setJobFiles(data);
-    } catch (err) {
-      console.error("[ERROR] Error fetching job files:", err);
-    } finally {
-      setLoadingFiles(false);
-    }
-  }, []);
+  const fetchJobFiles = useCallback(
+    async (jobId: string) => {
+      try {
+        setLoadingFiles(true);
+        const res = await fetch(`/api/delete-videos?jobId=${jobId}`);
+        const data = await res.json();
+        if (res.ok && data.success) {
+          setJobFiles(data);
+        } else if (
+          res.status === 404 ||
+          /not found|unauthorized/i.test(data?.error || "")
+        ) {
+          removeJobFromQueue(jobId);
+        }
+      } catch (err) {
+        console.error("[ERROR] Error fetching job files:", err);
+      } finally {
+        setLoadingFiles(false);
+      }
+    },
+    [removeJobFromQueue],
+  );
 
   const handleQueueAction = useCallback(
     async (
@@ -228,13 +238,20 @@ export function useQueue({
             }, 500);
           }
         } else {
-          setShowToast({ message: data.error || "Failed to perform action", type: "error" });
+          const errMsg = data.error || "";
+          if (res.status === 404 || /not found|unauthorized/i.test(errMsg)) {
+            removeJobFromQueue(jobId);
+          }
+          setShowToast({
+            message: errMsg || "Failed to perform action",
+            type: "error",
+          });
         }
       } catch {
         setShowToast({ message: "An error occurred", type: "error" });
       }
     },
-    [setShowToast, fetchQueue, fetchJobStatus, selectedJobId],
+    [setShowToast, fetchQueue, fetchJobStatus, selectedJobId, removeJobFromQueue],
   );
 
   const handleDeleteFile = useCallback(
