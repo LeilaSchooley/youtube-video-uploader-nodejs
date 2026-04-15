@@ -2,6 +2,7 @@
 
 import { useState, useCallback, type FormEvent, type RefObject } from "react";
 import type { BulkUploadProgress } from "@/app/components/dashboard/types";
+import { useAppToast } from "@/app/app-toast-context";
 
 export interface DuplicateModalState {
   duplicateTitles: string[];
@@ -10,16 +11,15 @@ export interface DuplicateModalState {
 }
 
 export interface UseBulkUploadOptions {
-  setShowToast: (toast: { message: string; type: "success" | "error" | "info" }) => void;
   setMessage: (msg: { type: "success" | "error" | "info" | null; text: string | null }) => void;
   bulkFilesInputRef?: RefObject<HTMLInputElement | null>;
 }
 
 export function useBulkUpload({
-  setShowToast,
   setMessage,
   bulkFilesInputRef,
 }: UseBulkUploadOptions) {
+  const setShowToast = useAppToast();
   const [selectedBulkFiles, setSelectedBulkFiles] = useState<File[]>([]);
   const [bulkUrls, setBulkUrls] = useState<string[]>([]);
   const [urlAuthHeaders, setUrlAuthHeaders] = useState<string>("");
@@ -47,6 +47,7 @@ export function useBulkUpload({
       try {
         const res = await fetch("/api/upload-bulk", {
           method: "POST",
+          credentials: "include",
           body: formData,
         });
 

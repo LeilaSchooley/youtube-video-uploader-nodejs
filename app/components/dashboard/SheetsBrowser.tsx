@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { Button } from "@/components/ui/button";
+import BrowserLoadingSkeleton from "./BrowserLoadingSkeleton";
 
 interface DriveSheet {
   id: string;
@@ -36,7 +38,9 @@ export default function SheetsBrowser({ onSelectSheet, onClose }: SheetsBrowserP
         setCurrentFolder({ id: "all", name: "All Sheets" });
         
         const sheetsUrl = "/api/list-drive-sheets?folderId=all";
-        const sheetsResponse = await fetch(sheetsUrl);
+        const sheetsResponse = await fetch(sheetsUrl, {
+          credentials: "include",
+        });
         const sheetsData = await sheetsResponse.json();
         
         if (!sheetsResponse.ok) {
@@ -53,7 +57,9 @@ export default function SheetsBrowser({ onSelectSheet, onClose }: SheetsBrowserP
           ? "/api/browse-drive?folderId=root"
           : `/api/browse-drive?folderId=${encodeURIComponent(folderId)}`;
         
-        const browseResponse = await fetch(browseUrl);
+        const browseResponse = await fetch(browseUrl, {
+          credentials: "include",
+        });
         const browseData = await browseResponse.json();
         
         if (!browseResponse.ok) {
@@ -68,7 +74,9 @@ export default function SheetsBrowser({ onSelectSheet, onClose }: SheetsBrowserP
           ? "/api/list-drive-sheets?folderId=root"
           : `/api/list-drive-sheets?folderId=${encodeURIComponent(folderId)}`;
         
-        const sheetsResponse = await fetch(sheetsUrl);
+        const sheetsResponse = await fetch(sheetsUrl, {
+          credentials: "include",
+        });
         const sheetsData = await sheetsResponse.json();
         
         if (!sheetsResponse.ok) {
@@ -195,18 +203,16 @@ export default function SheetsBrowser({ onSelectSheet, onClose }: SheetsBrowserP
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6">
           {loading ? (
-            <div className="flex items-center justify-center py-12">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-            </div>
+            <BrowserLoadingSkeleton rows={8} />
           ) : error ? (
-            <div className="text-center py-12">
-              <div className="text-red-600 dark:text-red-400 mb-2">⚠️ {error}</div>
-              <button
-                onClick={() => loadSheets(currentFolderId)}
-                className="text-blue-600 dark:text-blue-400 hover:underline"
+            <div className="flex flex-col items-center justify-center gap-4 py-12 text-center">
+              <p className="text-sm text-destructive">{error}</p>
+              <Button
+                type="button"
+                onClick={() => void loadSheets(currentFolderId)}
               >
                 Try again
-              </button>
+              </Button>
             </div>
           ) : (
             <div className="space-y-6">

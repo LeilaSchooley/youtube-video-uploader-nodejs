@@ -1,30 +1,26 @@
 import { parse } from "date-fns";
+import { clsx, type ClassValue } from "clsx";
+import { twMerge } from "tailwind-merge";
 
-// Date parser utility
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
+
 export function parseDate(input: string): Date | null {
   const formats = [
-    "yyyy-MM-dd HH:mm", // 2023-12-25 14:30
-    "MM/dd/yyyy hh:mm a", // 12/25/2023 02:30 PM
-    "MMM dd yyyy hh:mm a", // Dec 25 2023 02:30 PM
-    "MMM d yyyy hh:mm a", // Dec 25 2023 2:30 PM
-    "dd MMM yyyy HH:mm", // 25 Dec 2023 14:30
+    "yyyy-MM-dd HH:mm",
+    "MM/dd/yyyy hh:mm a",
+    "MMM dd yyyy hh:mm a",
+    "MMM d yyyy hh:mm a",
+    "dd MMM yyyy HH:mm",
   ];
 
   for (const format of formats) {
     try {
       return parse(input, format, new Date());
-    } catch (e) {
-      // Try next format
+    } catch {
+      // try next format
     }
   }
   return null;
 }
-
-
-
-
-
-
-
-
-

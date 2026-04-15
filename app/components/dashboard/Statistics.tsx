@@ -1,6 +1,17 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useAppToast } from "@/app/app-toast-context";
+import { useState, useCallback, useEffect, useMemo } from "react";
+import { Button } from "@/components/ui/button";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 
 interface ProgressItem {
   index: number;
@@ -20,12 +31,12 @@ interface StatisticsProps {
   timeUntilNext: string;
   /** When true (Statistics tab is active), auto-load uploaded videos list once if not yet loaded */
   isActive?: boolean;
-  /** Optional: for "Clear upload history" confirmation and toast */
+  /** Optional: for "Clear upload history" confirmation */
   requestConfirm?: (opts: { title: string; message: string; confirmLabel?: string; variant?: "danger" | "default" }) => Promise<boolean>;
-  setShowToast?: (t: { message: string; type: "success" | "error" | "info" }) => void;
 }
 
-export default function Statistics({ queue, nextUploadTime, timeUntilNext, isActive, requestConfirm, setShowToast }: StatisticsProps) {
+export default function Statistics({ queue, nextUploadTime, timeUntilNext, isActive, requestConfirm }: StatisticsProps) {
+  const showAppToast = useAppToast();
   const [uploadedVideos, setUploadedVideos] = useState<UploadedVideoRecord[] | null>(null);
   const [loadingUploadedVideos, setLoadingUploadedVideos] = useState(false);
   const [syncingFromQueue, setSyncingFromQueue] = useState(false);
@@ -56,6 +67,27 @@ export default function Statistics({ queue, nextUploadTime, timeUntilNext, isAct
       loadUploadedVideos(false);
     }
   }, [isActive, uploadedVideos, loadingUploadedVideos, loadUploadedVideos]);
+
+  const uploadsByDay = useMemo(() => {
+    if (!uploadedVideos?.length) return [];
+    const days = 14;
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const counts = new Map<string, number>();
+    for (const v of uploadedVideos) {
+      const key = new Date(v.uploadedAt).toISOString().slice(0, 10);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    const out: { label: string; date: string; uploads: number }[] = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(today);
+      d.setUTCDate(d.getUTCDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      const label = `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
+      out.push({ label, date: key, uploads: counts.get(key) ?? 0 });
+    }
+    return out;
+  }, [uploadedVideos]);
 
   const syncFromQueue = useCallback(async () => {
     setSyncingFromQueue(true);
@@ -170,35 +202,36 @@ export default function Statistics({ queue, nextUploadTime, timeUntilNext, isAct
             📋 All uploaded videos
           </h2>
           <div className="flex flex-wrap gap-2">
-            <button
+            <Button
               type="button"
               onClick={() => loadUploadedVideos(false)}
               disabled={loadingUploadedVideos}
-              className="px-4 py-2 rounded-lg font-medium bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm"
+              className="bg-indigo-600 text-white hover:bg-indigo-700"
             >
               {loadingUploadedVideos ? "Loading…" : "Load list"}
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               onClick={syncFromQueue}
               disabled={syncingFromQueue}
               title="Add any completed videos from the queue that aren’t in the list yet"
-              className="px-4 py-2 rounded-lg font-medium bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm"
+              className="bg-emerald-600 text-white hover:bg-emerald-700"
             >
               {syncingFromQueue ? "Syncing…" : "Sync from queue"}
-            </button>
+            </Button>
             {uploadedVideos && uploadedVideos.length > 0 && (
               <>
-                <button
+                <Button
                   type="button"
+                  variant="secondary"
                   onClick={downloadUploadedVideosCsv}
-                  className="px-4 py-2 rounded-lg font-medium bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-white text-sm"
                 >
                   Export CSV
-                </button>
-                {requestConfirm && setShowToast && (
-                  <button
+                </Button>
+                {requestConfirm && (
+                  <Button
                     type="button"
+                    variant="destructive"
                     onClick={async () => {
                       const ok = await requestConfirm({
                         title: "Clear upload history",
@@ -213,18 +246,18 @@ export default function Statistics({ queue, nextUploadTime, timeUntilNext, isAct
                         if (res.ok) {
                           setUploadedVideos([]);
                           setUploadedVideosError(null);
-                          setShowToast({ message: data.message || "Upload history cleared", type: "success" });
+                          showAppToast({ message: data.message || "Upload history cleared", type: "success" });
                         } else {
-                          setShowToast({ message: data.error || "Failed to clear", type: "error" });
+                          showAppToast({ message: data.error || "Failed to clear", type: "error" });
                         }
                       } catch {
-                        setShowToast({ message: "Failed to clear upload history", type: "error" });
+                        showAppToast({ message: "Failed to clear upload history", type: "error" });
                       }
                     }}
-                    className="px-4 py-2 rounded-lg font-medium bg-red-100 dark:bg-red-900/30 hover:bg-red-200 dark:hover:bg-red-900/50 text-red-700 dark:text-red-300 text-sm"
+                    className="bg-red-100 text-red-800 hover:bg-red-200 dark:bg-red-900/40 dark:text-red-200"
                   >
                     Clear upload history
-                  </button>
+                  </Button>
                 )}
               </>
             )}
@@ -271,6 +304,62 @@ export default function Statistics({ queue, nextUploadTime, timeUntilNext, isAct
           </div>
         )}
       </div>
+
+      {uploadedVideos && uploadedVideos.length > 0 && uploadsByDay.length > 0 && (
+        <div className="card border border-gray-100 dark:border-gray-700 mb-8">
+          <h3 className="text-lg font-bold text-gray-800 dark:text-white">
+            Uploads per day (UTC, last 14 days)
+          </h3>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 mb-4">
+            Based on your saved upload history in this app.
+          </p>
+          <div className="h-56 w-full min-w-0 text-foreground">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                data={uploadsByDay}
+                margin={{ top: 4, right: 8, left: 0, bottom: 0 }}
+              >
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  className="stroke-border/80"
+                />
+                <XAxis
+                  dataKey="label"
+                  tick={{ fontSize: 11 }}
+                  className="text-muted-foreground"
+                />
+                <YAxis
+                  allowDecimals={false}
+                  width={28}
+                  tick={{ fontSize: 11 }}
+                  className="text-muted-foreground"
+                />
+                <Tooltip
+                  contentStyle={{
+                    background: "hsl(var(--card))",
+                    border: "1px solid hsl(var(--border))",
+                    borderRadius: "8px",
+                    fontSize: "12px",
+                  }}
+                  labelFormatter={(_, items) => {
+                    const row = items?.[0]?.payload as
+                      | { date?: string }
+                      | undefined;
+                    return row?.date ?? "";
+                  }}
+                  formatter={(value) => [`${value ?? 0}`, "Uploads"]}
+                />
+                <Bar
+                  dataKey="uploads"
+                  fill="hsl(var(--primary))"
+                  radius={[4, 4, 0, 0]}
+                  maxBarSize={28}
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
 
       {queue.length === 0 && (
         <div className="card border border-gray-100 dark:border-gray-700 p-6 text-center text-gray-500 dark:text-gray-400">
@@ -327,21 +416,23 @@ export default function Statistics({ queue, nextUploadTime, timeUntilNext, isAct
             📊 Upload Statistics
           </h2>
           <div className="flex flex-wrap items-center gap-2">
-            <button
+            <Button
               type="button"
+              variant="secondary"
+              size="sm"
               title="Export statistics as JSON"
               onClick={() => exportStats("json")}
-              className="px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-white"
             >
               Export (JSON)
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant="secondary"
+              size="sm"
               onClick={() => exportStats("csv")}
-              className="px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-white"
             >
               Export (CSV)
-            </button>
+            </Button>
             <div
               className={`px-4 py-2 rounded-full text-sm font-semibold ${
                 processing > 0

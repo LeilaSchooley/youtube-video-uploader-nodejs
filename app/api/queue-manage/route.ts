@@ -11,6 +11,7 @@ import {
 } from "@/lib/bulk-queue";
 import { deleteUploadDir } from "@/lib/storage";
 import { parseBodyOr400, queueManageBodySchema } from "@/lib/api-validation";
+import { jobBelongsToViewer } from "@/lib/job-ownership";
 
 export const dynamic = "force-dynamic";
 
@@ -45,11 +46,12 @@ export async function POST(request: NextRequest) {
       
       // Get jobs to delete before deletion (for cleanup)
       const allJobs = getQueue();
-      const jobsToDelete = allJobs.filter(job => {
-        const canDelete = job.status === "completed" || job.status === "failed" || job.status === "cancelled";
-        const belongsToUser = (userId && job.userId === userId) || 
-                             (!job.userId && sessionId && job.sessionId === sessionId);
-        return canDelete && belongsToUser;
+      const jobsToDelete = allJobs.filter((job) => {
+        const canDelete =
+          job.status === "completed" ||
+          job.status === "failed" ||
+          job.status === "cancelled";
+        return canDelete && jobBelongsToViewer(job, userId, sessionId);
       });
       
       // Clean up files for jobs that will be deleted
@@ -81,17 +83,13 @@ export async function POST(request: NextRequest) {
       const allJobs = getQueue();
       const allBulkJobs = getBulkQueue();
       
-      const regularJobsToDelete = allJobs.filter(job => {
-        const belongsToUser = (userId && job.userId === userId) || 
-                             (!job.userId && sessionId && job.sessionId === sessionId);
-        return belongsToUser;
-      });
-      
-      const bulkJobsToDelete = allBulkJobs.filter(job => {
-        const belongsToUser = (userId && job.userId === userId) || 
-                             (!job.userId && sessionId && job.sessionId === sessionId);
-        return belongsToUser;
-      });
+      const regularJobsToDelete = allJobs.filter((job) =>
+        jobBelongsToViewer(job, userId, sessionId),
+      );
+
+      const bulkJobsToDelete = allBulkJobs.filter((job) =>
+        jobBelongsToViewer(job, userId, sessionId),
+      );
       
       // Clean up files for regular jobs that will be deleted
       for (const job of regularJobsToDelete) {
@@ -146,9 +144,7 @@ export async function POST(request: NextRequest) {
       if (!bulkJob) {
         return NextResponse.json({ error: "Job not found" }, { status: 404 });
       }
-      const isAuthorized =
-        (userId && bulkJob.userId === userId) ||
-        (!bulkJob.userId && sessionId && bulkJob.sessionId === sessionId);
+      const isAuthorized = jobBelongsToViewer(bulkJob, userId, sessionId);
       if (!isAuthorized) {
         return NextResponse.json(
           { error: "Job not found or unauthorized" },
@@ -226,9 +222,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Job not found" }, { status: 404 });
     }
 
-    const isAuthorized =
-      (userId && job.userId === userId) ||
-      (!job.userId && sessionId && job.sessionId === sessionId);
+    const isAuthorized = jobBelongsToViewer(job, userId, sessionId);
     if (!isAuthorized) {
       return NextResponse.json(
         { error: "Job not found or unauthorized" },

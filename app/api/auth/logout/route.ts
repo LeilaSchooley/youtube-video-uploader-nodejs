@@ -4,6 +4,7 @@ import { deleteSession, getSession } from "@/lib/session";
 import { getBulkQueue } from "@/lib/bulk-queue";
 import { getQueue } from "@/lib/queue";
 import { cookies } from "next/headers";
+import { jobBelongsToViewer } from "@/lib/job-ownership";
 
 export const dynamic = 'force-dynamic';
 
@@ -21,15 +22,15 @@ export async function GET(request: NextRequest) {
     const regularQueue = getQueue();
     
     const hasActiveBulkJobs = bulkQueue.some(
-      (job) => 
-        (job.sessionId === sessionId || job.userId === userId) &&
-        (job.status === "pending" || job.status === "processing")
+      (job) =>
+        jobBelongsToViewer(job, userId, sessionId) &&
+        (job.status === "pending" || job.status === "processing"),
     );
     
     const hasActiveRegularJobs = regularQueue.some(
-      (job) => 
-        (job.sessionId === sessionId || job.userId === userId) &&
-        (job.status === "pending" || job.status === "processing")
+      (job) =>
+        jobBelongsToViewer(job, userId, sessionId) &&
+        (job.status === "pending" || job.status === "processing"),
     );
     
     if (hasActiveBulkJobs || hasActiveRegularJobs) {

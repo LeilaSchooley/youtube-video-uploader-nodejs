@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { jobBelongsToViewer } from "@/lib/job-ownership";
 
 export interface QueueItem {
   id: string;
@@ -232,11 +233,8 @@ export function deleteAllCompletedJobs(userId?: string, sessionId?: string): { d
   // Filter jobs that can be deleted (completed, failed, cancelled)
   const jobsToDelete = queue.filter(item => {
     const canDelete = item.status === "completed" || item.status === "failed" || item.status === "cancelled";
-    // If userId/sessionId provided, only delete jobs belonging to that user
     if (userId || sessionId) {
-      const belongsToUser = (userId && item.userId === userId) || 
-                           (!item.userId && sessionId && item.sessionId === sessionId);
-      return canDelete && belongsToUser;
+      return canDelete && jobBelongsToViewer(item, userId, sessionId);
     }
     return canDelete;
   });
@@ -257,11 +255,9 @@ export function deleteAllJobs(userId?: string, sessionId?: string): { deleted: n
   let deleted = 0;
   
   // Filter jobs belonging to user (if userId/sessionId provided)
-  const jobsToDelete = queue.filter(item => {
+  const jobsToDelete = queue.filter((item) => {
     if (userId || sessionId) {
-      const belongsToUser = (userId && item.userId === userId) || 
-                           (!item.userId && sessionId && item.sessionId === sessionId);
-      return belongsToUser;
+      return jobBelongsToViewer(item, userId, sessionId);
     }
     return true; // Delete all if no filter
   });

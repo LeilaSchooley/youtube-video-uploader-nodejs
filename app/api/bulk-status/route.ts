@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getBulkQueueItem, getBulkQueue } from "@/lib/bulk-queue";
+import { jobBelongsToViewer } from "@/lib/job-ownership";
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -43,8 +44,7 @@ export async function GET(request: NextRequest) {
         );
       }
 
-      // Verify job belongs to session
-      if (job.sessionId !== sessionId && job.userId !== session.userId) {
+      if (!jobBelongsToViewer(job, session.userId, sessionId)) {
         return NextResponse.json(
           { error: "Unauthorized" },
           { status: 403 }
@@ -67,7 +67,7 @@ export async function GET(request: NextRequest) {
       // Get all jobs for this session
       const allJobs = getBulkQueue();
       const userJobs = allJobs.filter(
-        job => job.sessionId === sessionId || job.userId === session.userId
+        (job) => jobBelongsToViewer(job, session.userId, sessionId),
       );
 
       return NextResponse.json({

@@ -93,6 +93,25 @@ export function getUploadedTitlesSet(): Set<string> {
   return set;
 }
 
+const PYTHON_MANIFEST_JOB_PREFIX = "python-manifest:";
+
+/**
+ * Count uploads recorded today (UTC midnight) whose jobId came from the Python manifest worker.
+ */
+export function countPythonManifestUploadsTodayUtc(): number {
+  const list = readRecords();
+  const start = new Date();
+  start.setUTCHours(0, 0, 0, 0);
+  const minTime = start.getTime();
+  let n = 0;
+  for (const r of list) {
+    if (!r.jobId.startsWith(PYTHON_MANIFEST_JOB_PREFIX)) continue;
+    const t = new Date(r.uploadedAt).getTime();
+    if (t >= minTime) n++;
+  }
+  return n;
+}
+
 /**
  * Backfill uploaded-videos.json from existing bulk queue jobs.
  * Adds any progress entry that has a videoId and is not already in the list (deduped by videoId).

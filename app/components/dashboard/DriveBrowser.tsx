@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { Button } from "@/components/ui/button";
+import BrowserLoadingSkeleton from "./BrowserLoadingSkeleton";
 
 interface DriveItem {
   id: string;
@@ -40,7 +42,7 @@ export default function DriveBrowser({ onSelectFolder, onClose }: DriveBrowserPr
         ? "/api/browse-drive?folderId=root"
         : `/api/browse-drive?folderId=${encodeURIComponent(folderId)}`;
       
-      const response = await fetch(url);
+      const response = await fetch(url, { credentials: "include" });
       const data = await response.json();
       
       if (!response.ok) {
@@ -139,16 +141,17 @@ export default function DriveBrowser({ onSelectFolder, onClose }: DriveBrowserPr
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-4">
-          {loading && (
-            <div className="flex items-center justify-center py-8">
-              <div className="animate-spin text-2xl">⏳</div>
-              <span className="ml-3 text-gray-600 dark:text-gray-400">Loading...</span>
-            </div>
-          )}
+          {loading && <BrowserLoadingSkeleton rows={8} />}
 
-          {error && (
-            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded p-3 mb-4">
-              <p className="text-red-800 dark:text-red-200 text-sm">{error}</p>
+          {error && !loading && (
+            <div className="flex flex-col items-center justify-center gap-4 py-10 text-center">
+              <p className="text-sm text-destructive">{error}</p>
+              <Button
+                type="button"
+                onClick={() => void loadFolder(currentFolderId)}
+              >
+                Try again
+              </Button>
             </div>
           )}
 

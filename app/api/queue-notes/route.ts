@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { cookies } from "next/headers";
 import { getQueueItem, updateQueueItem } from "@/lib/queue";
+import { jobBelongsToViewer } from "@/lib/job-ownership";
 
 export const dynamic = "force-dynamic";
 
@@ -45,8 +46,7 @@ export async function POST(request: NextRequest) {
 
     // Check authorization
     const userId = session?.userId;
-    const isAuthorized = (userId && job.userId === userId) || 
-                        (!job.userId && job.sessionId === sessionId);
+    const isAuthorized = jobBelongsToViewer(job, userId, sessionId);
     
     if (!isAuthorized) {
       return NextResponse.json(

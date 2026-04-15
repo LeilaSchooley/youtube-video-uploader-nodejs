@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { cookies } from "next/headers";
+import { jobBelongsToViewer } from "@/lib/job-ownership";
 import { getQueueItem, getQueue } from "@/lib/queue";
 import { getOAuthClient } from "@/lib/auth";
 import { google } from "googleapis";
@@ -153,8 +154,7 @@ export async function DELETE(request: NextRequest) {
     // Authorization check
     if (job) {
       // If job exists in queue, verify authorization
-      const isAuthorized = (userId && job.userId === userId) || 
-                          (!job.userId && job.sessionId === sessionId);
+      const isAuthorized = jobBelongsToViewer(job, userId, sessionId);
       if (!isAuthorized) {
         return NextResponse.json(
           { error: "Job not found or unauthorized" },
@@ -409,8 +409,7 @@ export async function GET(request: NextRequest) {
     // Authorization check
     if (job) {
       // If job exists in queue, verify authorization
-      const isAuthorized = (userId && job.userId === userId) || 
-                          (!job.userId && job.sessionId === sessionId);
+      const isAuthorized = jobBelongsToViewer(job, userId, sessionId);
       if (!isAuthorized) {
         return NextResponse.json(
           { error: "Job not found or unauthorized" },

@@ -99,4 +99,30 @@ export interface BulkJob
 
 export type JobStatus = BulkJob | null;
 
+/** Response shape from GET /api/python-queue (dashboard) */
+export interface PythonQueueData {
+  enabled: boolean;
+  queueRootLabel?: string;
+  maxPerTick: number;
+  skipDuplicateTitles: boolean;
+  sessionIdEnvConfigured: boolean;
+  pending: Array<{
+    id: string;
+    title: string;
+    priority: number;
+    locked: boolean;
+    videoReady: boolean;
+    fileName: string;
+  }>;
+  failedCount: number;
+  processedCount: number;
+  uploadsTodayUtc: number;
+  /** Where pending manifests are read from for this session */
+  source?: "filesystem" | "dropbox" | "both";
+  /** Session has persisted Dropbox python-queue root */
+  dropboxConfigured?: boolean;
+  /** Resolved Dropbox queue root (same user only) */
+  dropboxRootPath?: string;
+}
+
 

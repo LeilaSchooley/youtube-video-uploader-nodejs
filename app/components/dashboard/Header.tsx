@@ -1,5 +1,14 @@
 "use client";
 
+import { useDropboxAuth } from "@/app/components/dashboard/DropboxAuthContext";
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { User } from "./types";
 
 interface HeaderProps {
@@ -31,6 +40,9 @@ export default function Header({
   handleChannelChange,
   handleDeleteAccount,
 }: HeaderProps) {
+  const { hasDropboxAuth, dropboxAuthLoading, connectDropbox } =
+    useDropboxAuth();
+
   return (
     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-10 pb-6 border-b border-gray-200 dark:border-gray-700">
       <div>
@@ -64,52 +76,84 @@ export default function Header({
             </div>
           </div>
         )}
+        <div className="flex items-center gap-2 rounded-xl border-2 border-blue-100 dark:border-blue-800/60 px-3 py-2 bg-blue-50/90 dark:bg-blue-950/40 shadow-sm">
+          <span className="text-xs font-semibold text-blue-900 dark:text-blue-100 whitespace-nowrap">
+            Dropbox
+          </span>
+          {dropboxAuthLoading ? (
+            <span className="text-xs text-muted-foreground">Checking…</span>
+          ) : hasDropboxAuth === true ? (
+            <span className="text-xs text-emerald-700 dark:text-emerald-300 flex items-center gap-1 font-medium">
+              <span aria-hidden>✓</span>
+              Connected
+            </span>
+          ) : (
+            <Button
+              type="button"
+              size="sm"
+              className="h-8 rounded-lg bg-blue-600 text-white hover:bg-blue-700 text-xs px-3"
+              onClick={() => void connectDropbox()}
+            >
+              Connect Dropbox
+            </Button>
+          )}
+        </div>
         {/* Channel Selector */}
         {availableChannels.length > 1 && (
           <div className="flex items-center gap-2">
-            <label className="text-xs text-gray-600 dark:text-gray-400 font-medium">
+            <span className="text-xs text-gray-600 dark:text-gray-400 font-medium">
               Channel:
-            </label>
-            <select
+            </span>
+            <Select
               value={selectedChannel}
-              onChange={(e) => handleChannelChange(e.target.value)}
-              className="px-3 py-2 bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 text-gray-700 dark:text-gray-300 font-medium rounded-xl transition-all duration-200 shadow-sm hover:shadow-md text-sm min-w-[200px]"
+              onValueChange={handleChannelChange}
             >
-              {availableChannels.map((channel) => (
-                <option key={channel.userId} value={channel.userId}>
-                  {channel.displayName} ({channel.fileCount} files)
-                  {channel.isCurrent ? " ✓" : ""}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger className="min-w-[200px] w-[220px] rounded-xl border-2 shadow-sm">
+                <SelectValue placeholder="Select channel" />
+              </SelectTrigger>
+              <SelectContent>
+                {availableChannels.map((channel) => (
+                  <SelectItem key={channel.userId} value={channel.userId}>
+                    {channel.displayName} ({channel.fileCount} files)
+                    {channel.isCurrent ? " ✓" : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         )}
         <div className="flex gap-3 flex-wrap">
           {process.env.NODE_ENV === "development" && (
-            <button
+            <Button
+              type="button"
+              variant="secondary"
               onClick={() => setShowDebugPanel(!showDebugPanel)}
-              className="px-4 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-xl transition-all duration-200 hover:scale-105 active:scale-95 shadow-sm hover:shadow-md"
+              className="rounded-xl bg-purple-600 text-white hover:bg-purple-700"
               title="Toggle Debug Panel"
             >
               🐛 Debug
-            </button>
+            </Button>
           )}
-          <button
+          <Button
+            type="button"
+            variant="outline"
             onClick={toggleDarkMode}
-            className="px-4 py-2.5 bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 text-gray-700 dark:text-gray-300 font-medium rounded-xl transition-all duration-200 hover:scale-105 active:scale-95 shadow-sm hover:shadow-md"
+            className="rounded-xl border-2 shadow-sm"
             aria-label="Toggle dark mode"
           >
             {darkMode ? "☀️ Light" : "🌙 Dark"}
-          </button>
-          <a href="/api/auth/logout" className="btn-primary">
-            Logout
-          </a>
-          <button
+          </Button>
+          <Button type="button" asChild className="rounded-xl">
+            <a href="/api/auth/logout">Logout</a>
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
             onClick={handleDeleteAccount}
-            className="btn-secondary bg-red-600 hover:bg-red-700"
+            className="rounded-xl"
           >
             Delete Account
-          </button>
+          </Button>
         </div>
       </div>
     </div>

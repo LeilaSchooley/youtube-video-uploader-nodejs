@@ -1,6 +1,15 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import BrowserLoadingSkeleton from "./BrowserLoadingSkeleton";
 
 interface DropboxItem {
   id: string;
@@ -54,7 +63,7 @@ export default function DropboxBrowser({
     try {
       const url = `/api/browse-dropbox?folderPath=${encodeURIComponent(folderPath)}`;
 
-      const response = await fetch(url);
+      const response = await fetch(url, { credentials: "include" });
       const data = await response.json();
 
       if (!response.ok) {
@@ -175,44 +184,50 @@ export default function DropboxBrowser({
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col">
-        {/* Header */}
-        <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
+      <DialogContent className="flex max-h-[90vh] w-full max-w-4xl flex-col gap-0 overflow-hidden p-0 sm:max-w-4xl">
+        <DialogHeader className="flex flex-row flex-wrap items-center justify-between gap-3 space-y-0 border-b px-4 py-3 text-left">
           <div className="flex items-center gap-3">
-            <button
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
               onClick={handleBack}
-              disabled={currentFolderPath === "/" || folderHistory.length === 0}
-              className="px-3 py-1 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              disabled={
+                currentFolderPath === "/" || folderHistory.length === 0
+              }
             >
               ← Back
-            </button>
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+            </Button>
+            <DialogTitle className="text-lg font-semibold">
               {currentFolder?.name || "Dropbox"}
-            </h2>
+            </DialogTitle>
           </div>
-          <button
-            onClick={onClose}
-            className="px-3 py-1 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded transition-colors"
-          >
+          <Button type="button" variant="secondary" size="sm" onClick={onClose}>
             ✕ Close
-          </button>
-        </div>
+          </Button>
+        </DialogHeader>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-4">
-          {loading && (
-            <div className="flex items-center justify-center py-8">
-              <div className="animate-spin text-2xl">⏳</div>
-              <span className="ml-3 text-gray-600 dark:text-gray-400">
-                Loading...
-              </span>
-            </div>
-          )}
+        <ScrollArea className="max-h-[60vh] flex-1 p-4">
+          {loading && <BrowserLoadingSkeleton rows={8} />}
 
-          {error && (
-            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded p-3 mb-4">
-              <p className="text-red-800 dark:text-red-200 text-sm">{error}</p>
+          {error && !loading && (
+            <div className="mb-4 flex flex-col items-center gap-3 py-6 text-center">
+              <p className="text-sm text-destructive">{error}</p>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => void loadFolder(currentFolderPath)}
+              >
+                Try again
+              </Button>
             </div>
           )}
 
@@ -326,11 +341,11 @@ export default function DropboxBrowser({
                 )}
             </>
           )}
-        </div>
+        </ScrollArea>
 
         {/* Footer */}
-        <div className="p-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
-          <div className="text-sm text-gray-600 dark:text-gray-400">
+        <div className="flex items-center justify-between border-t border-border p-4">
+          <div className="text-sm text-muted-foreground">
             {mode === "file" && selectedFile ? (
               <span>
                 Selected file: <strong>{selectedFile.name}</strong>
@@ -348,32 +363,29 @@ export default function DropboxBrowser({
             )}
           </div>
           <div className="flex gap-2">
-            <button
-              onClick={onClose}
-              className="px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 rounded transition-colors"
-            >
+            <Button type="button" variant="outline" onClick={onClose}>
               Cancel
-            </button>
+            </Button>
             {mode === "folder" ? (
-              <button
+              <Button
+                type="button"
                 onClick={handleSelectFolder}
                 disabled={!currentFolder}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 Select This Folder
-              </button>
+              </Button>
             ) : (
-              <button
+              <Button
+                type="button"
                 onClick={handleSelectFile}
                 disabled={!selectedFile}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 Select File
-              </button>
+              </Button>
             )}
           </div>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -8,6 +8,8 @@ interface WorkerStatusProps {
   workerBusy?: boolean;
   /** Worker heartbeat from server; used to show "last seen X min ago" when stale */
   workerHeartbeat?: { lastRunAt: string; jobId?: string } | null;
+  /** Pending manifests from GET /api/python-queue (local PYTHON_QUEUE_ROOT and/or Dropbox queue) */
+  pythonPendingCount?: number;
 }
 
 function formatTimeAgo(iso: string): string {
@@ -23,40 +25,45 @@ export default function WorkerStatus({
   queue,
   workerBusy,
   workerHeartbeat,
+  pythonPendingCount = 0,
 }: WorkerStatusProps) {
   const [workerRunning, setWorkerRunning] = useState<boolean | null>(null);
   const [pendingJobs, setPendingJobs] = useState(0);
 
   useEffect(() => {
     const checkWorkerStatus = async () => {
-      // Count pending jobs (this user's queue)
-      const pending = queue.filter(
+      const bulkPending = queue.filter(
         (j) => j.status === "pending" || j.status === "processing"
       ).length;
-      setPendingJobs(pending);
+      const totalPending = bulkPending + pythonPendingCount;
+      setPendingJobs(totalPending);
 
-      // Worker is running if: this user has a processing job, OR server says workerBusy (another user's job is processing)
       const hasProcessing = queue.some((j) => j.status === "processing");
       const allPending = queue.filter((j) => j.status === "pending");
+      const heartbeatAge = workerHeartbeat
+        ? Date.now() - new Date(workerHeartbeat.lastRunAt).getTime()
+        : Infinity;
 
       if (hasProcessing || workerBusy) {
         setWorkerRunning(true);
       } else if (allPending.length > 0) {
-        // Check if pending jobs are old (more than 10 seconds)
         const oldPending = allPending.filter((job) => {
           const age = Date.now() - new Date(job.createdAt).getTime();
-          return age > 10000; // 10 seconds
+          return age > 10000;
         });
         setWorkerRunning(oldPending.length === 0);
+      } else if (pythonPendingCount > 0) {
+        // No bulk jobs: infer liveness from heartbeat recency (worker ticks every ~5s)
+        setWorkerRunning(heartbeatAge < 45000);
       } else {
-        setWorkerRunning(null); // No jobs, can't tell
+        setWorkerRunning(null);
       }
     };
 
     checkWorkerStatus();
     const interval = setInterval(checkWorkerStatus, 2000);
     return () => clearInterval(interval);
-  }, [queue, workerBusy]);
+  }, [queue, workerBusy, workerHeartbeat, pythonPendingCount]);
 
   if (workerRunning === null || pendingJobs === 0) {
     return null;
@@ -73,8 +80,8 @@ export default function WorkerStatus({
                 Worker Not Running
               </div>
               <div className="text-sm opacity-90">
-                {pendingJobs} job{pendingJobs !== 1 ? "s" : ""} waiting to be processed. 
-                Start the worker to begin uploading.
+                {pendingJobs} job{pendingJobs !== 1 ? "s" : ""} waiting (bulk + Python
+                manifests). Start the worker to begin uploading.
               </div>
             </div>
           </div>

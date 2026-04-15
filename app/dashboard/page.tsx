@@ -19,14 +19,25 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import Toast from "@/app/components/Toast";
+import { useAppToast } from "@/app/app-toast-context";
 import ConfirmModal from "@/app/components/ConfirmModal";
 import Header from "@/app/components/dashboard/Header";
+import DashboardErrorBoundary from "@/app/components/dashboard/DashboardErrorBoundary";
+import DashboardTabs from "@/app/components/dashboard/DashboardTabs";
+import DuplicateTitlesDialog from "@/app/components/dashboard/DuplicateTitlesDialog";
+import { DropboxAuthProvider } from "@/app/components/dashboard/DropboxAuthContext";
 import Statistics from "@/app/components/dashboard/Statistics";
 import UploadForms from "@/app/components/dashboard/UploadForms";
 import QueueManagement from "@/app/components/dashboard/QueueManagement";
 import UploadSummary from "@/app/components/dashboard/UploadSummary";
-import Tabs from "@/app/components/dashboard/Tabs";
+import QueueModeStrip from "@/app/components/dashboard/QueueModeStrip";
+import UploadScheduleSettings from "@/app/components/dashboard/UploadScheduleSettings";
+import CommandPalette from "@/app/components/dashboard/CommandPalette";
+import { DASHBOARD_STORAGE } from "@/lib/dashboard-storage-keys";
+import {
+  readUploadScheduleFromStorage,
+  writeUploadScheduleToStorage,
+} from "@/lib/global-upload-schedule";
 import type { User } from "@/app/components/dashboard/types";
 import { useConfirmModal } from "@/app/dashboard/hooks/useConfirmModal";
 import { useQueue } from "@/app/dashboard/hooks/useQueue";
@@ -53,26 +64,23 @@ export default function Dashboard() {
   const [message, setMessage] = useState<Message>({ type: null, text: null });
   const [progress, setProgress] = useState<ProgressItem[]>([]);
   const [showProgress, setShowProgress] = useState<boolean>(false);
-  const [videosPerDay, setVideosPerDay] = useState<string>("");
-  const [enableScheduling, setEnableScheduling] = useState<boolean>(false);
-  const [toastState, setToastState] = useState<{
-    current: { message: string; type: "success" | "error" | "info" } | null;
-    queue: Array<{ message: string; type: "success" | "error" | "info" }>;
-  }>({ current: null, queue: [] });
-  const setShowToast = useCallback(
-    (t: { message: string; type: "success" | "error" | "info" }) => {
-      setToastState((prev) => {
-        if (!prev.current) return { current: t, queue: prev.queue };
-        return { ...prev, queue: [...prev.queue, t] };
-      });
-    },
-    [],
+  const [uploadScheduleHydrated, setUploadScheduleHydrated] =
+    useState<boolean>(false);
+  const [uploadScheduleEnabled, setUploadScheduleEnabled] =
+    useState<boolean>(false);
+  const [uploadScheduleVpd, setUploadScheduleVpd] = useState<string>("");
+  const [scheduleJustSaved, setScheduleJustSaved] = useState(false);
+  const scheduleSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
   );
+  const scheduleSavedFlashRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const showAppToast = useAppToast();
   const bulkFilesInputRef = useRef<HTMLInputElement>(null);
 
   const { confirmModal, requestConfirm, closeConfirmModal } = useConfirmModal();
   const queueState = useQueue({
-    setShowToast: (t) => setShowToast(t),
     requestConfirm,
   });
   const {
@@ -80,25 +88,19 @@ export default function Dashboard() {
     setQueue,
     workerBusy,
     workerHeartbeat,
+    pythonQueue,
     selectedJobId,
     setSelectedJobId,
     jobStatus,
-    setJobStatus,
-    jobFiles,
-    loadingFiles,
     searchQuery,
     setSearchQuery,
     nextUploadTime,
     timeUntilNext,
     fetchQueue,
     fetchJobStatus,
-    fetchJobFiles,
     handleQueueAction,
-    handleDeleteFile,
-    handleDeleteAllFiles,
   } = queueState;
   const bulkUpload = useBulkUpload({
-    setShowToast: (t) => setShowToast(t),
     setMessage,
     bulkFilesInputRef,
   });
@@ -120,6 +122,28 @@ export default function Dashboard() {
     doBulkSubmit,
     handleBulkUpload,
   } = bulkUpload;
+
+  const exportStatistics = useCallback(async (format: "json" | "csv") => {
+    try {
+      const res = await fetch(`/api/export-stats?format=${format}`, {
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Export failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `youtube-uploader-stats-${new Date().toISOString().split("T")[0]}.${format}`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showAppToast({
+        message: `Exported statistics (${format.toUpperCase()})`,
+        type: "success",
+      });
+    } catch {
+      showAppToast({ message: "Could not export statistics", type: "error" });
+    }
+  }, [showAppToast]);
 
   const [darkMode, setDarkMode] = useState<boolean>(false);
   const [selectedVideoFile, setSelectedVideoFile] = useState<File | null>(null);
@@ -156,11 +180,8 @@ export default function Dashboard() {
     useState<NodeJS.Timeout | null>(null);
   const [csvValidationErrors, setCsvValidationErrors] = useState<string[]>([]);
   const [showSingleUpload, setShowSingleUpload] = useState<boolean>(false); // Collapsed by default
-  const [showBatchUpload, setShowBatchUpload] = useState<boolean>(true); // Expanded by default
   const [showBulkUpload, setShowBulkUpload] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<string>("upload");
-  const [showBatchInstructions, setShowBatchInstructions] =
-    useState<boolean>(false); // Collapsed by default
   const fileInputRef = useRef<HTMLInputElement>(null);
   const csvFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -246,25 +267,21 @@ export default function Dashboard() {
     return errors;
   };
 
-  // Keyboard shortcuts (Ctrl+K only in development)
+  // Keyboard shortcuts (Ctrl+Shift+K debug in development; Ctrl+K is command palette)
   useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent) => {
-      // Ctrl/Cmd + K: Toggle debug panel (dev only)
       if (
         process.env.NODE_ENV === "development" &&
         (e.ctrlKey || e.metaKey) &&
-        e.key === "k"
+        e.shiftKey &&
+        e.key.toLowerCase() === "k"
       ) {
         e.preventDefault();
         setShowDebugPanel((prev) => !prev);
       }
-      // Ctrl/Cmd + E: Export stats
-      if ((e.ctrlKey || e.metaKey) && e.key === "e") {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "e") {
         e.preventDefault();
-        const exportBtn = document.querySelector(
-          '[title="Export statistics as JSON"]',
-        ) as HTMLButtonElement;
-        if (exportBtn) exportBtn.click();
+        void exportStatistics("json");
       }
       // Escape: Close job details
       if (e.key === "Escape" && selectedJobId) {
@@ -274,7 +291,7 @@ export default function Dashboard() {
 
     window.addEventListener("keydown", handleKeyPress);
     return () => window.removeEventListener("keydown", handleKeyPress);
-  }, [selectedJobId]);
+  }, [selectedJobId, exportStatistics]);
 
   // Dark mode effect
   useEffect(() => {
@@ -287,7 +304,7 @@ export default function Dashboard() {
 
   // Load dark mode preference from localStorage
   useEffect(() => {
-    const saved = localStorage.getItem("darkMode");
+    const saved = localStorage.getItem(DASHBOARD_STORAGE.darkMode);
     if (saved === "true") {
       setDarkMode(true);
     }
@@ -295,33 +312,17 @@ export default function Dashboard() {
 
   // Load single upload section preference from localStorage
   useEffect(() => {
-    const saved = localStorage.getItem("showSingleUpload");
+    const saved = localStorage.getItem(DASHBOARD_STORAGE.showSingleUpload);
     if (saved !== null) {
       setShowSingleUpload(saved === "true");
     }
   }, []);
 
-  // Load batch upload section preference from localStorage
-  useEffect(() => {
-    const saved = localStorage.getItem("showBatchUpload");
-    if (saved !== null) {
-      setShowBatchUpload(saved === "true");
-    }
-  }, []);
-
   // Real-time polling: Refresh all uploaded files automatically while uploads are active
-
-  // Load batch instructions preference from localStorage
-  useEffect(() => {
-    const saved = localStorage.getItem("showBatchInstructions");
-    if (saved !== null) {
-      setShowBatchInstructions(saved === "true");
-    }
-  }, []);
 
   // Load Upload Videos (bulk) section preference from localStorage
   useEffect(() => {
-    const saved = localStorage.getItem("showBulkUpload");
+    const saved = localStorage.getItem(DASHBOARD_STORAGE.showBulkUpload);
     if (saved !== null) {
       setShowBulkUpload(saved === "true");
     }
@@ -329,12 +330,17 @@ export default function Dashboard() {
 
   // Persist Upload Videos collapse state when it changes
   useEffect(() => {
-    localStorage.setItem("showBulkUpload", String(showBulkUpload));
+    localStorage.setItem(
+      DASHBOARD_STORAGE.showBulkUpload,
+      String(showBulkUpload),
+    );
   }, [showBulkUpload]);
 
   // Load "check duplicates before upload" preference
   useEffect(() => {
-    const saved = localStorage.getItem("checkDuplicatesBeforeUpload");
+    const saved = localStorage.getItem(
+      DASHBOARD_STORAGE.checkDuplicatesBeforeUpload,
+    );
     if (saved !== null) {
       setCheckDuplicatesBeforeUpload(saved === "true");
     }
@@ -342,33 +348,55 @@ export default function Dashboard() {
 
   useEffect(() => {
     localStorage.setItem(
-      "checkDuplicatesBeforeUpload",
+      DASHBOARD_STORAGE.checkDuplicatesBeforeUpload,
       String(checkDuplicatesBeforeUpload),
     );
   }, [checkDuplicatesBeforeUpload]);
 
+  // Global upload schedule (videos/day): load once, then auto-save to localStorage
+  useEffect(() => {
+    const r = readUploadScheduleFromStorage();
+    setUploadScheduleEnabled(r.enabled);
+    setUploadScheduleVpd(r.videosPerDay);
+    setUploadScheduleHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!uploadScheduleHydrated) return;
+    if (scheduleSaveTimerRef.current) {
+      clearTimeout(scheduleSaveTimerRef.current);
+    }
+    scheduleSaveTimerRef.current = setTimeout(() => {
+      writeUploadScheduleToStorage(uploadScheduleEnabled, uploadScheduleVpd);
+      setScheduleJustSaved(true);
+      if (scheduleSavedFlashRef.current) {
+        clearTimeout(scheduleSavedFlashRef.current);
+      }
+      scheduleSavedFlashRef.current = setTimeout(
+        () => setScheduleJustSaved(false),
+        2000,
+      );
+    }, 400);
+    return () => {
+      if (scheduleSaveTimerRef.current) {
+        clearTimeout(scheduleSaveTimerRef.current);
+      }
+    };
+  }, [uploadScheduleHydrated, uploadScheduleEnabled, uploadScheduleVpd]);
+
   const toggleDarkMode = () => {
     const newMode = !darkMode;
     setDarkMode(newMode);
-    localStorage.setItem("darkMode", String(newMode));
+    localStorage.setItem(DASHBOARD_STORAGE.darkMode, String(newMode));
   };
 
   const toggleSingleUpload = () => {
     const newState = !showSingleUpload;
     setShowSingleUpload(newState);
-    localStorage.setItem("showSingleUpload", String(newState));
-  };
-
-  const toggleBatchUpload = () => {
-    const newState = !showBatchUpload;
-    setShowBatchUpload(newState);
-    localStorage.setItem("showBatchUpload", String(newState));
-  };
-
-  const toggleBatchInstructions = () => {
-    const newState = !showBatchInstructions;
-    setShowBatchInstructions(newState);
-    localStorage.setItem("showBatchInstructions", String(newState));
+    localStorage.setItem(
+      DASHBOARD_STORAGE.showSingleUpload,
+      String(newState),
+    );
   };
 
   useEffect(() => {
@@ -378,7 +406,7 @@ export default function Dashboard() {
 
   const fetchAvailableChannels = async () => {
     try {
-      const res = await fetch("/api/channels");
+      const res = await fetch("/api/channels", { credentials: "include" });
       const data = await res.json();
       if (res.ok && data.channels) {
         setAvailableChannels(data.channels);
@@ -401,7 +429,7 @@ export default function Dashboard() {
 
   const fetchUser = async () => {
     try {
-      const res = await fetch("/api/user");
+      const res = await fetch("/api/user", { credentials: "include" });
       const data = await res.json();
       if (data.authenticated) {
         setUser(data);
@@ -429,12 +457,13 @@ export default function Dashboard() {
     try {
       const res = await fetch("/api/upload", {
         method: "POST",
+        credentials: "include",
         body: formData,
       });
 
       const data = await res.json();
       if (res.ok) {
-        setShowToast({
+        showAppToast({
           message: data.message || "Video uploaded successfully!",
           type: "success",
         });
@@ -453,7 +482,7 @@ export default function Dashboard() {
         console.error("=============================");
 
         const errorMsg = data.error || "Error uploading video";
-        setShowToast({ message: errorMsg, type: "error" });
+        showAppToast({ message: errorMsg, type: "error" });
         setMessage({ type: "error", text: errorMsg });
       }
     } catch (error: any) {
@@ -465,7 +494,7 @@ export default function Dashboard() {
 
       const errorMsg =
         error?.message || "An error occurred while uploading the video.";
-      setShowToast({ message: errorMsg, type: "error" });
+      showAppToast({ message: errorMsg, type: "error" });
       setMessage({ type: "error", text: errorMsg });
     } finally {
       setUploading(false);
@@ -504,6 +533,7 @@ export default function Dashboard() {
 
       const res = await fetch("/api/upload-queue", {
         method: "POST",
+        credentials: "include",
         body: formData,
       });
 
@@ -633,7 +663,7 @@ export default function Dashboard() {
                     finalMessage += `\n⚠️ ${data.invalidCount} videos skipped (no matching files)`;
                   }
 
-                  setShowToast({
+                  showAppToast({
                     message: finalMessage.trim(),
                     type: failed > 0 ? "info" : "success",
                   });
@@ -674,7 +704,7 @@ export default function Dashboard() {
 
       const errorMsg =
         error?.message || "An error occurred while uploading files.";
-      setShowToast({ message: errorMsg, type: "error" });
+      showAppToast({ message: errorMsg, type: "error" });
       setMessage({ type: "error", text: errorMsg });
     } finally {
       setCsvUploading(false);
@@ -696,35 +726,42 @@ export default function Dashboard() {
     if (!ok) return;
 
     try {
-      const res = await fetch("/api/delete-account", { method: "POST" });
+      const res = await fetch("/api/delete-account", {
+        method: "POST",
+        credentials: "include",
+      });
       const data = await res.json();
       if (res.ok) {
-        setShowToast({
+        showAppToast({
           message: data.message || "Account deletion requested.",
           type: "success",
         });
         setTimeout(() => router.push("/"), 2000);
       } else {
-        setShowToast({
+        showAppToast({
           message: data.message || "Failed to delete account.",
           type: "error",
         });
       }
     } catch (err) {
       console.error(err);
-      setShowToast({
+      showAppToast({
         message: "Could not reach the server.",
         type: "error",
       });
     }
   };
 
+  const queueTabBadge =
+    queue.filter((j) => j.status === "processing" || j.status === "pending")
+      .length + (pythonQueue?.pending?.length ?? 0);
+
   if (loading) {
     return (
-      <div className="flex justify-center items-center min-h-screen bg-gray-50">
+      <div className="flex justify-center items-center min-h-screen bg-background">
         <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-red-600 mb-4"></div>
-          <p className="text-gray-600 text-lg">Loading dashboard...</p>
+          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-primary mb-4"></div>
+          <p className="text-muted-foreground text-lg">Loading dashboard...</p>
         </div>
       </div>
     );
@@ -737,7 +774,8 @@ export default function Dashboard() {
   // Statistics calculation moved to Statistics component
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
+    <DropboxAuthProvider onToast={showAppToast}>
+      <div className="min-h-screen bg-background">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-10">
         {/* Header - Extracted to components/dashboard/Header.tsx */}
         <Header
@@ -763,122 +801,62 @@ export default function Dashboard() {
           onCancel={() => closeConfirmModal(false)}
         />
 
-        {/* Toast Notification */}
-        {toastState.current && (
-          <Toast
-            message={
-              toastState.queue.length > 0
-                ? `${toastState.current.message} (+${toastState.queue.length} more)`
-                : toastState.current.message
-            }
-            type={toastState.current.type}
-            onClose={() => {
-              setToastState((prev) =>
-                prev.queue.length > 0
-                  ? { current: prev.queue[0], queue: prev.queue.slice(1) }
-                  : { current: null, queue: [] },
-              );
-            }}
-            duration={
-              toastState.current.type === "error" ||
-              toastState.current.type === "info"
-                ? 8000
-                : 5000
-            }
-          />
-        )}
+        <CommandPalette
+          onGoUpload={() => setActiveTab("upload")}
+          onGoQueue={() => setActiveTab("queue")}
+          onGoStatistics={() => setActiveTab("statistics")}
+          onExportStatsJson={() => exportStatistics("json")}
+          onExportStatsCsv={() => exportStatistics("csv")}
+          onToggleDebug={
+            process.env.NODE_ENV === "development"
+              ? () => setShowDebugPanel((p) => !p)
+              : undefined
+          }
+        />
 
-        {/* Duplicate titles modal (when "Check for duplicates" found matches) */}
-        {duplicateModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-lg w-full max-h-[80vh] flex flex-col">
-              <div className="p-5 border-b border-gray-200 dark:border-gray-700">
-                <h3 className="text-lg font-bold text-gray-800 dark:text-white">
-                  Some titles already uploaded
-                </h3>
-                <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                  {duplicateModal.duplicateTitles.length} of your items match
-                  titles in your uploaded list (by name). You can add them
-                  anyway or add only the new ones.
-                </p>
-                <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
-                  Matching is by title (case-insensitive) against your local
-                  uploaded list, not the YouTube API.
-                </p>
-              </div>
-              <div className="p-5 overflow-y-auto flex-1">
-                <ul className="text-sm text-gray-700 dark:text-gray-300 space-y-1">
-                  {duplicateModal.duplicateTitles.slice(0, 15).map((t, i) => (
-                    <li key={i} className="truncate" title={t}>
-                      • {t}
-                    </li>
-                  ))}
-                  {duplicateModal.duplicateTitles.length > 15 && (
-                    <li className="text-gray-500">
-                      … and {duplicateModal.duplicateTitles.length - 15} more
-                    </li>
-                  )}
-                </ul>
-              </div>
-              <div className="p-5 border-t border-gray-200 dark:border-gray-700 flex flex-wrap gap-2 justify-end">
-                <button
-                  type="button"
-                  onClick={() => setDuplicateModal(null)}
-                  className="px-4 py-2 rounded-lg font-medium bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-600"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const dupSet = new Set(
-                      duplicateModal.duplicateTitles.map((t) =>
-                        t.toLowerCase().trim(),
-                      ),
-                    );
-                    const filtered = duplicateModal.pendingFiles.filter(
-                      (f) => !dupSet.has(f.name.toLowerCase().trim()),
-                    );
-                    doBulkSubmit(filtered, duplicateModal.pendingUrls);
-                    setDuplicateModal(null);
-                  }}
-                  className="px-4 py-2 rounded-lg font-medium bg-emerald-600 text-white hover:bg-emerald-700"
-                >
-                  Add only new
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    doBulkSubmit(
-                      duplicateModal.pendingFiles,
-                      duplicateModal.pendingUrls,
-                    );
-                    setDuplicateModal(null);
-                  }}
-                  className="px-4 py-2 rounded-lg font-medium bg-indigo-600 text-white hover:bg-indigo-700"
-                >
-                  Add all anyway
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+        <DuplicateTitlesDialog
+          duplicateModal={duplicateModal}
+          onDismiss={() => setDuplicateModal(null)}
+          onAddOnlyNew={() => {
+            if (!duplicateModal) return;
+            const dupSet = new Set(
+              duplicateModal.duplicateTitles.map((t) => t.toLowerCase().trim()),
+            );
+            const filtered = duplicateModal.pendingFiles.filter(
+              (f) => !dupSet.has(f.name.toLowerCase().trim()),
+            );
+            void doBulkSubmit(filtered, duplicateModal.pendingUrls);
+            setDuplicateModal(null);
+          }}
+          onAddAllAnyway={() => {
+            if (!duplicateModal) return;
+            void doBulkSubmit(
+              duplicateModal.pendingFiles,
+              duplicateModal.pendingUrls,
+            );
+            setDuplicateModal(null);
+          }}
+        />
 
         {/* Keyboard shortcuts (Debug only in development) */}
-        <div className="mb-4 py-1.5 px-3 rounded-lg text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700">
+        <div className="mb-4 py-1.5 px-3 rounded-lg text-xs text-muted-foreground bg-muted/50 border border-border">
+          <kbd className="px-1 py-0.5 rounded bg-muted font-mono">
+            Ctrl+K
+          </kbd>{" "}
+          Command palette ·{" "}
           {process.env.NODE_ENV === "development" && (
             <>
-              <kbd className="px-1 py-0.5 rounded bg-gray-200 dark:bg-gray-700 font-mono">
-                Ctrl+K
+              <kbd className="px-1 py-0.5 rounded bg-muted font-mono">
+                Ctrl+Shift+K
               </kbd>{" "}
               Debug ·{" "}
             </>
           )}
-          <kbd className="px-1 py-0.5 rounded bg-gray-200 dark:bg-gray-700 font-mono">
+          <kbd className="px-1 py-0.5 rounded bg-muted font-mono">
             Ctrl+E
           </kbd>{" "}
           Export ·{" "}
-          <kbd className="px-1 py-0.5 rounded bg-gray-200 dark:bg-gray-700 font-mono">
+          <kbd className="px-1 py-0.5 rounded bg-muted font-mono">
             Esc
           </kbd>{" "}
           Close details
@@ -953,41 +931,30 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Tabbed Interface */}
-        <Tabs
-          tabs={[
-            {
-              id: "upload",
-              label: "Upload Videos",
-              icon: "📤",
-            },
-            {
-              id: "queue",
-              label: "Queue & Progress",
-              icon: "📊",
-              badge: queue.filter(
-                (j) => j.status === "processing" || j.status === "pending",
-              ).length,
-            },
-            {
-              id: "statistics",
-              label: "Statistics",
-              icon: "📈",
-            },
-          ]}
+        <DashboardErrorBoundary>
+        <DashboardTabs
           activeTab={activeTab}
-          onTabChange={setActiveTab}
-        >
-          {activeTab === "upload" && (
-            <div className="space-y-6">
-              {/* Upload Summary - Quick overview */}
+          onActiveTabChange={setActiveTab}
+          queueTabBadge={queueTabBadge}
+          uploadContent={
+            <>
+              <QueueModeStrip
+                fetchQueue={fetchQueue}
+                onOpenQueueTab={() => setActiveTab("queue")}
+              />
+              <UploadScheduleSettings
+                enabled={uploadScheduleEnabled}
+                videosPerDay={uploadScheduleVpd}
+                onEnabledChange={setUploadScheduleEnabled}
+                onVideosPerDayChange={setUploadScheduleVpd}
+                hydrated={uploadScheduleHydrated}
+                justSaved={scheduleJustSaved}
+              />
               <UploadSummary
                 queue={queue}
                 nextUploadTime={nextUploadTime}
                 timeUntilNext={timeUntilNext}
               />
-
-              {/* Upload Forms - Extracted to UploadForms component */}
               <UploadForms
                 showSingleUpload={showSingleUpload}
                 toggleSingleUpload={toggleSingleUpload}
@@ -996,10 +963,6 @@ export default function Dashboard() {
                 setSelectedVideoFile={setSelectedVideoFile}
                 fileInputRef={fileInputRef}
                 uploading={uploading}
-                showBatchUpload={showBatchUpload}
-                toggleBatchUpload={toggleBatchUpload}
-                showBatchInstructions={showBatchInstructions}
-                toggleBatchInstructions={toggleBatchInstructions}
                 handleCsvUpload={handleCsvUpload}
                 selectedCsvFile={selectedCsvFile}
                 setSelectedCsvFile={setSelectedCsvFile}
@@ -1025,17 +988,16 @@ export default function Dashboard() {
                 setUrlTimeout={setUrlTimeout}
                 checkDuplicatesBeforeUpload={checkDuplicatesBeforeUpload}
                 setCheckDuplicatesBeforeUpload={setCheckDuplicatesBeforeUpload}
-                setShowToast={setShowToast}
                 setSelectedJobId={setSelectedJobId}
                 fetchJobStatus={fetchJobStatus}
                 fetchQueue={fetchQueue}
+                schedulingEnabled={uploadScheduleEnabled}
+                globalVideosPerDay={uploadScheduleVpd}
               />
-            </div>
-          )}
-
-          {activeTab === "queue" && (
-            <div className="space-y-6">
-              {/* Quick Stats Banner */}
+            </>
+          }
+          queueContent={
+            <>
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
                 <div className="bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl p-4 text-white shadow-lg">
                   <div className="text-sm opacity-90 mb-1">Total Jobs</div>
@@ -1065,12 +1027,11 @@ export default function Dashboard() {
                   </div>
                 </div>
               </div>
-
-              {/* Queue Management - Extracted to QueueManagement component */}
               <QueueManagement
                 queue={queue}
                 workerBusy={workerBusy}
                 workerHeartbeat={workerHeartbeat}
+                pythonQueue={pythonQueue}
                 searchQuery={searchQuery}
                 selectedJobId={selectedJobId}
                 setSelectedJobId={setSelectedJobId}
@@ -1078,33 +1039,25 @@ export default function Dashboard() {
                 fetchQueue={fetchQueue}
                 handleQueueAction={handleQueueAction}
                 jobStatus={jobStatus}
-                jobFiles={jobFiles}
-                loadingFiles={loadingFiles}
-                handleDeleteFile={handleDeleteFile}
-                handleDeleteAllFiles={handleDeleteAllFiles}
-                setShowToast={setShowToast}
                 requestConfirm={requestConfirm}
                 onGoToUpload={() => setActiveTab("upload")}
               />
-            </div>
-          )}
-
-          {activeTab === "statistics" && (
-            <div className="space-y-6">
-              <Statistics
-                queue={queue}
-                nextUploadTime={nextUploadTime}
-                timeUntilNext={timeUntilNext}
-                isActive={activeTab === "statistics"}
-                requestConfirm={requestConfirm}
-                setShowToast={(t) => setShowToast(t)}
-              />
-            </div>
-          )}
-        </Tabs>
+            </>
+          }
+          statisticsContent={
+            <Statistics
+              queue={queue}
+              nextUploadTime={nextUploadTime}
+              timeUntilNext={timeUntilNext}
+              isActive={activeTab === "statistics"}
+              requestConfirm={requestConfirm}
+            />
+          }
+        />
+        </DashboardErrorBoundary>
 
         <footer className="text-center py-5 text-gray-500">
-          &copy; 2025 ZonDiscounts.{" "}
+          &copy; {new Date().getFullYear()} ZonDiscounts.{" "}
           <Link href="/privacy" className="text-red-600 hover:underline">
             Privacy
           </Link>{" "}
@@ -1115,5 +1068,6 @@ export default function Dashboard() {
         </footer>
       </div>
     </div>
+    </DropboxAuthProvider>
   );
 }

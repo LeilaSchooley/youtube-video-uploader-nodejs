@@ -700,6 +700,61 @@ export async function getDropboxFileMetadata(
 }
 
 /**
+ * Create folder path recursively (ignores if a segment already exists).
+ */
+export async function ensureDropboxFolder(
+  folderPath: string,
+  accessToken: string,
+  sessionId?: string,
+  sessionRefreshToken?: string | null,
+): Promise<void> {
+  let normalized = folderPath.trim();
+  if (normalized === "" || normalized === "/") return;
+  normalized = normalized.replace(/\/+$/, "");
+  if (!normalized.startsWith("/")) normalized = `/${normalized}`;
+
+  const parts = normalized.split("/").filter(Boolean);
+  let acc = "";
+  let token = accessToken;
+
+  for (const part of parts) {
+    acc = `${acc}/${part}`;
+    const dbx = getDropboxClient(token);
+    try {
+      await dbx.filesCreateFolderV2({ path: acc, autorename: false });
+    } catch (error: any) {
+      const summary = String(error?.error?.error_summary || "");
+      if (
+        summary.includes("conflict") ||
+        summary.includes("path/conflict")
+      ) {
+        continue;
+      }
+      const newToken = await handleDropbox401Error(
+        error,
+        token,
+        sessionId,
+        sessionRefreshToken,
+        "create folder",
+      );
+      if (newToken) {
+        token = newToken;
+        const dbx2 = getDropboxClient(token);
+        try {
+          await dbx2.filesCreateFolderV2({ path: acc, autorename: false });
+        } catch (e2: any) {
+          const s2 = String(e2?.error?.error_summary || "");
+          if (s2.includes("conflict") || s2.includes("path/conflict")) continue;
+          throw e2;
+        }
+      } else {
+        throw error;
+      }
+    }
+  }
+}
+
+/**
  * Rename a file in Dropbox (post-upload action)
  * Automatically refreshes token if it expires (401 error)
  */

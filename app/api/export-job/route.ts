@@ -3,6 +3,7 @@ import { getSession } from "@/lib/session";
 import { cookies } from "next/headers";
 import { getBulkQueue } from "@/lib/bulk-queue";
 import { parseQueryOr400, exportJobQuerySchema } from "@/lib/api-validation";
+import { jobBelongsToViewer } from "@/lib/job-ownership";
 
 export const dynamic = "force-dynamic";
 
@@ -27,9 +28,7 @@ export async function GET(request: NextRequest) {
 
     const bulkQueue = getBulkQueue();
     const job = bulkQueue.find(
-      (j) =>
-        j.id === jobId &&
-        (j.sessionId === sessionId || j.userId === session.userId),
+      (j) => j.id === jobId && jobBelongsToViewer(j, session.userId, sessionId),
     );
 
     if (!job) {

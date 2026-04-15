@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { cookies } from "next/headers";
 import { getQueueItem, addToQueue } from "@/lib/queue";
+import { jobBelongsToViewer } from "@/lib/job-ownership";
 import { getUploadDir } from "@/lib/storage";
 import fs from "fs";
 import path from "path";
@@ -48,8 +49,7 @@ export async function POST(request: NextRequest) {
 
     // Check authorization
     const userId = session?.userId;
-    const isAuthorized = (userId && originalJob.userId === userId) || 
-                        (!originalJob.userId && originalJob.sessionId === sessionId);
+    const isAuthorized = jobBelongsToViewer(originalJob, userId, sessionId);
     
     if (!isAuthorized) {
       return NextResponse.json(

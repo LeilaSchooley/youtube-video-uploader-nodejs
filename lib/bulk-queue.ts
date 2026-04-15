@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { jobBelongsToViewer } from "@/lib/job-ownership";
 
 export interface BulkUploadItem {
   id: string;
@@ -82,27 +83,48 @@ function readBulkQueue(): BulkUploadItem[] {
   return [];
 }
 
-// Debounce queue writes
+// Debounce queue writes: never persist a stale full-queue snapshot (that can restore
+// jobs after delete when a timer fires). Pending updates are merged on flush.
 let writeQueueTimeout: NodeJS.Timeout | null = null;
 const QUEUE_WRITE_DEBOUNCE_MS = 1000;
+const pendingBulkPatches = new Map<string, Partial<BulkUploadItem>>();
 
-function writeBulkQueue(queue: BulkUploadItem[]): void {
-  try {
-    if (writeQueueTimeout) {
-      clearTimeout(writeQueueTimeout);
+/** Merge pending debounced patches into a fresh read from disk (mutates queue). */
+function mergePendingPatchesIntoQueue(queue: BulkUploadItem[]): void {
+  const now = new Date().toISOString();
+  for (const [jobId, patch] of Array.from(pendingBulkPatches.entries())) {
+    const idx = queue.findIndex((j) => j.id === jobId);
+    if (idx !== -1) {
+      queue[idx] = { ...queue[idx], ...patch, updatedAt: now };
     }
-
-    writeQueueTimeout = setTimeout(() => {
-      try {
-        fs.writeFileSync(BULK_QUEUE_FILE, JSON.stringify(queue, null, 2));
-        writeQueueTimeout = null;
-      } catch (error) {
-        console.error("Error writing bulk queue:", error);
-      }
-    }, QUEUE_WRITE_DEBOUNCE_MS);
-  } catch (error) {
-    console.error("Error scheduling bulk queue write:", error);
   }
+  pendingBulkPatches.clear();
+}
+
+/** Read disk and fold in any debounced patches (clears pending map). */
+function readBulkQueueWithPendingMerged(): BulkUploadItem[] {
+  const queue = readBulkQueue();
+  mergePendingPatchesIntoQueue(queue);
+  return queue;
+}
+
+function scheduleDebouncedBulkPersist(): void {
+  if (writeQueueTimeout) {
+    clearTimeout(writeQueueTimeout);
+  }
+  writeQueueTimeout = setTimeout(() => {
+    writeQueueTimeout = null;
+    try {
+      if (pendingBulkPatches.size === 0) {
+        return;
+      }
+      const queue = readBulkQueue();
+      mergePendingPatchesIntoQueue(queue);
+      fs.writeFileSync(BULK_QUEUE_FILE, JSON.stringify(queue, null, 2));
+    } catch (error) {
+      console.error("Error writing bulk queue (debounced):", error);
+    }
+  }, QUEUE_WRITE_DEBOUNCE_MS);
 }
 
 function writeBulkQueueImmediate(queue: BulkUploadItem[]): void {
@@ -123,7 +145,7 @@ export function addToBulkQueue(
     "id" | "status" | "progress" | "createdAt" | "updatedAt"
   >,
 ): string {
-  const queue = readBulkQueue();
+  const queue = readBulkQueueWithPendingMerged();
   const id = `bulk-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 
   const queueItem: BulkUploadItem = {
@@ -154,21 +176,32 @@ export function updateBulkQueueItem(
   updates: Partial<BulkUploadItem>,
   immediate: boolean = false,
 ): void {
-  const queue = readBulkQueue();
-  const index = queue.findIndex((item) => item.id === id);
-
-  if (index !== -1) {
+  if (immediate || updates.status) {
+    pendingBulkPatches.delete(id);
+    const queue = readBulkQueueWithPendingMerged();
+    const index = queue.findIndex((item) => item.id === id);
+    if (index === -1) return;
     queue[index] = {
       ...queue[index],
       ...updates,
       updatedAt: new Date().toISOString(),
     };
-    if (immediate || updates.status) {
-      writeBulkQueueImmediate(queue);
-    } else {
-      writeBulkQueue(queue);
-    }
+    writeBulkQueueImmediate(queue);
+    return;
   }
+
+  const queue = readBulkQueue();
+  const index = queue.findIndex((item) => item.id === id);
+  if (index === -1) return;
+
+  const prior = pendingBulkPatches.get(id);
+  const base = prior ? { ...queue[index], ...prior } : queue[index];
+  pendingBulkPatches.set(id, {
+    ...base,
+    ...updates,
+    updatedAt: new Date().toISOString(),
+  });
+  scheduleDebouncedBulkPersist();
 }
 
 export function getNextPendingBulkItem(): BulkUploadItem | undefined {
@@ -205,7 +238,8 @@ export function updateBulkProgress(
  * Delete a single bulk job by id. Returns true if the job was found and removed.
  */
 export function deleteBulkJob(jobId: string): boolean {
-  const queue = readBulkQueue();
+  pendingBulkPatches.delete(jobId);
+  const queue = readBulkQueueWithPendingMerged();
   const index = queue.findIndex((item) => item.id === jobId);
   if (index === -1) return false;
   queue.splice(index, 1);
@@ -217,17 +251,14 @@ export function deleteAllBulkJobs(
   userId?: string,
   sessionId?: string,
 ): { deleted: number; errors: string[] } {
-  const queue = readBulkQueue();
+  const queue = readBulkQueueWithPendingMerged();
   const errors: string[] = [];
   let deleted = 0;
 
   // Filter jobs belonging to user (if userId/sessionId provided)
   const jobsToDelete = queue.filter((item) => {
     if (userId || sessionId) {
-      const belongsToUser =
-        (userId && item.userId === userId) ||
-        (!item.userId && sessionId && item.sessionId === sessionId);
-      return belongsToUser;
+      return jobBelongsToViewer(item, userId, sessionId);
     }
     return true; // Delete all if no filter
   });
