@@ -4,6 +4,17 @@
 import fs from "fs";
 import path from "path";
 
+export type AiAssistProvider = "openai" | "anthropic";
+
+/** Optional BYOK for AI snippet assist (stored with session on disk like other tokens). */
+export interface SessionAiAssist {
+  provider?: AiAssistProvider;
+  /** Model override, e.g. gpt-4o-mini or claude-3-5-haiku-20241022 */
+  model?: string;
+  openaiApiKey?: string;
+  anthropicApiKey?: string;
+}
+
 interface SessionData {
   authenticated: boolean;
   userId?: string; // Google user email/ID
@@ -14,6 +25,7 @@ interface SessionData {
   };
   dropboxToken?: string; // Dropbox access token (separate from Google OAuth)
   dropboxRefreshToken?: string; // Dropbox refresh token for automatic token renewal
+  aiAssist?: SessionAiAssist;
 }
 
 const SESSIONS_FILE = path.join(process.cwd(), "data", "sessions.json");

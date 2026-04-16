@@ -85,6 +85,8 @@ interface UploadFormsProps {
   /** Global upload schedule (from dashboard; persisted in localStorage by parent) */
   schedulingEnabled?: boolean;
   globalVideosPerDay?: string;
+  /** When incremented (e.g. from Queue mode), opens the Dropbox folder browser for bulk/queue pick. */
+  openDropboxQueuePickerNonce?: number;
 }
 
 export default function UploadForms({
@@ -125,6 +127,7 @@ export default function UploadForms({
   fetchQueue,
   schedulingEnabled = false,
   globalVideosPerDay = "",
+  openDropboxQueuePickerNonce = 0,
 }: UploadFormsProps) {
   const showAppToast = useAppToast();
   const [isHydrated, setIsHydrated] = useState(false);
@@ -196,6 +199,19 @@ export default function UploadForms({
     setShowDropboxBrowser,
     hasDropboxAuth,
   });
+
+  useEffect(() => {
+    if (!openDropboxQueuePickerNonce) return;
+    setDropboxBrowserMode("folder");
+    setDropboxBrowserContext("bulk");
+    setUploadSource("dropbox");
+    setShowBulkUpload(true);
+    setShowDropboxBrowser(true);
+  }, [
+    openDropboxQueuePickerNonce,
+    setShowBulkUpload,
+    setShowDropboxBrowser,
+  ]);
 
   const handleDriveFolderSelect = (folderId: string, folderName: string) => {
     const input = document.getElementById("driveFolderId") as HTMLInputElement;

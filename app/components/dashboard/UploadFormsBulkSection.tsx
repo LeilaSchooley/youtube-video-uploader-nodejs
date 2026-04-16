@@ -7,6 +7,7 @@ import UploadFormsBulkDriveBlock from "./UploadFormsBulkDriveBlock";
 import UploadFormsBulkDropboxBlock from "./UploadFormsBulkDropboxBlock";
 import UploadFormsBulkProgressBlock from "./UploadFormsBulkProgressBlock";
 import UploadFormsBulkQueueFooter from "./UploadFormsBulkQueueFooter";
+import AiAssistSnippetPanel from "@/app/components/dashboard/AiAssistSnippetPanel";
 
 export type {
   PythonQueueDetectInfo,
@@ -70,33 +71,39 @@ export default function UploadFormsBulkSection(
     setSpreadsheetTitle,
   } = props;
 
+  const showDriveBulkColumn =
+    !HIDE_GOOGLE_DRIVE_SHEETS && uploadSource === "drive";
+
   return (
-    <>
-      <div className="card">
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-3">
-            <span className="text-3xl">📤</span>
-            <h2 className="text-2xl font-bold text-gray-800 dark:text-white">
+    <div className="card min-w-0 max-w-full">
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="shrink-0 text-3xl" aria-hidden>
+            📤
+          </span>
+          <h2 className="text-xl font-bold text-gray-800 dark:text-white sm:text-2xl">
               Upload Videos
             </h2>
           </div>
           <button
             type="button"
             onClick={() => setShowBulkUpload(!showBulkUpload)}
-            className="px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-white rounded-lg transition-colors"
+          className="shrink-0 self-start rounded-lg bg-gray-200 px-4 py-2 font-medium text-gray-800 transition-colors hover:bg-gray-300 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600 sm:self-auto"
           >
             {showBulkUpload ? "Hide" : "Show"}
           </button>
         </div>
 
         {showBulkUpload && (
-          <div className="space-y-4">
-            <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border border-blue-200 dark:border-blue-700 rounded-lg">
-              <p className="text-sm text-blue-900 dark:text-blue-100">
-                <strong>📤 Upload Videos:</strong>{" "}
+        <div className="min-h-0 max-h-[min(72dvh,calc(100dvh-12rem))] space-y-4 overflow-x-hidden overflow-y-auto overscroll-y-contain pr-0.5 [-webkit-overflow-scrolling:touch] sm:max-h-[min(75dvh,calc(100dvh-10rem))]">
+          <div className="rounded-lg border border-blue-200 bg-gradient-to-r from-blue-50 to-indigo-50 p-4 dark:border-blue-700 dark:from-blue-900/20 dark:to-indigo-900/20">
+            <p className="text-pretty text-sm leading-relaxed text-blue-900 dark:text-blue-100">
+              <span className="font-semibold text-blue-950 dark:text-blue-50">
+                How it works.
+              </span>{" "}
                 {HIDE_GOOGLE_DRIVE_SHEETS
-                  ? "Upload multiple videos from Dropbox folders. Optionally provide CSV or XLSX files for metadata. Videos stream directly to YouTube - no disk storage needed! Uploads are processed in the background."
-                  : "Upload multiple videos from Google Drive or Dropbox folders. Optionally provide Google Sheets or CSV files for metadata. Videos stream directly to YouTube - no disk storage needed! Uploads are processed in the background."}
+                ? "Upload multiple videos from Dropbox folders. Optionally add CSV or XLSX for metadata. Files stream to YouTube; uploads run in the background."
+                : "Upload from Google Drive or Dropbox folders. Optionally add Google Sheets or CSV for metadata. Files stream to YouTube; uploads run in the background."}
               </p>
             </div>
 
@@ -160,27 +167,35 @@ export default function UploadFormsBulkSection(
 
             <form
               onSubmit={handleBulkUpload}
-              className="flex flex-col gap-5"
+              className="flex min-w-0 flex-col gap-5"
             >
-              <div className="flex flex-col gap-5 lg:grid lg:grid-cols-[1fr_minmax(280px,360px)] lg:items-start lg:gap-6">
-                <div className="flex min-w-0 flex-col gap-5">
-                  <UploadFormsBulkDriveBlock
-                    uploadSource={uploadSource}
-                    driveUploadFolderId={driveUploadFolderId}
-                    setDriveUploadFolderId={setDriveUploadFolderId}
-                    setDriveUploadFolderName={setDriveUploadFolderName}
-                    setDriveBrowserContext={setDriveBrowserContext}
-                    setShowDriveBrowser={setShowDriveBrowser}
-                    setShowSheetsBrowser={setShowSheetsBrowser}
-                    debounceTimerRef={debounceTimerRef}
-                    fetchSheets={fetchSheets}
-                    availableSheets={availableSheets}
-                    setAvailableSheets={setAvailableSheets}
-                    loadingSheets={loadingSheets}
-                    spreadsheetTitle={spreadsheetTitle}
-                    setSpreadsheetTitle={setSpreadsheetTitle}
-                  />
-                </div>
+                        <div
+                          className={
+                  showDriveBulkColumn
+                    ? "flex min-w-0 flex-col gap-5 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-start lg:gap-6 xl:grid-cols-[1fr_minmax(0,28rem)]"
+                    : "flex min-w-0 flex-col gap-5"
+                }
+              >
+                {showDriveBulkColumn && (
+                  <div className="flex min-w-0 flex-col gap-5">
+                    <UploadFormsBulkDriveBlock
+                      uploadSource={uploadSource}
+                      driveUploadFolderId={driveUploadFolderId}
+                      setDriveUploadFolderId={setDriveUploadFolderId}
+                      setDriveUploadFolderName={setDriveUploadFolderName}
+                      setDriveBrowserContext={setDriveBrowserContext}
+                      setShowDriveBrowser={setShowDriveBrowser}
+                      setShowSheetsBrowser={setShowSheetsBrowser}
+                      debounceTimerRef={debounceTimerRef}
+                      fetchSheets={fetchSheets}
+                      availableSheets={availableSheets}
+                      setAvailableSheets={setAvailableSheets}
+                      loadingSheets={loadingSheets}
+                      spreadsheetTitle={spreadsheetTitle}
+                      setSpreadsheetTitle={setSpreadsheetTitle}
+                    />
+                  </div>
+                )}
                 <div className="flex min-w-0 flex-col gap-5">
                   <UploadFormsBulkDropboxBlock
                     uploadSource={uploadSource}
@@ -216,6 +231,10 @@ export default function UploadFormsBulkSection(
                   />
                 </div>
               </div>
+              <AiAssistSnippetPanel
+                variant="standalone"
+                heading="Metadata prep (Sheets / CSV / manifests)"
+              />
               <UploadFormsBulkProgressBlock
                 bulkUploadProgress={bulkUploadProgress}
                 bulkUploading={bulkUploading}
@@ -232,6 +251,5 @@ export default function UploadFormsBulkSection(
           </div>
         )}
       </div>
-    </>
   );
 }

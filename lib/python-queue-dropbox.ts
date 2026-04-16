@@ -15,9 +15,65 @@ import { normalizeDropboxPath } from "@/lib/queue-source";
 import type { ParsedManifestEntry, PythonManifest } from "@/lib/python-queue";
 import { parseManifestJson } from "@/lib/python-queue";
 
+/**
+ * Manifests written by a local bot often contain OS-absolute paths. Those must
+ * not be passed through as Dropbox paths (joinDropbox used to treat leading `/`
+ * as a full Dropbox path). Map common shapes to paths relative to the queue root.
+ */
+function normalizeManifestPathForDropbox(raw: string): string {
+  let t = (raw || "").trim();
+  if (!t) return t;
+
+  const winAbs = /^[A-Za-z]:[\\/]/.test(t);
+  if (winAbs) {
+    t = t.replace(/\\/g, "/");
+  }
+
+  const uq = "/upload_queue/";
+  const uqIdx = t.toLowerCase().indexOf(uq);
+  if (uqIdx >= 0) {
+    return t.slice(uqIdx + uq.length).replace(/^\/+/, "");
+  }
+
+  if (
+    t.startsWith("/home/") ||
+    t.startsWith("/Users/") ||
+    t.startsWith("/private/")
+  ) {
+    let i = t.indexOf("/videos/");
+    if (i >= 0) return t.slice(i + 1);
+    i = t.indexOf("/thumbnails/");
+    if (i >= 0) return t.slice(i + 1);
+    const base = path.posix.basename(t);
+    if (base) return `videos/${base}`;
+    return t;
+  }
+
+  if (winAbs) {
+    let i = t.toLowerCase().lastIndexOf("/videos/");
+    if (i >= 0) return t.slice(i + 1);
+    i = t.toLowerCase().lastIndexOf("/thumbnails/");
+    if (i >= 0) return t.slice(i + 1);
+    const base = path.posix.basename(t);
+    if (base) return `videos/${base}`;
+    return t;
+  }
+
+  if (!t.startsWith("/")) {
+    let u = t.replace(/^\.?\//, "");
+    // Queue root in Dropbox is already the bot "queue" folder; paths like queue/videos/… double up.
+    if (/^queue\/(videos\/|thumbnails\/)/i.test(u)) {
+      u = u.replace(/^queue\//i, "");
+    }
+    return u;
+  }
+
+  return t;
+}
+
 function joinDropbox(root: string, rel: string): string {
   const r = normalizeDropboxPath(root);
-  const t = (rel || "").trim();
+  const t = normalizeManifestPathForDropbox(rel).trim();
   if (!t) return r;
   if (t.startsWith("/")) return normalizeDropboxPath(t);
   const sub = t.replace(/^\.?\//, "");

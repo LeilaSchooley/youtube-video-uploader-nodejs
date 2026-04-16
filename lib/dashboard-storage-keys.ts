@@ -29,4 +29,6 @@ export const DASHBOARD_STORAGE = {
   hasDropboxAuth: "hasDropboxAuth",
   /** Queue tab strip: manual vs queue-driven worker mode */
   uploadQueueWorkerMode: "dashboardUploadSourceMode",
+  /** Last Dropbox path that passed Queue Mode auto-detect (try first next time) */
+  lastDetectedDropboxQueuePath: "dashboardLastDetectedDropboxQueuePath",
 } as const;

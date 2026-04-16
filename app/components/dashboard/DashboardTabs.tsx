@@ -43,7 +43,10 @@ export default function DashboardTabs({
         </TabsTrigger>
       </TabsList>
 
-      <TabsContent value="upload" className="mt-0 space-y-6">
+      <TabsContent
+        value="upload"
+        className="mt-0 min-h-0 max-w-full space-y-6 overflow-x-hidden"
+      >
         {uploadContent}
       </TabsContent>
 

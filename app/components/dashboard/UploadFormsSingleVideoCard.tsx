@@ -1,6 +1,8 @@
 "use client";
 
 import type { FormEvent, RefObject } from "react";
+import { useRef } from "react";
+import AiAssistSnippetPanel from "@/app/components/dashboard/AiAssistSnippetPanel";
 
 const ICON_CLAPPER = "\u{1F3AC}";
 const ICON_CHECK = "\u{2705}";
@@ -25,6 +27,9 @@ export default function UploadFormsSingleVideoCard({
   fileInputRef,
   uploading,
 }: UploadFormsSingleVideoCardProps) {
+  const titleRef = useRef<HTMLInputElement>(null);
+  const descriptionRef = useRef<HTMLTextAreaElement>(null);
+
   return (
     <div className="card animate-fade-in">
       <div className="flex items-center justify-between mb-6">
@@ -46,6 +51,7 @@ export default function UploadFormsSingleVideoCard({
             Title
           </label>
           <input
+            ref={titleRef}
             type="text"
             id="title"
             name="title"
@@ -62,6 +68,7 @@ export default function UploadFormsSingleVideoCard({
             Description
           </label>
           <textarea
+            ref={descriptionRef}
             id="description"
             name="description"
             placeholder="Enter video description"
@@ -72,6 +79,13 @@ export default function UploadFormsSingleVideoCard({
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
             Max 5000 characters (YouTube limit)
           </p>
+
+          <AiAssistSnippetPanel
+            variant="single"
+            titleInputRef={titleRef}
+            descriptionTextAreaRef={descriptionRef}
+            heading="AI & marketing (optional)"
+          />
 
           <label htmlFor="video" className="label">
             Choose File

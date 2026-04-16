@@ -45,11 +45,6 @@ const nextConfig = {
     // Suppress React DevTools serialization warnings for params
     optimizePackageImports: ['react', 'react-dom'],
   },
-  // Suppress console warnings in development (params enumeration is a DevTools issue)
-  onDemandEntries: {
-    maxInactiveAge: 60 * 1000,
-    pagesBufferLength: 2,
-  },
   // Webpack configuration for server-side packages
   webpack: (config, { isServer }) => {
     if (isServer) {

@@ -32,6 +32,8 @@ import QueueManagement from "@/app/components/dashboard/QueueManagement";
 import UploadSummary from "@/app/components/dashboard/UploadSummary";
 import QueueModeStrip from "@/app/components/dashboard/QueueModeStrip";
 import UploadScheduleSettings from "@/app/components/dashboard/UploadScheduleSettings";
+import AiAssistSettings from "@/app/components/dashboard/AiAssistSettings";
+import DescriptionTemplateSettings from "@/app/components/dashboard/DescriptionTemplateSettings";
 import CommandPalette from "@/app/components/dashboard/CommandPalette";
 import { DASHBOARD_STORAGE } from "@/lib/dashboard-storage-keys";
 import {
@@ -182,6 +184,7 @@ export default function Dashboard() {
   const [showSingleUpload, setShowSingleUpload] = useState<boolean>(false); // Collapsed by default
   const [showBulkUpload, setShowBulkUpload] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<string>("upload");
+  const [dropboxQueuePickerNonce, setDropboxQueuePickerNonce] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const csvFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -941,6 +944,11 @@ export default function Dashboard() {
               <QueueModeStrip
                 fetchQueue={fetchQueue}
                 onOpenQueueTab={() => setActiveTab("queue")}
+                onRequestManualDropboxQueue={() => {
+                  setActiveTab("upload");
+                  setShowBulkUpload(true);
+                  setDropboxQueuePickerNonce((n) => n + 1);
+                }}
               />
               <UploadScheduleSettings
                 enabled={uploadScheduleEnabled}
@@ -950,6 +958,8 @@ export default function Dashboard() {
                 hydrated={uploadScheduleHydrated}
                 justSaved={scheduleJustSaved}
               />
+              <AiAssistSettings />
+              <DescriptionTemplateSettings />
               <UploadSummary
                 queue={queue}
                 nextUploadTime={nextUploadTime}
@@ -993,6 +1003,7 @@ export default function Dashboard() {
                 fetchQueue={fetchQueue}
                 schedulingEnabled={uploadScheduleEnabled}
                 globalVideosPerDay={uploadScheduleVpd}
+                openDropboxQueuePickerNonce={dropboxQueuePickerNonce}
               />
             </>
           }

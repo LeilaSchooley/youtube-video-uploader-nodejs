@@ -167,6 +167,19 @@ export function useDropboxQueueSource(options: {
     if (hasDropboxAuth === true) void refreshQueueSourceConfig();
   }, [hasDropboxAuth, refreshQueueSourceConfig]);
 
+  useEffect(() => {
+    const onExternal = () => {
+      if (hasDropboxAuth === true) void refreshQueueSourceConfig();
+    };
+    if (typeof window === "undefined") return;
+    window.addEventListener("zondiscounts-queue-source-updated", onExternal);
+    return () =>
+      window.removeEventListener(
+        "zondiscounts-queue-source-updated",
+        onExternal,
+      );
+  }, [hasDropboxAuth, refreshQueueSourceConfig]);
+
   return {
     dropboxPythonQueueMode,
     pythonQueueDetectInfo,

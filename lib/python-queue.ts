@@ -13,7 +13,10 @@ export interface PythonManifest {
   /** Absolute path or path relative to PYTHON_QUEUE_ROOT */
   videoPath: string;
   thumbnailPath?: string;
-  /** Overrides PYTHON_SESSION_ID when set */
+  /**
+   * YouTube OAuth session (cookie `sessionId` / id in data/sessions.json).
+   * Omit it when using Dropbox queue: the worker uses the same session that registered the queue root.
+   */
   sessionId?: string;
   privacyStatus?: "public" | "private" | "unlisted";
   publishDate?: string;
@@ -153,10 +156,27 @@ export function isValidManifest(obj: unknown): obj is PythonManifest {
   );
 }
 
+/**
+ * Accept bot JSON that uses `local_video_path` instead of `videoPath` before validation.
+ */
+export function normalizeManifestJsonShape(data: unknown): unknown {
+  if (!data || typeof data !== "object") return data;
+  const m = data as Record<string, unknown>;
+  const videoPath = m.videoPath;
+  const localPath = m.local_video_path;
+  const hasVideo =
+    typeof videoPath === "string" && videoPath.trim().length > 0;
+  if (!hasVideo && typeof localPath === "string" && localPath.trim()) {
+    return { ...m, videoPath: localPath.trim() };
+  }
+  return data;
+}
+
 /** Parse manifest JSON object (Dropbox download or tests). */
 export function parseManifestJson(data: unknown): PythonManifest | null {
-  if (!isValidManifest(data)) return null;
-  return data;
+  const norm = normalizeManifestJsonShape(data);
+  if (!isValidManifest(norm)) return null;
+  return norm;
 }
 
 export function parseManifestFile(manifestPath: string): PythonManifest | null {

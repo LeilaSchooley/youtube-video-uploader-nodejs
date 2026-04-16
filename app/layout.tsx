@@ -1,7 +1,11 @@
 import { Inter } from "next/font/google";
+import dynamic from "next/dynamic";
 import "./globals.css";
 import type { ReactNode } from "react";
-import { Providers } from "./providers";
+
+const Providers = dynamic(() =>
+  import("./providers").then((mod) => ({ default: mod.Providers })),
+);
 
 const inter = Inter({
   subsets: ["latin"],

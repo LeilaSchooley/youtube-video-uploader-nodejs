@@ -337,11 +337,14 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
       writeHeartbeat(lastHeartbeatId);
       loadSessions();
 
+      /** Same session that registered this Dropbox queue almost always owns YouTube too. */
       const uploadSessionId =
-        manifest.sessionId?.trim() || process.env.PYTHON_SESSION_ID?.trim();
+        manifest.sessionId?.trim() ||
+        process.env.PYTHON_SESSION_ID?.trim() ||
+        queueOwnerSessionId;
       if (!uploadSessionId) {
         workerLog.error(
-          "Python manifest queue (Dropbox): set PYTHON_SESSION_ID or sessionId in manifest",
+          "Python manifest queue (Dropbox): no session for upload (manifest sessionId, PYTHON_SESSION_ID, or queue owner)",
           { manifestId: mid },
         );
         await moveDropboxManifestToFailed(
