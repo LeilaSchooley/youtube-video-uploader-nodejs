@@ -6,6 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "stop": "pm2 stop ecosystem.config.js",
+    "restart": "npm run pm2:restart",
     "lint": "next lint",
     "test": "vitest run",
     "test:watch": "vitest",
