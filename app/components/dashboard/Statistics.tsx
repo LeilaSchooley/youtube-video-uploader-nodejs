@@ -43,11 +43,18 @@ function isKnownChannelId(
   return videos.some((v) => v.channelId === id);
 }
 
-/** Prefer saved choice, else newest row with channelId, else all. */
+/**
+ * Preference order:
+ * 1. Saved localStorage choice (if still valid)
+ * 2. channelId on the newest upload row that has one
+ * 3. First channel from the YouTube channels API list (already fetched)
+ * 4. "all"
+ */
 function resolveInitialUploadChannelFilter(
   stored: string | null,
   videos: UploadedVideoRecord[],
   ytChannelIds: Set<string>,
+  ytChannelsList: Array<{ id: string; title: string }>,
 ): string {
   if (stored === "all") return "all";
   if (stored && isKnownChannelId(stored, videos, ytChannelIds)) {
@@ -59,6 +66,9 @@ function resolveInitialUploadChannelFilter(
   );
   for (const v of sorted) {
     if (v.channelId) return v.channelId;
+  }
+  if (ytChannelsList.length === 1) {
+    return ytChannelsList[0].id;
   }
   return "all";
 }
@@ -137,6 +147,7 @@ export default function Statistics({ queue, nextUploadTime, timeUntilNext, isAct
       stored,
       uploadedVideos,
       ytIds,
+      ytChannels,
     );
     setUploadChannelFilter(resolved);
 
