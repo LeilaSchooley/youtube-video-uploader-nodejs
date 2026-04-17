@@ -104,7 +104,7 @@ export async function POST(request: NextRequest) {
  * Clears the local upload history (data/uploaded-videos.json). Does not delete videos on YouTube.
  * Export first if you want to keep a copy.
  */
-export async function DELETE(request: NextRequest) {
+export async function DELETE() {
   try {
     const cookieStore = await cookies();
     const sessionId = cookieStore.get("sessionId")?.value;

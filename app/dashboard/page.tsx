@@ -13,7 +13,6 @@ import {
   useEffect,
   useState,
   FormEvent,
-  ChangeEvent,
   useRef,
   useCallback,
 } from "react";
@@ -53,11 +52,6 @@ interface Message {
   text: string | null;
 }
 
-interface ProgressItem {
-  index: number;
-  status: string;
-}
-
 export default function Dashboard() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
@@ -65,8 +59,6 @@ export default function Dashboard() {
   const [uploading, setUploading] = useState<boolean>(false);
   const [csvUploading, setCsvUploading] = useState<boolean>(false);
   const [message, setMessage] = useState<Message>({ type: null, text: null });
-  const [progress, setProgress] = useState<ProgressItem[]>([]);
-  const [showProgress, setShowProgress] = useState<boolean>(false);
   const [uploadScheduleHydrated, setUploadScheduleHydrated] =
     useState<boolean>(false);
   const [uploadScheduleEnabled, setUploadScheduleEnabled] =
@@ -88,7 +80,6 @@ export default function Dashboard() {
   });
   const {
     queue,
-    setQueue,
     workerBusy,
     workerHeartbeat,
     pythonQueue,
@@ -96,7 +87,6 @@ export default function Dashboard() {
     setSelectedJobId,
     jobStatus,
     searchQuery,
-    setSearchQuery,
     nextUploadTime,
     timeUntilNext,
     fetchQueue,
@@ -179,8 +169,6 @@ export default function Dashboard() {
       errors: string[];
     };
   } | null>(null);
-  const [uploadProgressInterval, setUploadProgressInterval] =
-    useState<NodeJS.Timeout | null>(null);
   const [csvValidationErrors, setCsvValidationErrors] = useState<string[]>([]);
   const [showSingleUpload, setShowSingleUpload] = useState<boolean>(false); // Collapsed by default
   const [showBulkUpload, setShowBulkUpload] = useState<boolean>(false);
@@ -195,19 +183,6 @@ export default function Dashboard() {
   const [dropboxQueuePickerNonce, setDropboxQueuePickerNonce] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const csvFileInputRef = useRef<HTMLInputElement>(null);
-
-  // Add debug log helper
-  const addDebugLog = useCallback(
-    (message: string, type: "info" | "success" | "error" = "info") => {
-      const logEntry = {
-        time: new Date().toLocaleTimeString(),
-        message,
-        type,
-      };
-      setDebugLogs((prev) => [...prev.slice(-49), logEntry]); // Keep last 50 logs
-    },
-    [],
-  );
 
   // CSV validation function
   const validateCsv = async (file: File): Promise<string[]> => {
@@ -302,7 +277,7 @@ export default function Dashboard() {
 
     window.addEventListener("keydown", handleKeyPress);
     return () => window.removeEventListener("keydown", handleKeyPress);
-  }, [selectedJobId, exportStatistics]);
+  }, [selectedJobId, setSelectedJobId, exportStatistics]);
 
   // Dark mode effect
   useEffect(() => {
@@ -355,7 +330,7 @@ export default function Dashboard() {
     if (saved !== null) {
       setCheckDuplicatesBeforeUpload(saved === "true");
     }
-  }, []);
+  }, [setCheckDuplicatesBeforeUpload]);
 
   useEffect(() => {
     localStorage.setItem(
@@ -458,11 +433,6 @@ export default function Dashboard() {
     );
   };
 
-  useEffect(() => {
-    fetchUser();
-    fetchAvailableChannels();
-  }, []);
-
   const fetchAvailableChannels = async () => {
     try {
       const res = await fetch("/api/channels", { credentials: "include" });
@@ -502,6 +472,12 @@ export default function Dashboard() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    void fetchUser();
+    void fetchAvailableChannels();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- initial load only; avoid re-fetch when channel selection updates
+  }, []);
 
   const handleSingleUpload = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -569,8 +545,6 @@ export default function Dashboard() {
     e.preventDefault();
     setCsvUploading(true);
     setMessage({ type: null, text: null });
-    setShowProgress(false);
-    setProgress([]);
 
     // Store form reference before async operation
     const form = e.currentTarget;

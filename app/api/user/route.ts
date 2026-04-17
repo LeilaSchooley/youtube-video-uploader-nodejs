@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { NextRequest } from "next/server";
 import { getOAuthClient, getDropboxToken } from "@/lib/auth";
 import { getSession } from "@/lib/session";
 import { google } from "googleapis";
@@ -7,7 +6,7 @@ import { cookies } from "next/headers";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
     const cookieStore = await cookies();
     const sessionId = cookieStore.get("sessionId")?.value;
@@ -35,7 +34,7 @@ export async function GET(request: NextRequest) {
       const response = await oauth2.userinfo.get();
       name = response.data.name ?? null;
       picture = response.data.picture ?? null;
-    } catch (_) {
+    } catch {
       // When Google scopes are minimal (DISABLE_GOOGLE_SCOPES), userinfo is not available
     }
 

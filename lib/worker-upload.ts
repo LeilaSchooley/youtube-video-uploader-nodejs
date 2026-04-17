@@ -1,6 +1,5 @@
 import { Readable } from "stream";
 import fs from "fs";
-import path from "path";
 import { google } from "googleapis";
 import { getOAuthClient } from "./auth";
 import {

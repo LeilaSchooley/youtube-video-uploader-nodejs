@@ -1,4 +1,3 @@
-import type { NextRequest } from "next/server";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { jobBelongsToViewer } from "@/lib/job-ownership";
@@ -8,7 +7,7 @@ import { readHeartbeat } from "@/lib/worker-health";
 import type { QueueItem } from "@/lib/queue";
 import type { BulkUploadItem } from "@/lib/bulk-queue";
 
-export async function handleUploadQueueGet(request: NextRequest) {
+export async function handleUploadQueueGet() {
   try {
     const cookieStore = await cookies();
     const sessionId = cookieStore.get("sessionId")?.value;

@@ -10,6 +10,6 @@ export async function POST(request: NextRequest) {
   return handleUploadQueuePost(request);
 }
 
-export async function GET(request: NextRequest) {
-  return handleUploadQueueGet(request);
+export async function GET() {
+  return handleUploadQueueGet();
 }

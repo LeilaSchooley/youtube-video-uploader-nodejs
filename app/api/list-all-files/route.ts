@@ -64,11 +64,11 @@ function scanDirectory(
           // Recursively scan subdirectories
           results.push(...scanDirectory(fullPath, relPath));
         }
-      } catch (error) {
+      } catch {
         // Skip items that can't be accessed
       }
     }
-  } catch (error) {
+  } catch {
     // Skip directories that can't be read
   }
 

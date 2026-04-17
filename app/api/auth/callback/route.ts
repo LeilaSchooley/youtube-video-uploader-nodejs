@@ -132,7 +132,7 @@ export async function GET(request: NextRequest) {
               `[AUTH CALLBACK] User ID from id_token: ${userId.substring(0, 10)}...`,
             );
           }
-        } catch (_) {
+        } catch {
           // ignore decode errors
         }
       }

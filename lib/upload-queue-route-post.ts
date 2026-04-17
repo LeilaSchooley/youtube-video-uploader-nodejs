@@ -159,11 +159,11 @@ export async function handleUploadQueuePost(request: NextRequest) {
             // Recursively scan subdirectories
             results.push(...scanForFiles(fullPath, type));
           }
-        } catch (error) {
+        } catch {
           // Skip files that can't be accessed
         }
       }
-    } catch (error) {
+    } catch {
       // Skip directories that can't be read
     }
     return results;
@@ -215,7 +215,7 @@ export async function handleUploadQueuePost(request: NextRequest) {
                 type: mimeType,
               });
               uploadedFiles.push(file);
-            } catch (error) {
+            } catch {
               // Skip files that can't be read
             }
           }
@@ -238,7 +238,7 @@ export async function handleUploadQueuePost(request: NextRequest) {
                 type: mimeType,
               });
               uploadedThumbnails.push(file);
-            } catch (error) {
+            } catch {
               // Skip files that can't be read
             }
           }

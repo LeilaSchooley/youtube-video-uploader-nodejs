@@ -59,6 +59,7 @@ export default function Header({
           <div className="flex items-center gap-3 p-3 bg-gradient-to-r from-red-50 via-pink-50 to-red-50 dark:from-red-900/20 dark:via-pink-900/20 dark:to-red-900/20 rounded-xl border-2 border-red-100 dark:border-red-800/50 shadow-sm hover:shadow-md transition-shadow">
             <div className="relative">
               <div className="absolute inset-0 bg-red-500/20 rounded-full blur-xl"></div>
+              {/* eslint-disable-next-line @next/next/no-img-element -- Google profile URL; dynamic remote */}
               <img
                 src={user.picture}
                 alt={user.name}

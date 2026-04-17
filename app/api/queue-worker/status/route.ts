@@ -1,4 +1,3 @@
-import { NextRequest } from "next/server";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getDropboxToken } from "@/lib/auth";
@@ -8,7 +7,7 @@ import { countPythonManifestUploadsTodayUtc } from "@/lib/uploaded-videos";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(_request: NextRequest) {
+export async function GET() {
   try {
     const cookieStore = await cookies();
     const sessionId = cookieStore.get("sessionId")?.value;

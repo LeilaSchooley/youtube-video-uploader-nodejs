@@ -265,7 +265,7 @@ export async function runWorkerBulkJob(jobId: string, batchSize: number): Promis
   }
 
   // Track progress in memory to avoid race conditions with disk writes
-  let localProgress = [...(job.progress || [])];
+  const localProgress = [...(job.progress || [])];
 
   const sendProgress = (
     index: number,

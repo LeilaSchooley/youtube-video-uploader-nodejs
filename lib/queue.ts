@@ -197,7 +197,7 @@ export function markAsCompleted(id: string): void {
   updateQueueItem(id, { status: "completed" });
 }
 
-export function markAsFailed(id: string, error: string): void {
+export function markAsFailed(id: string, _error: string): void {
   updateQueueItem(id, { status: "failed" });
 }
 

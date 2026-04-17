@@ -1,10 +1,8 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import * as fs from "fs";
 import * as path from "path";
-import { Readable } from "stream";
-import { pipeline } from "stream/promises";
 import AdmZip from "adm-zip";
 
 export const dynamic = "force-dynamic";
@@ -61,7 +59,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Get userId from session
-  let userId = session.userId;
+  const userId = session.userId;
   if (!userId) {
     return new Response(
       JSON.stringify({ error: "User ID not found in session" }),

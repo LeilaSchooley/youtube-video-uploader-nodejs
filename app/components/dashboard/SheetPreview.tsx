@@ -119,7 +119,7 @@ export default function SheetPreview({ previewData, onClose }: SheetPreviewProps
                   const hasTitle = row.youtube_title || row.title;
                   const hasDescription = row.youtube_description || row.description;
                   const hasVideoSource = row.video_url || row.drive_file_id || row.path;
-                  const isValid = hasTitle || hasDescription;
+                  const isValid = hasTitle || hasDescription || !!hasVideoSource;
 
                   return (
                     <tr

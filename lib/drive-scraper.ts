@@ -44,7 +44,7 @@ export function isDriveUrl(input: string): boolean {
 /**
  * Parse a single HTML page and extract file information
  */
-async function parseDrivePageHtml(html: string, folderId: string): Promise<{
+async function parseDrivePageHtml(html: string): Promise<{
   files: ScrapedFile[];
   continuationToken?: string;
 }> {
@@ -264,7 +264,7 @@ export async function scrapeDriveFolder(
     }
 
     // Parse this page
-    const { files, continuationToken: nextToken } = await parseDrivePageHtml(html, folderId);
+    const { files, continuationToken: nextToken } = await parseDrivePageHtml(html);
     allFiles.push(...files);
     
     console.log(`[DRIVE-SCRAPER] Page ${pageNumber}: Found ${files.length} files (total so far: ${allFiles.length})`);

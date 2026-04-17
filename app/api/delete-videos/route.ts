@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { cookies } from "next/headers";
 import { jobBelongsToViewer } from "@/lib/job-ownership";
-import { getQueueItem, getQueue } from "@/lib/queue";
+import { getQueueItem } from "@/lib/queue";
 import { getOAuthClient } from "@/lib/auth";
 import { google } from "googleapis";
 import fs from "fs";
@@ -100,7 +100,7 @@ export async function DELETE(request: NextRequest) {
         if (userId) {
           session.userId = userId;
         }
-      } catch (error) {
+      } catch {
         console.log("[DELETE-VIDEOS] Could not fetch userId from Google, continuing with sessionId only");
       }
     }
@@ -355,7 +355,7 @@ export async function GET(request: NextRequest) {
         if (userId) {
           session.userId = userId;
         }
-      } catch (error) {
+      } catch {
         console.log("[DELETE-VIDEOS] GET: Could not fetch userId from Google, continuing with sessionId only");
       }
     }
@@ -477,7 +477,7 @@ export async function GET(request: NextRequest) {
               sizeFormatted: `${(stats.size / 1024 / 1024).toFixed(2)} MB`,
             });
           }
-        } catch (error) {
+        } catch {
           // Skip files that can't be accessed
         }
       }
@@ -498,7 +498,7 @@ export async function GET(request: NextRequest) {
               sizeFormatted: `${(stats.size / 1024).toFixed(2)} KB`,
             });
           }
-        } catch (error) {
+        } catch {
           // Skip files that can't be accessed
         }
       }
@@ -515,7 +515,7 @@ export async function GET(request: NextRequest) {
           size: stats.size,
           sizeFormatted: `${(stats.size / 1024).toFixed(2)} KB`,
         };
-      } catch (error) {
+      } catch {
         // Skip if can't access
       }
     }

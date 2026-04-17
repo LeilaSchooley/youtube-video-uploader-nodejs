@@ -254,7 +254,7 @@ export function listJobFiles(
             size: stats.size,
           });
         }
-      } catch (error) {
+      } catch {
         // Skip files that can't be accessed
       }
     }
@@ -274,7 +274,7 @@ export function listJobFiles(
             size: stats.size,
           });
         }
-      } catch (error) {
+      } catch {
         // Skip files that can't be accessed
       }
     }
@@ -290,7 +290,7 @@ export function listJobFiles(
         path: "metadata.csv",
         size: stats.size,
       };
-    } catch (error) {
+    } catch {
       // Skip if can't access
     }
   }
@@ -416,7 +416,7 @@ export function listStagingFiles(
             uploadedAt: stats.birthtime.toISOString(),
           });
         }
-      } catch (error) {
+      } catch {
         // Skip files that can't be accessed
       }
     }
@@ -437,7 +437,7 @@ export function listStagingFiles(
             uploadedAt: stats.birthtime.toISOString(),
           });
         }
-      } catch (error) {
+      } catch {
         // Skip files that can't be accessed
       }
     }

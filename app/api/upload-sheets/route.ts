@@ -226,7 +226,7 @@ export async function POST(request: NextRequest) {
       : undefined;
 
     // If driveFolderId is provided, match video_name to Drive files
-    let driveFilesMap: Map<string, string> = new Map();
+    const driveFilesMap: Map<string, string> = new Map();
     if (driveFolderId) {
       try {
         const driveVideos = await listDriveVideos(driveFolderId, oAuthClient);
@@ -263,7 +263,7 @@ export async function POST(request: NextRequest) {
     }
 
     // If dropboxFolderPath is provided, match video_name to Dropbox files
-    let dropboxFilesMap: Map<string, string> = new Map();
+    const dropboxFilesMap: Map<string, string> = new Map();
     if (dropboxFolderPath && dropboxToken) {
       try {
         const dropboxVideos = await listDropboxVideos(
@@ -554,7 +554,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Use only valid items
-    let queueItems = validQueueItems.map(({ originalIndex, ...item }) => item); // Remove originalIndex before queuing
+    let queueItems = validQueueItems.map(({ originalIndex: _i, ...item }) => item); // Remove originalIndex before queuing
 
     // Check for duplicates against local uploaded-videos list (no YouTube API)
     let duplicateCount = 0;

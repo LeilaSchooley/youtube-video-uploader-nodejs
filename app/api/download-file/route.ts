@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { cookies } from "next/headers";
-import { getQueueItem, getQueue } from "@/lib/queue";
+import { getQueueItem } from "@/lib/queue";
 import { jobBelongsToViewer } from "@/lib/job-ownership";
 import fs from "fs";
 import path from "path";

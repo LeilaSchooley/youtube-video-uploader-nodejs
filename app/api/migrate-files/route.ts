@@ -1,8 +1,7 @@
 /**
  * Migrate files between user directories. Used by scripts or future UI; not used by dashboard.
  */
-import { NextResponse } from "next/server";
-import { NextRequest } from "next/server";
+import { NextResponse, NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { cookies } from "next/headers";
 import { jsonApiError } from "@/lib/api-response";
@@ -15,7 +14,7 @@ export const dynamic = "force-dynamic";
  * GET - List all available user directories in uploads folder
  * This helps users see which directories contain their files
  */
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
     const cookieStore = await cookies();
     const sessionId = cookieStore.get("sessionId")?.value;
@@ -84,7 +83,7 @@ export async function GET(request: NextRequest) {
               }
             }
           }
-        } catch (e) {
+        } catch {
           // Ignore errors reading subdirectories
         }
 

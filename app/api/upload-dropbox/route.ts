@@ -178,7 +178,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Parse CSV/XLSX metadata if provided
-    let csvMetadataMap: Map<string, any> = new Map();
+    const csvMetadataMap: Map<string, any> = new Map();
     let csvData: any[] = [];
     // Auto-detect column that holds the video filename
     // Populated after CSV is parsed; used by getVideoNameFromRow and the queue builder
@@ -379,7 +379,7 @@ export async function POST(request: NextRequest) {
     };
 
     // Build thumbnails map from optional thumbnails folder (name without ext -> Dropbox path)
-    let thumbnailsMap = new Map<string, string>();
+    const thumbnailsMap = new Map<string, string>();
     if (dropboxThumbnailsFolderPath && dropboxThumbnailsFolderPath.trim()) {
       const normalizedThumbPath = dropboxThumbnailsFolderPath.startsWith("/")
         ? dropboxThumbnailsFolderPath.trim()

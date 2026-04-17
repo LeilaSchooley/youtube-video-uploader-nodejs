@@ -23,7 +23,7 @@ try {
     const credsContent = fs.readFileSync(credsPath, "utf8");
     credentials = JSON.parse(credsContent) as Credentials;
   }
-} catch (e) {
+} catch {
   // creds.json not present — falling back to environment variables
 }
 

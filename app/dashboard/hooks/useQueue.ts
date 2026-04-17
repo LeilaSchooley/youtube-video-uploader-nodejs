@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   BulkJob,
@@ -23,13 +23,9 @@ export interface UseQueueOptions {
     cancelLabel?: string;
     variant?: "danger" | "default";
   }) => Promise<boolean>;
-  addDebugLog?: (message: string, type?: "info" | "success" | "error") => void;
 }
 
-export function useQueue({
-  requestConfirm,
-  addDebugLog = () => {},
-}: UseQueueOptions) {
+export function useQueue({ requestConfirm }: UseQueueOptions) {
   const setShowToast = useAppToast();
   const queryClient = useQueryClient();
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
@@ -62,7 +58,7 @@ export function useQueue({
     },
   });
 
-  const queue = bundle?.queue ?? [];
+  const queue = useMemo(() => bundle?.queue ?? [], [bundle?.queue]);
   const workerBusy = bundle?.workerBusy ?? false;
   const workerHeartbeat = bundle?.workerHeartbeat ?? null;
   const pythonQueue: PythonQueueData | null = bundle?.pythonQueue ?? null;

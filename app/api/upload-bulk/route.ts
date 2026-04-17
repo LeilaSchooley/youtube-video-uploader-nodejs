@@ -7,8 +7,6 @@ import { Readable } from "stream";
 import { addToBulkQueue, getBulkQueueItem } from "@/lib/bulk-queue";
 import { isValidUrl } from "@/lib/url-stream";
 import { saveToStaging } from "@/lib/storage";
-import path from "path";
-
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60; // Reduced since we're using worker
 export const runtime = 'nodejs';
@@ -346,7 +344,7 @@ export async function POST(request: NextRequest) {
         batchSize: BATCH_SIZE,
       });
 
-      let allResults: UploadResult[] = [];
+      const allResults: UploadResult[] = [];
       let totalCompleted = 0;
       let totalFailed = 0;
 

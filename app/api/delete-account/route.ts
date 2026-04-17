@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
-import { NextRequest } from "next/server";
 import { getOAuthClient } from "@/lib/auth";
 import { getSession, deleteSession } from "@/lib/session";
 import { cookies } from "next/headers";
 
 export const dynamic = 'force-dynamic';
 
-export async function POST(request: NextRequest) {
+export async function POST() {
   try {
     const cookieStore = await cookies();
     const sessionId = cookieStore.get("sessionId")?.value;
