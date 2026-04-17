@@ -90,12 +90,12 @@ export default function StatisticsQueueOverview(props: Props) {
             </div>
           </div>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 p-5 bg-gray-50 rounded-xl">
-          <StatCell value={props.queueLength} label="Total Jobs" colorClass="text-indigo-600" />
-          <StatCell value={props.completedJobs} label="Completed" colorClass="text-teal-600" />
-          <StatCell value={props.processing} label="Processing" colorClass="text-red-500" />
-          <StatCell value={props.pendingJobs} label="Pending" colorClass="text-yellow-500" />
-          <StatCell value={props.failedJobs} label="Failed" colorClass="text-pink-500" />
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 p-4 md:p-5 rounded-2xl bg-gradient-to-br from-gray-50/90 via-slate-50/50 to-gray-100/80 dark:from-gray-900/50 dark:via-slate-900/30 dark:to-gray-950/80 border border-gray-100/90 dark:border-gray-800/80 shadow-inner">
+          <StatCell value={props.queueLength} label="Total Jobs" colorClass="text-indigo-600 dark:text-indigo-400" accent="indigo" />
+          <StatCell value={props.completedJobs} label="Completed" colorClass="text-teal-600 dark:text-teal-400" accent="teal" />
+          <StatCell value={props.processing} label="Processing" colorClass="text-amber-600 dark:text-amber-400" accent="amber" />
+          <StatCell value={props.pendingJobs} label="Pending" colorClass="text-sky-600 dark:text-sky-400" accent="sky" />
+          <StatCell value={props.failedJobs} label="Failed" colorClass="text-rose-600 dark:text-rose-400" accent="rose" />
         </div>
         {props.totalVideos > 0 ? (
           props.remaining > 0 ? (
@@ -118,11 +118,34 @@ export default function StatisticsQueueOverview(props: Props) {
   );
 }
 
-function StatCell({ value, label, colorClass }: { value: number; label: string; colorClass: string }) {
+const statAccentRing: Record<
+  "indigo" | "teal" | "amber" | "sky" | "rose",
+  string
+> = {
+  indigo: "ring-indigo-200/70 dark:ring-indigo-900/50",
+  teal: "ring-teal-200/70 dark:ring-teal-900/50",
+  amber: "ring-amber-200/70 dark:ring-amber-900/50",
+  sky: "ring-sky-200/70 dark:ring-sky-900/50",
+  rose: "ring-rose-200/70 dark:ring-rose-900/50",
+};
+
+function StatCell({
+  value,
+  label,
+  colorClass,
+  accent,
+}: {
+  value: number;
+  label: string;
+  colorClass: string;
+  accent: keyof typeof statAccentRing;
+}) {
   return (
-    <div className="text-center">
-      <div className={`text-3xl font-bold ${colorClass}`}>{value}</div>
-      <div className="text-sm text-gray-600 mt-1">{label}</div>
+    <div
+      className={`text-center rounded-xl bg-white/95 dark:bg-gray-950/70 border border-gray-100 dark:border-gray-800 py-4 px-2 shadow-sm hover:shadow-md transition-shadow duration-200 ring-1 ring-inset ${statAccentRing[accent]}`}
+    >
+      <div className={`text-3xl font-bold tabular-nums tracking-tight ${colorClass}`}>{value}</div>
+      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mt-1.5">{label}</div>
     </div>
   );
 }

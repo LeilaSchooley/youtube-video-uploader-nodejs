@@ -689,5 +689,7 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
     }
   }
 
-  return lastHeartbeatId;
+  /* Do not return lastHeartbeatId: worker.ts re-writes heartbeat each tick; returning
+   * python:* would keep jobId set forever so the dashboard shows Uploading: 1 when idle. */
+  return undefined;
 }

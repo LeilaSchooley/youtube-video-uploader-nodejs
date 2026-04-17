@@ -84,7 +84,7 @@ export default function PythonQueuePanel({
 
   if (!data) {
     return (
-      <div className="mb-4 h-16 rounded-xl border border-gray-200 dark:border-gray-700 bg-white/60 dark:bg-gray-800/60 animate-pulse" />
+      <div className="mb-4 h-16 rounded-2xl border border-gray-200/80 dark:border-gray-700 bg-gradient-to-r from-gray-50 to-white dark:from-gray-900 dark:to-gray-800/80 shadow-sm animate-pulse" />
     );
   }
 
@@ -93,7 +93,7 @@ export default function PythonQueuePanel({
       ? `Dropbox folder saved (${data.dropboxRootPath ?? "—"}) — connect Dropbox to activate.`
       : "Not configured. Set PYTHON_QUEUE_ROOT or pick a Dropbox bot folder in Upload Videos.";
     return (
-      <div className="mb-4 flex items-center gap-3 rounded-xl border border-dashed border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900/40 px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
+      <div className="mb-4 flex items-center gap-3 rounded-2xl border border-dashed border-gray-300 dark:border-gray-600 bg-gray-50/90 dark:bg-gray-900/50 px-4 py-3.5 text-sm text-gray-600 dark:text-gray-400 shadow-sm">
         <span className="text-lg shrink-0" aria-hidden>🐍</span>
         <span>{msg}</span>
       </div>
@@ -101,10 +101,13 @@ export default function PythonQueuePanel({
   }
 
   const pending = data.pending.length;
-  const pythonActive = workerHeartbeat?.jobId?.startsWith("python:") ?? false;
+  const pythonLockedCount = data.pending.filter((p) => p.locked).length;
   const workerRecent =
-    workerHeartbeat &&
+    !!workerHeartbeat &&
     Date.now() - new Date(workerHeartbeat.lastRunAt).getTime() < 2 * 60 * 1000;
+  const heartbeatPython =
+    (workerHeartbeat?.jobId?.startsWith("python:") ?? false) && workerRecent;
+  const pythonActive = pythonLockedCount > 0 || heartbeatPython;
 
   const limit = data.manifestDailyLimit;
   const capEnabled = limit?.enabled ?? false;
@@ -140,9 +143,9 @@ export default function PythonQueuePanel({
         : `next tick ~${nextTickSecs}s`;
 
   return (
-    <div className="mb-4 rounded-xl border border-violet-200 dark:border-violet-800 bg-gradient-to-r from-violet-50/80 to-white dark:from-violet-950/30 dark:to-gray-900 shadow-sm overflow-hidden">
+    <div className="mb-4 rounded-2xl border border-violet-200/90 dark:border-violet-800/80 bg-gradient-to-br from-violet-50/95 via-white to-fuchsia-50/40 dark:from-violet-950/40 dark:via-gray-950 dark:to-fuchsia-950/20 shadow-md shadow-violet-900/5 dark:shadow-black/40 ring-1 ring-violet-100/80 dark:ring-violet-900/40 overflow-hidden">
       {/* Header row */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2.5 border-b border-violet-100 dark:border-violet-900/50">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 border-b border-violet-100/90 dark:border-violet-900/50 bg-white/40 dark:bg-gray-950/30 backdrop-blur-[2px]">
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-base shrink-0" aria-hidden>🐍</span>
           <span className="font-semibold text-sm text-gray-900 dark:text-white truncate">
@@ -157,10 +160,12 @@ export default function PythonQueuePanel({
 
         {/* Live status pill + next-tick hint */}
         <div className="flex items-center gap-1.5 ml-auto">
-          {pythonActive && workerRecent ? (
+          {pythonActive ? (
             <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 dark:bg-emerald-900/50 text-emerald-800 dark:text-emerald-200 text-xs px-2 py-0.5 font-medium">
               <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                {(heartbeatPython || workerRecent) && (
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                )}
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
               </span>
               Uploading
@@ -185,7 +190,7 @@ export default function PythonQueuePanel({
             </span>
           )}
           {/* Next tick hint — only when there are pending and worker isn't actively uploading */}
-          {pending > 0 && !pythonActive && nextTickLabel && (
+          {pending > 0 && !heartbeatPython && nextTickLabel && (
             <span className="text-[11px] text-violet-400 dark:text-violet-500">
               · {nextTickLabel}
             </span>
@@ -194,26 +199,28 @@ export default function PythonQueuePanel({
       </div>
 
       {/* Stats row */}
-      <div className="grid grid-cols-4 divide-x divide-violet-100 dark:divide-violet-900/50 text-center">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-violet-100/60 dark:bg-violet-950/50 p-px text-center">
         <Stat
           value={pending}
           label="Pending"
+          tone="violet"
           color={pending > 0 ? "text-violet-700 dark:text-violet-300" : undefined}
         />
-        <Stat value={data.uploadsTodayUtc} label="Today (UTC)" />
+        <Stat tone="sky" value={data.uploadsTodayUtc} label="Today (UTC)" />
         <Stat
+          tone="emerald"
           value={data.processedCount}
           label="Done"
           color="text-emerald-700 dark:text-emerald-300"
           suffix={
-            <span className="text-rose-500 dark:text-rose-400 text-xs ml-1">
+            <span className="text-rose-500 dark:text-rose-400 text-xs ml-1 font-semibold tabular-nums">
               / {data.failedCount} fail
             </span>
           }
         />
 
         {/* Daily limit cell with reset countdown */}
-        <div className="py-2 px-2">
+        <div className="py-2.5 px-2 bg-white/90 dark:bg-gray-950/70">
           {capEnabled && limit ? (
             <>
               <div className={`text-sm font-semibold ${capReached ? "text-rose-600 dark:text-rose-400" : "text-gray-700 dark:text-gray-200"}`}>
@@ -234,7 +241,7 @@ export default function PythonQueuePanel({
 
       {/* Queue clear ETA footer */}
       {clearEta && (
-        <div className={`px-4 py-2 border-t border-violet-100 dark:border-violet-900/50 text-[11px] leading-snug ${capReached ? "text-rose-500 dark:text-rose-400" : "text-gray-400 dark:text-gray-500"}`}>
+        <div className={`px-4 py-2.5 border-t border-violet-100/90 dark:border-violet-900/50 text-[11px] leading-snug bg-white/50 dark:bg-gray-950/40 ${capReached ? "text-rose-600 dark:text-rose-400" : "text-gray-500 dark:text-gray-400"}`}>
           {clearEta}
         </div>
       )}
@@ -249,24 +256,36 @@ function fmtSec(sec: number): string {
   return s > 0 ? `${m}m ${s}s` : `${m}m`;
 }
 
+const statToneClass: Record<
+  "neutral" | "violet" | "sky" | "emerald",
+  string
+> = {
+  neutral: "bg-white/90 dark:bg-gray-950/70",
+  violet: "bg-violet-50/90 dark:bg-violet-950/35",
+  sky: "bg-sky-50/80 dark:bg-sky-950/25",
+  emerald: "bg-emerald-50/70 dark:bg-emerald-950/25",
+};
+
 function Stat({
   value,
   label,
   color,
   suffix,
+  tone = "neutral",
 }: {
   value: number;
   label: string;
   color?: string;
   suffix?: React.ReactNode;
+  tone?: keyof typeof statToneClass;
 }) {
   return (
-    <div className="py-2 px-2">
-      <div className={`text-xl font-bold ${color ?? "text-gray-800 dark:text-gray-200"}`}>
+    <div className={`py-2.5 px-2 ${statToneClass[tone]}`}>
+      <div className={`text-xl font-bold tabular-nums tracking-tight ${color ?? "text-gray-800 dark:text-gray-200"}`}>
         {value}
         {suffix}
       </div>
-      <div className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5 leading-tight">{label}</div>
+      <div className="text-[11px] font-medium text-gray-500 dark:text-gray-400 mt-0.5 leading-tight">{label}</div>
     </div>
   );
 }
