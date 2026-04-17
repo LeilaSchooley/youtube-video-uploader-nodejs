@@ -4,8 +4,7 @@
  * After changing `env` below (or deploying with new shell env you want applied),
  * restart with `--update-env` so PM2 picks up ecosystem + current shell env:
  *   npm run pm2:restart
- * or:
- *   pm2 reload ecosystem.config.js --update-env
+ * (same as: pm2 restart ecosystem.config.js --update-env)
  *
  * Plain `pm2 restart` without `--update-env` can keep stale env from the last start.
  */
