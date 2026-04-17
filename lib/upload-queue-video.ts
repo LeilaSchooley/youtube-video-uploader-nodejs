@@ -12,7 +12,7 @@ import {
   sanitizeYoutubeTitle,
   sanitizeYoutubeDescription,
 } from "@/lib/youtube-utils";
-import { parseDate } from "@/lib/utils";
+import { parseDate } from "@/lib/parse-date";
 import { getOAuthClient } from "@/lib/auth";
 import type { BatchProgress, VideoUploadTask } from "@/lib/upload-queue-types";
 

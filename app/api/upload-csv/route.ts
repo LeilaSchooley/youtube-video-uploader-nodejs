@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getOAuthClient } from "@/lib/auth";
 import { getSession } from "@/lib/session";
-import { parseDate } from "@/lib/utils";
+import { parseDate } from "@/lib/parse-date";
 import { google } from "googleapis";
 import { cookies } from "next/headers";
 import { Readable } from "stream";
