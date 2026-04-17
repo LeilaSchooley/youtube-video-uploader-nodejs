@@ -4,6 +4,7 @@ import { google } from "googleapis";
 import {
   appendUploadedVideo,
   getUploadedTitlesSet,
+  wasManifestJobUploadedTodayUtc,
 } from "./uploaded-videos";
 import { getSession, loadSessions } from "./session";
 import { getOAuthClient, getDropboxToken } from "./auth";
@@ -12,7 +13,6 @@ import {
   isPythonQueueEnabled,
   listPendingManifestsSorted,
   manifestId,
-  moveManifestToFailed,
   moveManifestToProcessed,
   releaseLock,
   resolveUnderQueueRoot,
@@ -23,15 +23,23 @@ import { getAllDropboxPythonQueueSessions } from "./queue-source";
 import {
   listManifestJsonPathsSortedDropbox,
   downloadAndParseManifest,
+  mergeManifestJsonOnDropbox,
   moveDropboxManifestToProcessed,
   moveDropboxManifestToFailed,
   resolveDropboxVideoPath,
   resolveDropboxThumbnailPath,
   dropboxVideoExists,
 } from "./python-queue-dropbox";
+import {
+  mergeManifestJobPatchOnFs,
+  recordManifestUploadFailureOnDropbox,
+  recordManifestUploadFailureOnFs,
+  shouldWorkerProcessManifest,
+} from "./manifest-job-state";
 import { workerLog } from "./worker-logger";
 import { writeHeartbeat } from "./worker-health";
 import { getDropboxFileMetadata } from "./dropbox";
+import { getPythonManifestDailySlotsRemaining } from "./server-upload-schedule";
 import type { UploadTask } from "./worker-upload";
 import { workerUploadVideo } from "./worker-upload";
 
@@ -76,6 +84,9 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
     parseInt(process.env.PYTHON_QUEUE_MAX_PER_TICK || "1", 10) || 1,
   );
 
+  /** null = no UTC daily cap; otherwise decremented after each successful upload this tick */
+  let dailyUploadSlotsLeft = getPythonManifestDailySlotsRemaining();
+
   const skipDupes = process.env.PYTHON_SKIP_DUPLICATE_TITLES === "true";
   const uploadedTitles = skipDupes ? getUploadedTitlesSet() : null;
 
@@ -84,6 +95,7 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
     const root = getPythonQueueRoot();
     if (root) {
       for (const entry of listPendingManifestsSorted()) {
+        if (!shouldWorkerProcessManifest(entry.manifest)) continue;
         workQueue.push({ kind: "fs", entry });
       }
     }
@@ -131,6 +143,7 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
       }
 
       const mid = manifestId(manifest, manifestPath);
+      let fsUploadSucceeded = false;
 
       try {
         lastHeartbeatId = `python:${mid}`;
@@ -144,8 +157,9 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
             "Python manifest queue: set PYTHON_SESSION_ID or sessionId in manifest",
             { manifestId: mid },
           );
-          moveManifestToFailed(
+          recordManifestUploadFailureOnFs(
             manifestPath,
+            manifest,
             "missing_session: set PYTHON_SESSION_ID or sessionId in manifest",
           );
           processedThisTick++;
@@ -158,7 +172,11 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
             "Python manifest queue: session not authenticated",
             { manifestId: mid, sessionId },
           );
-          moveManifestToFailed(manifestPath, "session_not_authenticated");
+          recordManifestUploadFailureOnFs(
+            manifestPath,
+            manifest,
+            "session_not_authenticated",
+          );
           processedThisTick++;
           continue;
         }
@@ -182,8 +200,9 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
             manifestId: mid,
             videoPath: videoAbs,
           });
-          moveManifestToFailed(
+          recordManifestUploadFailureOnFs(
             manifestPath,
+            manifest,
             `video_missing: ${videoAbs || manifest.videoPath}`,
           );
           processedThisTick++;
@@ -227,6 +246,31 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
           sessionId,
         );
 
+        if (dailyUploadSlotsLeft !== null && dailyUploadSlotsLeft <= 0) {
+          workerLog.info(
+            "Python manifest queue: UTC daily upload cap reached; deferring",
+            { manifestId: mid },
+          );
+          break;
+        }
+
+        const jobId = `python-manifest:${mid}`;
+        if (wasManifestJobUploadedTodayUtc(jobId)) {
+          workerLog.info(
+            "Python manifest queue: already uploaded today; marking done and skipping",
+            { manifestId: mid },
+          );
+          fsUploadSucceeded = true;
+          try {
+            mergeManifestJobPatchOnFs(manifestPath, { upload_status: "done" });
+          } catch { /* best effort */ }
+          try {
+            moveManifestToProcessed(manifestPath);
+          } catch { /* best effort */ }
+          processedThisTick++;
+          continue;
+        }
+
         const sendProgress = (
           index: number,
           status: string,
@@ -255,19 +299,37 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
         );
 
         if (result.success && result.videoId) {
+          fsUploadSucceeded = true;
           appendUploadedVideo({
             videoId: result.videoId,
             title: manifest.title,
-            jobId: `python-manifest:${mid}`,
+            jobId,
             uploadedAt: new Date().toISOString(),
           });
-          moveManifestToProcessed(manifestPath);
+          if (dailyUploadSlotsLeft !== null) {
+            dailyUploadSlotsLeft--;
+          }
+          try {
+            mergeManifestJobPatchOnFs(manifestPath, { upload_status: "done" });
+          } catch { /* best effort — move will clean up */ }
+          try {
+            moveManifestToProcessed(manifestPath);
+          } catch (moveErr: unknown) {
+            workerLog.warn("Python manifest queue: uploaded but could not move to processed", {
+              manifestId: mid,
+              error: moveErr instanceof Error ? moveErr.message : String(moveErr),
+            });
+          }
           workerLog.info("Python manifest queue: uploaded", {
             manifestId: mid,
             videoId: result.videoId,
           });
         } else {
-          moveManifestToFailed(manifestPath, result.error || "upload_failed");
+          recordManifestUploadFailureOnFs(
+            manifestPath,
+            manifest,
+            result.error || "upload_failed",
+          );
           workerLog.error("Python manifest queue: upload failed", {
             manifestId: mid,
             error: result.error,
@@ -281,10 +343,12 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
           manifestId: mid,
           error: msg,
         });
-        try {
-          moveManifestToFailed(manifestPath, msg);
-        } catch {
-          // ignore move errors
+        if (!fsUploadSucceeded) {
+          try {
+            recordManifestUploadFailureOnFs(manifestPath, manifest, msg);
+          } catch {
+            // ignore patch errors
+          }
         }
         processedThisTick++;
       } finally {
@@ -313,6 +377,8 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
       continue;
     }
 
+    let dbUploadSucceeded = false;
+
     try {
       const manifest = await downloadAndParseManifest(
         manifestPath,
@@ -332,6 +398,11 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
         continue;
       }
 
+      if (!shouldWorkerProcessManifest(manifest)) {
+        releaseDropboxPythonLock(lockKey);
+        continue;
+      }
+
       const mid = manifestId(manifest, manifestPath);
       lastHeartbeatId = `python:${mid}`;
       writeHeartbeat(lastHeartbeatId);
@@ -347,9 +418,10 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
           "Python manifest queue (Dropbox): no session for upload (manifest sessionId, PYTHON_SESSION_ID, or queue owner)",
           { manifestId: mid },
         );
-        await moveDropboxManifestToFailed(
+        await recordManifestUploadFailureOnDropbox(
           manifestPath,
-          queueRoot,
+          manifest,
+          "no_session: set sessionId in manifest, PYTHON_SESSION_ID, or use queue owner session",
           qToken,
           queueOwnerSessionId,
           qSession.dropboxRefreshToken ?? null,
@@ -364,9 +436,10 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
           "Python manifest queue (Dropbox): session not authenticated",
           { manifestId: mid, sessionId: uploadSessionId },
         );
-        await moveDropboxManifestToFailed(
+        await recordManifestUploadFailureOnDropbox(
           manifestPath,
-          queueRoot,
+          manifest,
+          "session_not_authenticated",
           qToken,
           queueOwnerSessionId,
           qSession.dropboxRefreshToken ?? null,
@@ -406,9 +479,10 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
           manifestId: mid,
           videoPath: manifest.videoPath,
         });
-        await moveDropboxManifestToFailed(
+        await recordManifestUploadFailureOnDropbox(
           manifestPath,
-          queueRoot,
+          manifest,
+          `video_missing: ${manifest.videoPath}`,
           qToken,
           queueOwnerSessionId,
           qSession.dropboxRefreshToken ?? null,
@@ -477,6 +551,42 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
         });
       };
 
+      if (dailyUploadSlotsLeft !== null && dailyUploadSlotsLeft <= 0) {
+        workerLog.info(
+          "Python manifest queue (Dropbox): UTC daily upload cap reached; deferring",
+          { manifestId: mid },
+        );
+        break;
+      }
+
+      const dbJobId = `python-manifest:${mid}`;
+      if (wasManifestJobUploadedTodayUtc(dbJobId)) {
+        workerLog.info(
+          "Python manifest queue (Dropbox): already uploaded today; marking done and skipping",
+          { manifestId: mid },
+        );
+        try {
+          await mergeManifestJsonOnDropbox(
+            manifestPath,
+            { upload_status: "done" },
+            qToken,
+            queueOwnerSessionId,
+            qSession.dropboxRefreshToken ?? null,
+          );
+        } catch { /* best effort */ }
+        try {
+          await moveDropboxManifestToProcessed(
+            manifestPath,
+            queueRoot,
+            qToken,
+            queueOwnerSessionId,
+            qSession.dropboxRefreshToken ?? null,
+          );
+        } catch { /* best effort */ }
+        processedThisTick++;
+        continue;
+      }
+
       const result = await workerUploadVideo(
         youtube,
         task,
@@ -488,27 +598,48 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
       );
 
       if (result.success && result.videoId) {
+        dbUploadSucceeded = true;
         appendUploadedVideo({
           videoId: result.videoId,
           title: manifest.title,
-          jobId: `python-manifest:${mid}`,
+          jobId: dbJobId,
           uploadedAt: new Date().toISOString(),
         });
-        await moveDropboxManifestToProcessed(
-          manifestPath,
-          queueRoot,
-          qToken,
-          queueOwnerSessionId,
-          qSession.dropboxRefreshToken ?? null,
-        );
+        if (dailyUploadSlotsLeft !== null) {
+          dailyUploadSlotsLeft--;
+        }
+        try {
+          await mergeManifestJsonOnDropbox(
+            manifestPath,
+            { upload_status: "done" },
+            qToken,
+            queueOwnerSessionId,
+            qSession.dropboxRefreshToken ?? null,
+          );
+        } catch { /* best effort — move will clean up */ }
+        try {
+          await moveDropboxManifestToProcessed(
+            manifestPath,
+            queueRoot,
+            qToken,
+            queueOwnerSessionId,
+            qSession.dropboxRefreshToken ?? null,
+          );
+        } catch (moveErr: unknown) {
+          workerLog.warn("Python manifest queue (Dropbox): uploaded but could not move to processed", {
+            manifestId: mid,
+            error: moveErr instanceof Error ? moveErr.message : String(moveErr),
+          });
+        }
         workerLog.info("Python manifest queue (Dropbox): uploaded", {
           manifestId: mid,
           videoId: result.videoId,
         });
       } else {
-        await moveDropboxManifestToFailed(
+        await recordManifestUploadFailureOnDropbox(
           manifestPath,
-          queueRoot,
+          manifest,
+          result.error || "upload_failed",
           qToken,
           queueOwnerSessionId,
           qSession.dropboxRefreshToken ?? null,
@@ -526,18 +657,29 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
         manifestPath,
         error: msg,
       });
-      try {
-        if (qToken) {
-          await moveDropboxManifestToFailed(
-            manifestPath,
-            queueRoot,
-            qToken,
-            queueOwnerSessionId,
-            qSession.dropboxRefreshToken ?? null,
-          );
+      if (!dbUploadSucceeded) {
+        try {
+          if (qToken) {
+            const m = await downloadAndParseManifest(
+              manifestPath,
+              qToken,
+              queueOwnerSessionId,
+              qSession.dropboxRefreshToken ?? null,
+            );
+            if (m) {
+              await recordManifestUploadFailureOnDropbox(
+                manifestPath,
+                m,
+                msg,
+                qToken,
+                queueOwnerSessionId,
+                qSession.dropboxRefreshToken ?? null,
+              );
+            }
+          }
+        } catch {
+          // ignore
         }
-      } catch {
-        // ignore
       }
       processedThisTick++;
     } finally {

@@ -116,8 +116,8 @@ export default function SheetPreview({ previewData, onClose }: SheetPreviewProps
               </thead>
               <tbody>
                 {previewRows.map((row, idx) => {
-                  const hasTitle = row.youtube_title || row.youtube_title;
-                  const hasDescription = row.youtube_description || row.youtube_description;
+                  const hasTitle = row.youtube_title || row.title;
+                  const hasDescription = row.youtube_description || row.description;
                   const hasVideoSource = row.video_url || row.drive_file_id || row.path;
                   const isValid = hasTitle || hasDescription;
 

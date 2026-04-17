@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
 import { getDropboxToken } from "@/lib/auth";
 import { getPythonQueueDataForSession } from "@/lib/python-queue-ui";
+import { readWorkerUploadSchedule } from "@/lib/server-upload-schedule";
 import { countPythonManifestUploadsTodayUtc } from "@/lib/uploaded-videos";
 
 export const dynamic = "force-dynamic";
@@ -39,11 +40,23 @@ export async function GET(_request: NextRequest) {
       session.dropboxRefreshToken ?? null,
     );
     const uploadsTodayUtc = countPythonManifestUploadsTodayUtc();
+    const sched = readWorkerUploadSchedule();
+    const capNum = parseInt(sched.videosPerDay.trim(), 10);
+    const manifestDailyLimit =
+      sched.enabled && !Number.isNaN(capNum) && capNum > 0
+        ? {
+            enabled: true,
+            videosPerDay: capNum,
+            uploadsTodayUtc,
+            remainingToday: Math.max(0, capNum - uploadsTodayUtc),
+          }
+        : null;
 
     return new Response(
       JSON.stringify({
         ...summary,
         uploadsTodayUtc,
+        manifestDailyLimit,
       }),
       { headers: { "Content-Type": "application/json" } },
     );

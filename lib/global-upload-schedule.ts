@@ -44,6 +44,16 @@ export function readUploadScheduleFromStorage(): UploadSchedulePersisted {
   };
 }
 
+/** True if any upload-schedule value was ever stored in this browser profile. */
+export function hasUploadScheduleBrowserPersistence(): boolean {
+  if (typeof window === "undefined") return false;
+  return (
+    localStorage.getItem(UPLOAD_SCHEDULE_ENABLED_KEY) !== null ||
+    localStorage.getItem(UPLOAD_SCHEDULE_VPD_KEY) !== null ||
+    localStorage.getItem(LEGACY_VIDEOS_PER_DAY_KEY) !== null
+  );
+}
+
 export function writeUploadScheduleToStorage(
   enabled: boolean,
   videosPerDay: string,

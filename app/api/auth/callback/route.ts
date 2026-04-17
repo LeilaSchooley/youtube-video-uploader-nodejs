@@ -6,12 +6,37 @@ import {
   CLIENT_SECRET,
   REDIRECT_URL,
 } from "@/lib/auth";
-import { setSession, generateSessionId } from "@/lib/session";
-import { getDropboxTokensForUser } from "@/lib/dropbox-by-user";
+import { getSession, setSession, generateSessionId } from "@/lib/session";
+import {
+  getDropboxTokensForCandidates,
+  setDropboxTokensForUser,
+} from "@/lib/dropbox-by-user";
 import { cookies } from "next/headers";
 import { google } from "googleapis";
 
 export const dynamic = "force-dynamic";
+
+/** Google may expose email, numeric id, or OIDC sub; Dropbox store may use any of them as key. */
+function googleIdentityCandidates(
+  userId: string | undefined,
+  tokens: { id_token?: string },
+): string[] {
+  const out: string[] = [];
+  if (userId?.trim()) out.push(userId.trim());
+  const idt = tokens.id_token;
+  if (idt) {
+    try {
+      const payload = JSON.parse(
+        Buffer.from(idt.split(".")[1], "base64url").toString(),
+      ) as { sub?: string; email?: string };
+      if (payload.sub?.trim()) out.push(payload.sub.trim());
+      if (payload.email?.trim()) out.push(payload.email.trim());
+    } catch {
+      // ignore invalid JWT segment
+    }
+  }
+  return Array.from(new Set(out));
+}
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -144,11 +169,22 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(new URL("/?error=cookie_failed", baseUrl));
     }
 
-    // Step 4: Save session data and restore Dropbox tokens if this user had them before
+    // Step 4: Save session data and merge Dropbox tokens (file + any already on this session)
     try {
-      const dropboxForUser = userId
-        ? getDropboxTokensForUser(userId)
-        : undefined;
+      const existingSession = getSession(sessionId);
+      const dropboxFromFile = getDropboxTokensForCandidates(
+        googleIdentityCandidates(userId, tokens as { id_token?: string }),
+      );
+      const dropboxFromSession =
+        existingSession?.dropboxToken || existingSession?.dropboxRefreshToken
+          ? {
+              dropboxToken: existingSession.dropboxToken as string,
+              dropboxRefreshToken: existingSession.dropboxRefreshToken,
+            }
+          : undefined;
+      // Prefer durable per-user store; else keep Dropbox from session (e.g. user connected Dropbox before userId existed)
+      const dropboxMerged = dropboxFromFile ?? dropboxFromSession;
+
       setSession(sessionId, {
         authenticated: true,
         userId: userId,
@@ -157,13 +193,31 @@ export async function GET(request: NextRequest) {
           refresh_token?: string | null;
           [key: string]: any;
         },
-        ...(dropboxForUser && {
-          dropboxToken: dropboxForUser.dropboxToken,
-          dropboxRefreshToken: dropboxForUser.dropboxRefreshToken,
+        ...(dropboxMerged && {
+          dropboxToken: dropboxMerged.dropboxToken,
+          dropboxRefreshToken: dropboxMerged.dropboxRefreshToken,
         }),
       });
-      if (dropboxForUser) {
-        console.log("[AUTH CALLBACK] Restored Dropbox tokens for user");
+
+      if (dropboxFromFile) {
+        console.log(
+          "[AUTH CALLBACK] Restored Dropbox tokens from dropbox-by-user (multi-key lookup)",
+        );
+      } else if (userId && dropboxFromSession) {
+        console.log(
+          "[AUTH CALLBACK] Carried forward Dropbox tokens from existing session",
+        );
+      }
+      if (userId && dropboxMerged) {
+        setDropboxTokensForUser(userId, {
+          dropboxToken: dropboxMerged.dropboxToken,
+          dropboxRefreshToken: dropboxMerged.dropboxRefreshToken,
+        });
+        if (!dropboxFromFile && dropboxFromSession) {
+          console.log(
+            "[AUTH CALLBACK] Persisted session-only Dropbox tokens to dropbox-by-user",
+          );
+        }
       }
       console.log("[AUTH CALLBACK] Session saved successfully");
     } catch (sessionError: any) {

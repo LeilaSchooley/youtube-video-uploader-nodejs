@@ -76,26 +76,35 @@ export default function Header({
             </div>
           </div>
         )}
-        <div className="flex items-center gap-2 rounded-xl border-2 border-blue-100 dark:border-blue-800/60 px-3 py-2 bg-blue-50/90 dark:bg-blue-950/40 shadow-sm">
-          <span className="text-xs font-semibold text-blue-900 dark:text-blue-100 whitespace-nowrap">
-            Dropbox
-          </span>
-          {dropboxAuthLoading ? (
-            <span className="text-xs text-muted-foreground">Checking…</span>
-          ) : hasDropboxAuth === true ? (
-            <span className="text-xs text-emerald-700 dark:text-emerald-300 flex items-center gap-1 font-medium">
-              <span aria-hidden>✓</span>
-              Connected
+        <div className="flex flex-col gap-1 rounded-xl border-2 border-blue-100 dark:border-blue-800/60 px-3 py-2 bg-blue-50/90 dark:bg-blue-950/40 shadow-sm">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-blue-900 dark:text-blue-100 whitespace-nowrap">
+              Dropbox
             </span>
-          ) : (
-            <Button
-              type="button"
-              size="sm"
-              className="h-8 rounded-lg bg-blue-600 text-white hover:bg-blue-700 text-xs px-3"
-              onClick={() => void connectDropbox()}
-            >
-              Connect Dropbox
-            </Button>
+            {dropboxAuthLoading ? (
+              <span className="text-xs text-muted-foreground">Checking…</span>
+            ) : hasDropboxAuth === true ? (
+              <span className="text-xs text-emerald-700 dark:text-emerald-300 flex items-center gap-1 font-medium">
+                <span aria-hidden>✓</span>
+                Connected
+              </span>
+            ) : (
+              <Button
+                type="button"
+                size="sm"
+                className="h-8 rounded-lg bg-blue-600 text-white hover:bg-blue-700 text-xs px-3"
+                onClick={() => void connectDropbox()}
+              >
+                Connect Dropbox
+              </Button>
+            )}
+          </div>
+          {!dropboxAuthLoading && hasDropboxAuth !== true && (
+            <p className="text-[10px] leading-snug text-blue-900/70 dark:text-blue-100/70 max-w-[240px]">
+              Connect while signed in with Google — saved on this app server for
+              your account (survives logout). New device: same server + same
+              Google account restores automatically when keys match.
+            </p>
           )}
         </div>
         {/* Channel Selector */}

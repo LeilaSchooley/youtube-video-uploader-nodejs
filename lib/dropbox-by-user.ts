@@ -47,6 +47,24 @@ export function getDropboxTokensForUser(
   return store[userId];
 }
 
+/**
+ * Try several Google identity strings (email, sub, legacy id) — Dropbox may have
+ * been saved under a different key than the current session `userId`.
+ */
+export function getDropboxTokensForCandidates(
+  ids: Array<string | undefined | null>,
+): DropboxTokensForUser | undefined {
+  const seen = new Set<string>();
+  for (const raw of ids) {
+    const id = typeof raw === "string" ? raw.trim() : "";
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    const t = getDropboxTokensForUser(id);
+    if (t?.dropboxToken || t?.dropboxRefreshToken) return t;
+  }
+  return undefined;
+}
+
 export function setDropboxTokensForUser(
   userId: string,
   tokens: DropboxTokensForUser,

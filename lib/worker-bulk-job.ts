@@ -398,6 +398,6 @@ export async function runWorkerBulkJob(jobId: string, batchSize: number): Promis
   } catch (error: any) {
     const errorMessage = error?.message || "Unknown error";
     console.error(`[WORKER] Job ${jobId} error:`, errorMessage);
-    // Don't fail the whole job for individual errors - keep processing
+    markBulkAsFailed(jobId, errorMessage);
   }
 }

@@ -1,46 +1,22 @@
 "use client";
 
 import { useMemo, useState, useEffect } from "react";
+import { buildUploadSummary, calculateTimeUntil } from "./upload-summary-helpers";
 
 interface QueueItem {
   id: string;
   status: string;
-  items?: Array<{ title?: string; [key: string]: any }>; // Bulk queue items have this
-  totalVideos?: number; // Regular queue items have this
+  items?: Array<{ title?: string; [key: string]: any }>;
+  totalVideos?: number;
   videosPerDay?: number;
   startDate?: string;
-  progress?: Array<{ status: string; title?: string; index?: number }>;
+  progress?: Array<{ status: string; title?: string; index?: number; videoId?: string }>;
 }
 
 interface UploadSummaryProps {
   queue: QueueItem[];
   nextUploadTime: Date | null;
   timeUntilNext: string;
-}
-
-// Helper function to calculate time until a specific date
-function calculateTimeUntil(targetDate: Date): string {
-  const now = new Date();
-  const diff = targetDate.getTime() - now.getTime();
-  
-  if (diff <= 0) {
-    return "Uploading now...";
-  }
-  
-  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-  const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-  const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-  const seconds = Math.floor((diff % (1000 * 60)) / 1000);
-  
-  if (days > 0) {
-    return `${days}d ${hours}h ${minutes}m`;
-  } else if (hours > 0) {
-    return `${hours}h ${minutes}m ${seconds}s`;
-  } else if (minutes > 0) {
-    return `${minutes}m ${seconds}s`;
-  } else {
-    return `${seconds}s`;
-  }
 }
 
 export default function UploadSummary({
@@ -50,254 +26,7 @@ export default function UploadSummary({
 }: UploadSummaryProps) {
   const [nextDayCountdown, setNextDayCountdown] = useState<string>("");
   
-  const summary = useMemo((): {
-    immediateVideoCount: number;
-    scheduledVideoCount: number;
-    schedulingSettings: Array<{
-      jobId: string;
-      videosPerDay: number;
-      startDate: string | null;
-      totalVideos: number;
-      completedVideos: number;
-    }>;
-    jobsImmediate: QueueItem[];
-    jobsWithScheduling: QueueItem[];
-    nextDayVideos: Array<{ jobId: string; title: string; index: number }>;
-    nextDayCount: number;
-    nextDayTime: Date | null;
-    isToday: boolean;
-  } | null => {
-    const activeJobs = queue.filter(
-      (job) =>
-        job.status !== "completed" &&
-        job.status !== "failed" &&
-        job.status !== "cancelled"
-    );
-
-    if (activeJobs.length === 0) {
-      return null;
-    }
-
-    const jobsWithScheduling = activeJobs.filter(
-      (job) => job.videosPerDay && job.videosPerDay > 0
-    );
-    const jobsImmediate = activeJobs.filter(
-      (job) => !job.videosPerDay || job.videosPerDay === 0
-    );
-
-    // Count immediate upload videos
-    let immediateVideoCount = 0;
-    jobsImmediate.forEach((job) => {
-      // Bulk queue items have `items`, regular queue items have `totalVideos`
-      const count = job.items?.length || job.totalVideos || 0;
-      immediateVideoCount += count;
-    });
-
-    // Count scheduled videos
-    let scheduledVideoCount = 0;
-    jobsWithScheduling.forEach((job) => {
-      // Bulk queue items have `items`, regular queue items have `totalVideos`
-      const count = job.items?.length || job.totalVideos || 0;
-      scheduledVideoCount += count;
-    });
-
-    // Get scheduling settings
-    const schedulingSettings = jobsWithScheduling.map((job) => {
-      // Bulk queue items have `items`, regular queue items have `totalVideos`
-      const totalVideos = job.items?.length || job.totalVideos || 0;
-      return {
-        jobId: job.id,
-        videosPerDay: job.videosPerDay || 0,
-        startDate: job.startDate
-          ? new Date(job.startDate).toLocaleDateString("en-US", {
-              month: "short",
-              day: "numeric",
-              year: "numeric",
-            })
-          : null,
-        totalVideos,
-        completedVideos:
-          job.progress?.filter(
-            (p: any) =>
-              p && (p.videoId || (p.status && (
-                p.status.includes("Uploaded") ||
-                p.status.includes("Completed") ||
-                p.status.includes("scheduled") ||
-                p.status.includes("Scheduled")
-              )))
-          ).length || 0,
-      };
-    });
-
-    // Calculate videos scheduled for next upload (using UTC for day boundaries to match worker)
-    const now = new Date();
-    // Use UTC midnight for day boundaries (matches worker)
-    const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
-    const tomorrow = new Date(today);
-    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
-    
-    // Helper to get video title
-    const getVideoTitle = (job: QueueItem, index: number): string => {
-      let videoTitle = `Video ${index + 1}`;
-      
-      // Try to get title from job.items (from sheet) first
-      if (job.items && Array.isArray(job.items) && job.items.length > index) {
-        const item = job.items[index];
-        if (item && typeof item === 'object') {
-          const itemTitle = item.title;
-          if (itemTitle && typeof itemTitle === 'string' && itemTitle.trim() && itemTitle.trim() !== `Video ${index + 1}`) {
-            return itemTitle.trim();
-          }
-        }
-      }
-      
-      // Fallback to progress title
-      if (job.progress && job.progress[index] && job.progress[index].title) {
-        const progressTitle = job.progress[index].title;
-        if (progressTitle && typeof progressTitle === 'string' && progressTitle.trim()) {
-          return progressTitle.trim();
-        }
-      }
-      
-      // Also check by index match
-      const progressItem = job.progress?.find((p) => p && p.index === index);
-      if (progressItem && progressItem.title && typeof progressItem.title === 'string' && progressItem.title.trim()) {
-        return progressItem.title.trim();
-      }
-      
-      return videoTitle;
-    };
-    
-    // Helper to check if video is completed
-    const isVideoCompleted = (job: QueueItem, index: number): boolean => {
-      return job.progress?.some(
-        (p: any) => p && p.index === index && (p.videoId || (p.status && (
-          p.status.includes("Uploaded") ||
-          p.status.includes("Completed") ||
-          p.status.includes("scheduled") || 
-          p.status.includes("Scheduled")
-        )))
-      ) || false;
-    };
-    
-    // Find next batch of videos to upload
-    let nextBatchVideos: Array<{ jobId: string; title: string; index: number }> = [];
-    let nextBatchCount = 0;
-    let nextBatchTime: Date | null = null;
-    let isToday = false;
-    
-    jobsWithScheduling.forEach((job) => {
-      if (!job.videosPerDay || job.videosPerDay <= 0) return;
-      if (nextBatchCount > 0) return; // Already found a batch
-      
-      // Use startDate if provided and valid, otherwise use today (UTC)
-      let startDate: Date;
-      if (job.startDate && !isNaN(new Date(job.startDate).getTime())) {
-        const startDateRaw = new Date(job.startDate);
-        startDate = new Date(Date.UTC(startDateRaw.getUTCFullYear(), startDateRaw.getUTCMonth(), startDateRaw.getUTCDate(), 0, 0, 0, 0));
-      } else {
-        // No startDate set - assume job starts TODAY (UTC)
-        startDate = new Date(today);
-      }
-      
-      const totalVideos = job.items?.length || job.totalVideos || 0;
-      
-      // Count completed videos to determine current position
-      const completedCount = job.progress?.filter(
-        (p: any) => p && (p.videoId || (p.status && (
-          p.status.includes("Uploaded") ||
-          p.status.includes("Completed") ||
-          p.status.includes("scheduled") ||
-          p.status.includes("Scheduled")
-        )))
-      ).length || 0;
-      
-      // Calculate today's day index from start date
-      const todayDiff = Math.floor((today.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
-      
-      // If start date is in the future, show first batch as "upcoming"
-      if (todayDiff < 0) {
-        // Show first batch scheduled for start date
-        const firstBatchEndIndex = Math.min(job.videosPerDay, totalVideos);
-        for (let i = 0; i < firstBatchEndIndex; i++) {
-          if (!isVideoCompleted(job, i)) {
-            nextBatchVideos.push({
-              jobId: job.id,
-              title: getVideoTitle(job, i),
-              index: i,
-            });
-          }
-        }
-        if (nextBatchVideos.length > 0) {
-          nextBatchCount = nextBatchVideos.length;
-          nextBatchTime = startDate;
-          isToday = false;
-        }
-        return;
-      }
-      
-      // Check today's batch first
-      const todayStartIndex = todayDiff * job.videosPerDay;
-      const todayEndIndex = Math.min(todayStartIndex + job.videosPerDay, totalVideos);
-      
-      // Find pending videos in today's batch
-      const todayPendingVideos: Array<{ jobId: string; title: string; index: number }> = [];
-      for (let i = todayStartIndex; i < todayEndIndex && i < totalVideos; i++) {
-        if (!isVideoCompleted(job, i)) {
-          todayPendingVideos.push({
-            jobId: job.id,
-            title: getVideoTitle(job, i),
-            index: i,
-          });
-        }
-      }
-      
-      if (todayPendingVideos.length > 0) {
-        // There are still pending videos for today
-        nextBatchVideos = todayPendingVideos;
-        nextBatchCount = todayPendingVideos.length;
-        // If it's past noon, show "now"; if before noon, show noon
-        nextBatchTime = now.getTime() >= today.getTime() ? now : today;
-        isToday = true;
-        return;
-      }
-      
-      // Today's batch is complete, check tomorrow's batch
-      const tomorrowDiff = todayDiff + 1;
-      const tomorrowStartIndex = tomorrowDiff * job.videosPerDay;
-      const tomorrowEndIndex = Math.min(tomorrowStartIndex + job.videosPerDay, totalVideos);
-      
-      if (tomorrowStartIndex >= totalVideos) return; // No more videos
-      
-      for (let i = tomorrowStartIndex; i < tomorrowEndIndex && i < totalVideos; i++) {
-        if (!isVideoCompleted(job, i)) {
-          nextBatchVideos.push({
-            jobId: job.id,
-            title: getVideoTitle(job, i),
-            index: i,
-          });
-        }
-      }
-      
-      if (nextBatchVideos.length > 0) {
-        nextBatchCount = nextBatchVideos.length;
-        nextBatchTime = tomorrow;
-        isToday = false;
-      }
-    });
-
-    return {
-      immediateVideoCount,
-      scheduledVideoCount,
-      schedulingSettings,
-      jobsImmediate,
-      jobsWithScheduling,
-      nextDayVideos: nextBatchVideos,
-      nextDayCount: nextBatchCount,
-      nextDayTime: nextBatchTime,
-      isToday,
-    };
-  }, [queue]);
+  const summary = useMemo(() => buildUploadSummary(queue), [queue]);
 
   // Update countdown for next day
   useEffect(() => {

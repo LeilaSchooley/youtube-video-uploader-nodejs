@@ -6,6 +6,7 @@ import path from "path";
 import { Readable } from "stream";
 import {
   downloadDropboxFile,
+  uploadDropboxFile,
   listDropboxItems,
   moveDropboxFile,
   ensureDropboxFolder,
@@ -111,6 +112,66 @@ export async function downloadAndParseManifest(
     );
     return null;
   }
+}
+
+/** Raw JSON text (preserves unknown keys for merge updates). */
+export async function downloadDropboxManifestRawJson(
+  manifestDropboxPath: string,
+  accessToken: string,
+  sessionId: string | undefined,
+  refresh: string | null | undefined,
+): Promise<string | null> {
+  try {
+    const stream = await downloadDropboxFile(
+      manifestDropboxPath,
+      accessToken,
+      sessionId,
+      refresh ?? null,
+    );
+    return await streamToString(stream);
+  } catch (e) {
+    console.error(
+      `[PYTHON-QUEUE-DBX] Failed to download manifest ${manifestDropboxPath}:`,
+      e,
+    );
+    return null;
+  }
+}
+
+/**
+ * Merge keys into existing manifest JSON on Dropbox and overwrite the file.
+ */
+export async function mergeManifestJsonOnDropbox(
+  manifestDropboxPath: string,
+  patch: Record<string, unknown>,
+  accessToken: string,
+  sessionId: string | undefined,
+  refresh: string | null | undefined,
+): Promise<void> {
+  const raw = await downloadDropboxManifestRawJson(
+    manifestDropboxPath,
+    accessToken,
+    sessionId,
+    refresh,
+  );
+  if (raw === null) {
+    throw new Error(`Could not read manifest: ${manifestDropboxPath}`);
+  }
+  let base: Record<string, unknown>;
+  try {
+    base = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    throw new Error(`Invalid JSON in manifest: ${manifestDropboxPath}`);
+  }
+  const merged = { ...base, ...patch };
+  const out = `${JSON.stringify(merged, null, 2)}\n`;
+  await uploadDropboxFile(
+    manifestDropboxPath,
+    Buffer.from(out, "utf8"),
+    accessToken,
+    sessionId,
+    refresh ?? null,
+  );
 }
 
 /**

@@ -9,8 +9,8 @@ export interface DashboardTabsProps {
   onActiveTabChange: (tab: string) => void;
   queueTabBadge: number;
   uploadContent: ReactNode;
+  /** Queue activity, worker status, and upload history / statistics (merged). */
   queueContent: ReactNode;
-  statisticsContent: ReactNode;
 }
 
 export default function DashboardTabs({
@@ -19,7 +19,6 @@ export default function DashboardTabs({
   queueTabBadge,
   uploadContent,
   queueContent,
-  statisticsContent,
 }: DashboardTabsProps) {
   return (
     <Tabs value={activeTab} onValueChange={onActiveTabChange} className="w-full">
@@ -29,17 +28,16 @@ export default function DashboardTabs({
           Upload Videos
         </TabsTrigger>
         <TabsTrigger value="queue" className="gap-2">
-          <ListOrdered className="h-4 w-4 shrink-0" />
-          Queue &amp; Progress
+          <span className="flex items-center gap-1 shrink-0" aria-hidden>
+            <ListOrdered className="h-4 w-4" />
+            <BarChart3 className="h-4 w-4" />
+          </span>
+          Queue &amp; statistics
           {queueTabBadge > 0 && (
             <span className="ml-1 rounded-full bg-primary/15 px-2 py-0.5 text-xs font-semibold text-primary">
               {queueTabBadge}
             </span>
           )}
-        </TabsTrigger>
-        <TabsTrigger value="statistics" className="gap-2">
-          <BarChart3 className="h-4 w-4 shrink-0" />
-          Statistics
         </TabsTrigger>
       </TabsList>
 
@@ -52,10 +50,6 @@ export default function DashboardTabs({
 
       <TabsContent value="queue" className="mt-0 space-y-6">
         {queueContent}
-      </TabsContent>
-
-      <TabsContent value="statistics" className="mt-0 space-y-6">
-        {statisticsContent}
       </TabsContent>
     </Tabs>
   );

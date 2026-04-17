@@ -6,6 +6,8 @@
 import fs from "fs";
 import path from "path";
 
+export { MANIFEST_MAX_AUTO_RETRIES } from "@/lib/manifest-upload-constants";
+
 export interface PythonManifest {
   id?: string;
   title: string;
@@ -23,6 +25,12 @@ export interface PythonManifest {
   madeForKids?: boolean;
   /** Higher runs first when listing pending jobs */
   priority?: number;
+  /** Worker / UI job state (optional; merged into manifest JSON on Dropbox or disk) */
+  upload_status?: "queued" | "uploading" | "done" | "failed";
+  /** Upload failures incremented by worker; terminal when >= MANIFEST_MAX_AUTO_RETRIES */
+  retry_count?: number;
+  last_error?: string;
+  last_attempt_at?: string;
 }
 
 export interface ParsedManifestEntry {

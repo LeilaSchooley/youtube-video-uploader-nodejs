@@ -123,6 +123,13 @@ export interface PythonQueueData {
   dropboxConfigured?: boolean;
   /** Resolved Dropbox queue root (same user only) */
   dropboxRootPath?: string;
+  /** UTC daily cap for Python manifest uploads when dashboard scheduling is enabled */
+  manifestDailyLimit?: {
+    enabled: boolean;
+    videosPerDay: number;
+    uploadsTodayUtc: number;
+    remainingToday: number;
+  } | null;
 }
 
 

@@ -97,6 +97,7 @@ const PYTHON_MANIFEST_JOB_PREFIX = "python-manifest:";
 
 /**
  * Count uploads recorded today (UTC midnight) whose jobId came from the Python manifest worker.
+ * Only counts records with a non-empty videoId (i.e. actually succeeded on YouTube).
  */
 export function countPythonManifestUploadsTodayUtc(): number {
   const list = readRecords();
@@ -106,10 +107,30 @@ export function countPythonManifestUploadsTodayUtc(): number {
   let n = 0;
   for (const r of list) {
     if (!r.jobId.startsWith(PYTHON_MANIFEST_JOB_PREFIX)) continue;
+    if (!r.videoId) continue;
     const t = new Date(r.uploadedAt).getTime();
     if (t >= minTime) n++;
   }
   return n;
+}
+
+/**
+ * True if a Python manifest job with the given jobId has already been recorded
+ * as uploaded today (UTC). Used to prevent double-uploading the same manifest
+ * if the post-upload file move fails or the daily cap toggle is off.
+ */
+export function wasManifestJobUploadedTodayUtc(jobId: string): boolean {
+  const list = readRecords();
+  const start = new Date();
+  start.setUTCHours(0, 0, 0, 0);
+  const minTime = start.getTime();
+  for (const r of list) {
+    if (r.jobId !== jobId) continue;
+    if (!r.videoId) continue;
+    const t = new Date(r.uploadedAt).getTime();
+    if (t >= minTime) return true;
+  }
+  return false;
 }
 
 /**

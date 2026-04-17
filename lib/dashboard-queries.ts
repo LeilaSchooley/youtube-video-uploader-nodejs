@@ -18,6 +18,7 @@ const FALLBACK_PYTHON: PythonQueueData = {
   uploadsTodayUtc: 0,
   source: undefined,
   dropboxConfigured: false,
+  manifestDailyLimit: null,
 };
 
 export async function fetchDashboardQueueBundle(): Promise<DashboardQueueBundle> {

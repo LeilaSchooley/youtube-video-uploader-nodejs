@@ -3,9 +3,9 @@
 import { useState } from "react";
 import WorkerStatus from "./WorkerStatus";
 import PythonQueuePanel from "./PythonQueuePanel";
+import UnifiedActivityView from "./UnifiedActivityView";
 import QueueManagementToolbar from "./QueueManagementToolbar";
 import QueueManagementEmptyState from "./QueueManagementEmptyState";
-import QueueManagementJobList from "./QueueManagementJobList";
 import QueueManagementJobDetailPanel from "./QueueManagementJobDetailPanel";
 import type { BulkJob, JobStatus, PythonQueueData } from "./types";
 
@@ -66,6 +66,16 @@ export default function QueueManagement({
         workerHeartbeat={workerHeartbeat}
       />
 
+      <UnifiedActivityView
+        queue={queue}
+        searchQuery={searchQuery}
+        manifestVisible={!!pythonQueue?.dropboxConfigured}
+        selectedBulkJobId={selectedJobId}
+        setSelectedBulkJobId={setSelectedJobId}
+        fetchJobStatus={fetchJobStatus}
+        fetchQueue={fetchQueue}
+      />
+
       <WorkerStatus
         queue={queue}
         workerBusy={workerBusy}
@@ -90,23 +100,13 @@ export default function QueueManagement({
         }}
       />
 
-      {queue.length === 0 && (
-        <QueueManagementEmptyState onGoToUpload={onGoToUpload} />
-      )}
+      {queue.length === 0 &&
+        !(pythonQueue?.dropboxConfigured) &&
+        !(pythonQueue?.pending && pythonQueue.pending.length > 0) && (
+          <QueueManagementEmptyState onGoToUpload={onGoToUpload} />
+        )}
 
-      <div className="min-h-0 lg:grid lg:grid-cols-2 lg:gap-6 lg:items-start">
-        <QueueManagementJobList
-          queue={queue}
-          searchQuery={searchQuery}
-          selectedJobId={selectedJobId}
-          jobStatus={jobStatus}
-          setSelectedJobId={setSelectedJobId}
-          fetchJobStatus={fetchJobStatus}
-          fetchQueue={fetchQueue}
-          handleQueueAction={handleQueueAction}
-          requestConfirm={requestConfirm}
-        />
-
+      <div className="min-h-0 max-w-5xl mx-auto w-full">
         <QueueManagementJobDetailPanel
           selectedJobId={selectedJobId}
           queue={queue}

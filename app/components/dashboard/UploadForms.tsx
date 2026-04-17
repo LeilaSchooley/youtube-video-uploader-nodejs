@@ -489,6 +489,8 @@ export default function UploadForms({
 
   // On unmount (e.g. user switches tab), save all Dropbox form inputs to localStorage
   // Read from DOM for the two path inputs so we capture the latest typed value even if state hasn't updated yet
+  // Empty deps intentional: this must run only on unmount, reading DOM directly for latest values.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     return () => {
       try {
@@ -556,7 +558,7 @@ export default function UploadForms({
         console.warn("[UploadForms] Error saving form state on unmount:", err);
       }
     };
-  });
+  }, []);
 
   // Restore all Dropbox inputs from localStorage when component mounts (after tab switch)
   // This runs after hydration to ensure DOM is ready and state is initialized

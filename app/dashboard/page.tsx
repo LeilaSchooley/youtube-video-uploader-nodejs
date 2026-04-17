@@ -39,6 +39,7 @@ import { DASHBOARD_STORAGE } from "@/lib/dashboard-storage-keys";
 import {
   readUploadScheduleFromStorage,
   writeUploadScheduleToStorage,
+  hasUploadScheduleBrowserPersistence,
 } from "@/lib/global-upload-schedule";
 import type { User } from "@/app/components/dashboard/types";
 import { useConfirmModal } from "@/app/dashboard/hooks/useConfirmModal";
@@ -184,6 +185,13 @@ export default function Dashboard() {
   const [showSingleUpload, setShowSingleUpload] = useState<boolean>(false); // Collapsed by default
   const [showBulkUpload, setShowBulkUpload] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<string>("upload");
+
+  /** Legacy: Statistics used its own tab; merged into `queue`. */
+  useEffect(() => {
+    if (activeTab === "statistics") {
+      setActiveTab("queue");
+    }
+  }, [activeTab]);
   const [dropboxQueuePickerNonce, setDropboxQueuePickerNonce] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const csvFileInputRef = useRef<HTMLInputElement>(null);
@@ -356,12 +364,46 @@ export default function Dashboard() {
     );
   }, [checkDuplicatesBeforeUpload]);
 
-  // Global upload schedule (videos/day): load once, then auto-save to localStorage
+  // Global upload schedule: load from localStorage; if the browser has no keys
+  // (e.g. user cleared site data), hydrate from the server file the worker uses.
   useEffect(() => {
-    const r = readUploadScheduleFromStorage();
-    setUploadScheduleEnabled(r.enabled);
-    setUploadScheduleVpd(r.videosPerDay);
-    setUploadScheduleHydrated(true);
+    let cancelled = false;
+    void (async () => {
+      const local = readUploadScheduleFromStorage();
+      let enabled = local.enabled;
+      let vpd = local.videosPerDay;
+
+      if (!hasUploadScheduleBrowserPersistence()) {
+        try {
+          const res = await fetch("/api/upload-schedule", {
+            credentials: "include",
+          });
+          if (res.ok) {
+            const data = (await res.json()) as {
+              success?: boolean;
+              enabled?: boolean;
+              videosPerDay?: string;
+            };
+            if (data.success && typeof data.enabled === "boolean") {
+              enabled = data.enabled;
+              vpd =
+                typeof data.videosPerDay === "string" ? data.videosPerDay : "";
+            }
+          }
+        } catch {
+          /* keep local defaults */
+        }
+      }
+
+      if (cancelled) return;
+      setUploadScheduleEnabled(enabled);
+      setUploadScheduleVpd(vpd);
+      setUploadScheduleHydrated(true);
+      writeUploadScheduleToStorage(enabled, vpd);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -371,6 +413,17 @@ export default function Dashboard() {
     }
     scheduleSaveTimerRef.current = setTimeout(() => {
       writeUploadScheduleToStorage(uploadScheduleEnabled, uploadScheduleVpd);
+      void fetch("/api/upload-schedule", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          enabled: uploadScheduleEnabled,
+          videosPerDay: uploadScheduleVpd,
+        }),
+      }).catch(() => {
+        /* worker may still use last saved file */
+      });
       setScheduleJustSaved(true);
       if (scheduleSavedFlashRef.current) {
         clearTimeout(scheduleSavedFlashRef.current);
@@ -383,6 +436,9 @@ export default function Dashboard() {
     return () => {
       if (scheduleSaveTimerRef.current) {
         clearTimeout(scheduleSaveTimerRef.current);
+      }
+      if (scheduleSavedFlashRef.current) {
+        clearTimeout(scheduleSavedFlashRef.current);
       }
     };
   }, [uploadScheduleHydrated, uploadScheduleEnabled, uploadScheduleVpd]);
@@ -807,7 +863,6 @@ export default function Dashboard() {
         <CommandPalette
           onGoUpload={() => setActiveTab("upload")}
           onGoQueue={() => setActiveTab("queue")}
-          onGoStatistics={() => setActiveTab("statistics")}
           onExportStatsJson={() => exportStatistics("json")}
           onExportStatsCsv={() => exportStatistics("csv")}
           onToggleDebug={
@@ -1053,16 +1108,14 @@ export default function Dashboard() {
                 requestConfirm={requestConfirm}
                 onGoToUpload={() => setActiveTab("upload")}
               />
+              <Statistics
+                queue={queue}
+                nextUploadTime={nextUploadTime}
+                timeUntilNext={timeUntilNext}
+                isActive={activeTab === "queue"}
+                requestConfirm={requestConfirm}
+              />
             </>
-          }
-          statisticsContent={
-            <Statistics
-              queue={queue}
-              nextUploadTime={nextUploadTime}
-              timeUntilNext={timeUntilNext}
-              isActive={activeTab === "statistics"}
-              requestConfirm={requestConfirm}
-            />
           }
         />
         </DashboardErrorBoundary>

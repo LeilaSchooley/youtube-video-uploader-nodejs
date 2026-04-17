@@ -45,7 +45,9 @@ export default function UploadScheduleSettings({
             </h3>
             <p className="text-xs text-muted-foreground mt-0.5">
               Global default for uploads that support a daily cap (e.g. Dropbox
-              folder queue). Saved automatically in this browser.
+              folder queue). Saved in this browser and on the server (signed in)
+              so the worker can enforce the same limit after refresh or cleared
+              site data.
             </p>
           </div>
         </div>
@@ -87,8 +89,10 @@ export default function UploadScheduleSettings({
           className="max-w-xs text-sm"
         />
         <p className="text-xs text-muted-foreground mt-1">
-          When enabled, the worker spreads uploads across days (see bulk job
-          docs). Per-row{" "}
+          When enabled, the worker applies the same per-day count to{" "}
+          <strong>bulk jobs</strong> and to <strong>Queue mode</strong> (Python
+          manifest uploads), using successful uploads completed today (UTC).
+          Per-row{" "}
           <code className="bg-blue-100 dark:bg-blue-900/50 px-1 rounded text-[11px]">
             publishAt
           </code>{" "}

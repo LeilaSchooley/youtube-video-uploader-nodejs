@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
-  BarChart3,
   Download,
   FileJson,
   ListOrdered,
@@ -22,8 +21,8 @@ import {
 
 export interface CommandPaletteProps {
   onGoUpload: () => void;
+  /** Queue, progress, activity, and upload history / charts (single tab). */
   onGoQueue: () => void;
-  onGoStatistics: () => void;
   onExportStatsJson: () => void | Promise<void>;
   onExportStatsCsv: () => void | Promise<void>;
   /** Dev-only: toggle debug panel */
@@ -33,7 +32,6 @@ export interface CommandPaletteProps {
 export default function CommandPalette({
   onGoUpload,
   onGoQueue,
-  onGoStatistics,
   onExportStatsJson,
   onExportStatsCsv,
   onToggleDebug,
@@ -76,14 +74,7 @@ export default function CommandPalette({
             className="gap-2"
           >
             <ListOrdered className="h-4 w-4" />
-            Go to Queue &amp; Progress
-          </CommandItem>
-          <CommandItem
-            onSelect={() => run(onGoStatistics)}
-            className="gap-2"
-          >
-            <BarChart3 className="h-4 w-4" />
-            Go to Statistics
+            Go to Queue &amp; statistics
           </CommandItem>
         </CommandGroup>
         <CommandSeparator />

@@ -8,21 +8,12 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useAppToast } from "@/app/app-toast-context";
 import {
-  DESCRIPTION_FOOTER_TEMPLATE_KEY,
-  DESCRIPTION_AFFILIATE_DISCLOSURE_KEY,
-  applyDescriptionTemplate,
-  ensureAffiliateDisclosure,
-} from "@/lib/description-templates";
-
-type SuggestResponse = {
-  titles?: string[];
-  description?: string;
-  chapterOutline?: string;
-  ctas?: string[];
-  warnings?: string[];
-  error?: string;
-  retryAfterMs?: number;
-};
+  appendFooterTemplate,
+  copyTitleAndDescription,
+  ensureDisclosureLine,
+  runSuggestRequest,
+  type SuggestResponse,
+} from "./ai-assist-snippet-actions";
 
 export interface AiAssistSnippetPanelProps {
   /** single: apply into linked form refs. standalone: local draft textareas */
@@ -99,19 +90,13 @@ export default function AiAssistSnippetPanel({
     setBusy(true);
     setResult(null);
     try {
-      const res = await fetch("/api/ai/suggest-snippet", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sourceTitle,
-          sourceDescription: readDescription().trim() || undefined,
-          keywords: keywords.trim() || undefined,
-          niche: niche.trim() || undefined,
-          language: language.trim() || undefined,
-        }),
+      const { res, data } = await runSuggestRequest({
+        sourceTitle,
+        sourceDescription: readDescription(),
+        keywords,
+        niche,
+        language,
       });
-      const data = (await res.json()) as SuggestResponse;
       if (!res.ok) {
         if (res.status === 429 && data.retryAfterMs) {
           showToast({
@@ -167,73 +152,18 @@ export default function AiAssistSnippetPanel({
   };
 
   const appendFooter = () => {
-    let tpl = "";
-    try {
-      tpl = localStorage.getItem(DESCRIPTION_FOOTER_TEMPLATE_KEY) ?? "";
-    } catch {
-      showToast({ type: "error", message: "Could not read templates" });
-      return;
-    }
-    if (!tpl.trim()) {
-      showToast({
-        type: "error",
-        message: "Save a footer template in Description footer settings first",
-      });
-      return;
-    }
-    const block = applyDescriptionTemplate(tpl, {
-      title: readTitle(),
-      link: footerLink.trim(),
-      coupon: footerCoupon.trim(),
+    appendFooterTemplate({
+      readTitle,
+      readDescription,
+      writeDescription,
+      link: footerLink,
+      coupon: footerCoupon,
+      showToast,
     });
-    const cur = readDescription().trimEnd();
-    const next = cur ? `${cur}\n\n${block}` : block;
-    writeDescription(next);
-    showToast({ type: "success", message: "Footer appended" });
   };
 
   const runDisclosure = () => {
-    let line = "";
-    try {
-      line =
-        localStorage.getItem(DESCRIPTION_AFFILIATE_DISCLOSURE_KEY)?.trim() ??
-        "";
-    } catch {
-      showToast({ type: "error", message: "Could not read disclosure line" });
-      return;
-    }
-    if (!line) {
-      showToast({
-        type: "error",
-        message: "Set affiliate disclosure line in settings first",
-      });
-      return;
-    }
-    const { text, appended } = ensureAffiliateDisclosure(
-      readDescription(),
-      line,
-    );
-    if (!appended) {
-      showToast({
-        type: "info",
-        message:
-          "No change (no affiliate-like keywords, or disclosure already present)",
-      });
-      return;
-    }
-    writeDescription(text);
-    showToast({ type: "success", message: "Disclosure appended" });
-  };
-
-  const copyDraft = async () => {
-    const t = readTitle();
-    const d = readDescription();
-    try {
-      await navigator.clipboard.writeText(`${t}\n\n${d}`);
-      showToast({ type: "success", message: "Copied title + description" });
-    } catch {
-      showToast({ type: "error", message: "Clipboard not available" });
-    }
+    ensureDisclosureLine({ readDescription, writeDescription, showToast });
   };
 
   return (
@@ -357,7 +287,7 @@ export default function AiAssistSnippetPanel({
             Ensure disclosure
           </Button>
           {variant === "standalone" ? (
-            <Button type="button" size="sm" variant="outline" onClick={() => void copyDraft()}>
+            <Button type="button" size="sm" variant="outline" onClick={() => void copyTitleAndDescription({ readTitle, readDescription, showToast })}>
               Copy title + description
             </Button>
           ) : null}
