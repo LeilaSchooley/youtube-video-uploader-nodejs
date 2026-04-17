@@ -177,7 +177,12 @@ export async function workerUploadVideo(
   dropboxToken?: string,
   sessionId?: string,
   sessionRefreshToken?: string | null,
-): Promise<{ success: boolean; videoId?: string; error?: string }> {
+): Promise<{
+  success: boolean;
+  videoId?: string;
+  channelId?: string;
+  error?: string;
+}> {
   const { index, item } = task;
   let videoDuration: number | null = null;
 
@@ -297,6 +302,7 @@ export async function workerUploadVideo(
     );
 
     const videoId = result.data.id;
+    const channelId = result.data.snippet?.channelId ?? undefined;
     const uploadDuration = (Date.now() - uploadStartTime) / 1000;
 
     if (!videoId) {
@@ -454,7 +460,7 @@ export async function workerUploadVideo(
       }
     }
 
-    return { success: true, videoId };
+    return { success: true, videoId, channelId };
   } catch (error: any) {
     let errorMessage =
       error?.response?.data?.error?.message ||
@@ -521,6 +527,7 @@ export async function workerProcessBatch(
   let results: PromiseSettledResult<{
     success: boolean;
     videoId?: string;
+    channelId?: string;
     error?: string;
   }>[];
 
@@ -578,6 +585,7 @@ export async function workerProcessBatch(
             title: task.item.title || `Video ${task.index + 1}`,
             jobId,
             uploadedAt: new Date().toISOString(),
+            channelId: result.value.channelId,
           });
         }
       } else {

@@ -15,6 +15,8 @@ export interface UploadedVideoRecord {
   title: string;
   jobId: string;
   uploadedAt: string; // ISO
+  /** YouTube channel that received the upload (from API). Omitted on older rows. */
+  channelId?: string;
 }
 
 function ensureDataDir(): void {
@@ -60,11 +62,22 @@ export function appendUploadedVideo(record: UploadedVideoRecord): void {
   writeRecords(without);
 }
 
+export type GetUploadedVideosOptions = {
+  /** If set, only rows for this YouTube channel (excludes legacy rows with no channelId). */
+  channelId?: string | null;
+};
+
 /**
- * Return all uploaded video records (newest first).
+ * Return uploaded video records (newest first).
  */
-export function getUploadedVideos(): UploadedVideoRecord[] {
-  const list = readRecords();
+export function getUploadedVideos(
+  options?: GetUploadedVideosOptions,
+): UploadedVideoRecord[] {
+  let list = readRecords();
+  const cid = options?.channelId?.trim();
+  if (cid) {
+    list = list.filter((r) => r.channelId === cid);
+  }
   list.sort(
     (a, b) =>
       new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime(),

@@ -19,6 +19,8 @@ interface StatisticsProps {
 export default function Statistics({ queue, nextUploadTime, timeUntilNext, isActive, requestConfirm }: StatisticsProps) {
   const showAppToast = useAppToast();
   const [uploadedVideos, setUploadedVideos] = useState<UploadedVideoRecord[] | null>(null);
+  const [uploadChannelFilter, setUploadChannelFilter] = useState<string>("all");
+  const [ytChannels, setYtChannels] = useState<Array<{ id: string; title: string }>>([]);
   const [loadingUploadedVideos, setLoadingUploadedVideos] = useState(false);
   const [syncingFromQueue, setSyncingFromQueue] = useState(false);
   const [uploadedVideosError, setUploadedVideosError] = useState<string | null>(null);
@@ -49,13 +51,29 @@ export default function Statistics({ queue, nextUploadTime, timeUntilNext, isAct
     }
   }, [isActive, uploadedVideos, loadingUploadedVideos, loadUploadedVideos]);
 
+  useEffect(() => {
+    if (!isActive) return;
+    void fetch("/api/youtube/channels", { credentials: "include" })
+      .then((r) => r.json())
+      .then((d: { channels?: Array<{ id: string; title: string }> }) => {
+        if (Array.isArray(d.channels)) setYtChannels(d.channels);
+      })
+      .catch(() => {});
+  }, [isActive]);
+
+  const displayedUploadedVideos = useMemo(() => {
+    if (uploadedVideos === null) return null;
+    if (uploadChannelFilter === "all") return uploadedVideos;
+    return uploadedVideos.filter((v) => v.channelId === uploadChannelFilter);
+  }, [uploadedVideos, uploadChannelFilter]);
+
   const uploadsByDay = useMemo(() => {
-    if (!uploadedVideos?.length) return [];
+    if (!displayedUploadedVideos?.length) return [];
     const days = 14;
     const today = new Date();
     today.setUTCHours(0, 0, 0, 0);
     const counts = new Map<string, number>();
-    for (const v of uploadedVideos) {
+    for (const v of displayedUploadedVideos) {
       const key = new Date(v.uploadedAt).toISOString().slice(0, 10);
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
@@ -68,7 +86,7 @@ export default function Statistics({ queue, nextUploadTime, timeUntilNext, isAct
       out.push({ label, date: key, uploads: counts.get(key) ?? 0 });
     }
     return out;
-  }, [uploadedVideos]);
+  }, [displayedUploadedVideos]);
 
   const syncFromQueue = useCallback(async () => {
     setSyncingFromQueue(true);
@@ -90,7 +108,14 @@ export default function Statistics({ queue, nextUploadTime, timeUntilNext, isAct
 
   const downloadUploadedVideosCsv = useCallback(async () => {
     try {
-      const res = await fetch("/api/uploaded-videos?format=csv", { credentials: "include" });
+      const ch =
+        uploadChannelFilter !== "all"
+          ? `&channelId=${encodeURIComponent(uploadChannelFilter)}`
+          : "";
+      const res = await fetch(
+        `/api/uploaded-videos?format=csv${ch}`,
+        { credentials: "include" },
+      );
       if (!res.ok) throw new Error("Export failed");
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
@@ -102,7 +127,7 @@ export default function Statistics({ queue, nextUploadTime, timeUntilNext, isAct
     } catch {
       setUploadedVideosError("Failed to download CSV");
     }
-  }, []);
+  }, [uploadChannelFilter]);
 
   const allProgress = queue.flatMap((job) => job.progress || []);
   const totalVideos = queue.reduce((sum, job) => {
@@ -182,6 +207,7 @@ export default function Statistics({ queue, nextUploadTime, timeUntilNext, isAct
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
         setUploadedVideos([]);
+        setUploadChannelFilter("all");
         setUploadedVideosError(null);
         showAppToast({ message: data.message || "Upload history cleared", type: "success" });
       } else {
@@ -195,7 +221,12 @@ export default function Statistics({ queue, nextUploadTime, timeUntilNext, isAct
   return (
     <>
       <StatisticsUploadedVideosPanel
-        uploadedVideos={uploadedVideos}
+        uploadedVideos={displayedUploadedVideos}
+        uploadHistoryFull={uploadedVideos}
+        uploadedVideosTotalCount={uploadedVideos?.length ?? 0}
+        uploadChannelFilter={uploadChannelFilter}
+        onUploadChannelFilterChange={setUploadChannelFilter}
+        ytChannels={ytChannels}
         loadingUploadedVideos={loadingUploadedVideos}
         syncingFromQueue={syncingFromQueue}
         uploadedVideosError={uploadedVideosError}

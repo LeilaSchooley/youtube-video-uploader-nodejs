@@ -29,15 +29,18 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const format = searchParams.get("format") || "json";
     const shouldBackfill = searchParams.get("backfill") === "1";
+    const channelIdFilter = searchParams.get("channelId")?.trim() || undefined;
 
     if (shouldBackfill) {
       backfillFromBulkQueue();
     }
 
-    const list = getUploadedVideos();
+    const list = getUploadedVideos(
+      channelIdFilter ? { channelId: channelIdFilter } : undefined,
+    );
 
     if (format === "csv") {
-      const headers = ["videoId", "title", "jobId", "uploadedAt"];
+      const headers = ["videoId", "title", "jobId", "uploadedAt", "channelId"];
       const escape = (v: unknown) => {
         const s = v == null ? "" : String(v);
         if (s.includes(",") || s.includes('"') || s.includes("\n") || s.includes("\r")) {
@@ -45,7 +48,16 @@ export async function GET(request: NextRequest) {
         }
         return s;
       };
-      const rows = [headers.join(","), ...list.map((r) => headers.map((h) => escape((r as unknown as Record<string, unknown>)[h])).join(","))];
+      const rows = [
+        headers.join(","),
+        ...list.map((r) =>
+          headers
+            .map((h) =>
+              escape((r as unknown as Record<string, unknown>)[h]),
+            )
+            .join(","),
+        ),
+      ];
       const csv = rows.join("\n");
       const filename = `uploaded-videos-${new Date().toISOString().split("T")[0]}.csv`;
       return new NextResponse(csv, {

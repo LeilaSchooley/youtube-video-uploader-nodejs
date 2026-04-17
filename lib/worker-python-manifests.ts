@@ -305,6 +305,7 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
             title: manifest.title,
             jobId,
             uploadedAt: new Date().toISOString(),
+            channelId: result.channelId,
           });
           if (dailyUploadSlotsLeft !== null) {
             dailyUploadSlotsLeft--;
@@ -604,6 +605,7 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
           title: manifest.title,
           jobId: dbJobId,
           uploadedAt: new Date().toISOString(),
+          channelId: result.channelId,
         });
         if (dailyUploadSlotsLeft !== null) {
           dailyUploadSlotsLeft--;
