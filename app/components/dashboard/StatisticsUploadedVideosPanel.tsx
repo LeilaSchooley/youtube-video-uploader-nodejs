@@ -70,7 +70,7 @@ export default function StatisticsUploadedVideosPanel({
           <div>
             <h2 className="text-xl font-bold text-gray-800 dark:text-white">📋 All uploaded videos</h2>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 max-w-xl">
-              History is stored on this server per Google login. If you use multiple YouTube channels with the same Google account, filter by channel. Rows from before this update may not have a channel column.
+              History is stored on this server per Google login. If you use multiple YouTube channels with the same Google account, filter by channel. The default picks your last choice (saved in this browser), otherwise the newest upload that has channel metadata. Rows from before this update may not have a channel column.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">

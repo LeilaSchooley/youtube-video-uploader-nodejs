@@ -1,10 +1,67 @@
 "use client";
 
 import { useAppToast } from "@/app/app-toast-context";
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import StatisticsQueueOverview from "./StatisticsQueueOverview";
 import StatisticsUploadedVideosPanel from "./StatisticsUploadedVideosPanel";
 import type { ConfirmFn, UploadedVideoRecord } from "./statistics-types";
+
+const UPLOAD_HISTORY_CHANNEL_STORAGE_KEY =
+  "youtube-uploader-stats-upload-channel-filter";
+
+function readStoredUploadChannelPreference(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return localStorage.getItem(UPLOAD_HISTORY_CHANNEL_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredUploadChannelPreference(value: string) {
+  try {
+    localStorage.setItem(UPLOAD_HISTORY_CHANNEL_STORAGE_KEY, value);
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
+
+function clearStoredUploadChannelPreference() {
+  try {
+    localStorage.removeItem(UPLOAD_HISTORY_CHANNEL_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+function isKnownChannelId(
+  id: string,
+  videos: UploadedVideoRecord[],
+  ytChannelIds: Set<string>,
+): boolean {
+  if (ytChannelIds.has(id)) return true;
+  return videos.some((v) => v.channelId === id);
+}
+
+/** Prefer saved choice, else newest row with channelId, else all. */
+function resolveInitialUploadChannelFilter(
+  stored: string | null,
+  videos: UploadedVideoRecord[],
+  ytChannelIds: Set<string>,
+): string {
+  if (stored === "all") return "all";
+  if (stored && isKnownChannelId(stored, videos, ytChannelIds)) {
+    return stored;
+  }
+  const sorted = [...videos].sort(
+    (a, b) =>
+      new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime(),
+  );
+  for (const v of sorted) {
+    if (v.channelId) return v.channelId;
+  }
+  return "all";
+}
 
 interface StatisticsProps {
   queue: import("./types").BulkJob[];
@@ -21,6 +78,8 @@ export default function Statistics({ queue, nextUploadTime, timeUntilNext, isAct
   const [uploadedVideos, setUploadedVideos] = useState<UploadedVideoRecord[] | null>(null);
   const [uploadChannelFilter, setUploadChannelFilter] = useState<string>("all");
   const [ytChannels, setYtChannels] = useState<Array<{ id: string; title: string }>>([]);
+  const [ytChannelsResolved, setYtChannelsResolved] = useState(false);
+  const uploadChannelDefaultAppliedRef = useRef(false);
   const [loadingUploadedVideos, setLoadingUploadedVideos] = useState(false);
   const [syncingFromQueue, setSyncingFromQueue] = useState(false);
   const [uploadedVideosError, setUploadedVideosError] = useState<string | null>(null);
@@ -53,13 +112,58 @@ export default function Statistics({ queue, nextUploadTime, timeUntilNext, isAct
 
   useEffect(() => {
     if (!isActive) return;
+    setYtChannelsResolved(false);
     void fetch("/api/youtube/channels", { credentials: "include" })
       .then((r) => r.json())
       .then((d: { channels?: Array<{ id: string; title: string }> }) => {
         if (Array.isArray(d.channels)) setYtChannels(d.channels);
+        else setYtChannels([]);
       })
-      .catch(() => {});
+      .catch(() => {
+        setYtChannels([]);
+      })
+      .finally(() => {
+        setYtChannelsResolved(true);
+      });
   }, [isActive]);
+
+  useEffect(() => {
+    if (!isActive || uploadedVideos === null || !ytChannelsResolved) return;
+    if (uploadChannelDefaultAppliedRef.current) return;
+
+    const stored = readStoredUploadChannelPreference();
+    const ytIds = new Set(ytChannels.map((c) => c.id));
+    const resolved = resolveInitialUploadChannelFilter(
+      stored,
+      uploadedVideos,
+      ytIds,
+    );
+    setUploadChannelFilter(resolved);
+
+    const hadNoStoredPreference = stored === null || stored === "";
+    const storedWasInvalid =
+      stored &&
+      stored !== "all" &&
+      !isKnownChannelId(stored, uploadedVideos, ytIds);
+    if (
+      resolved !== "all" &&
+      (hadNoStoredPreference || storedWasInvalid)
+    ) {
+      writeStoredUploadChannelPreference(resolved);
+    }
+
+    /* Allow re-infer after e.g. clear history then Load list with new rows. */
+    if (uploadedVideos.length === 0 && resolved === "all") {
+      uploadChannelDefaultAppliedRef.current = false;
+    } else {
+      uploadChannelDefaultAppliedRef.current = true;
+    }
+  }, [isActive, uploadedVideos, ytChannels, ytChannelsResolved]);
+
+  const setUploadChannelFilterPersisted = useCallback((value: string) => {
+    setUploadChannelFilter(value);
+    writeStoredUploadChannelPreference(value);
+  }, []);
 
   const displayedUploadedVideos = useMemo(() => {
     if (uploadedVideos === null) return null;
@@ -207,7 +311,9 @@ export default function Statistics({ queue, nextUploadTime, timeUntilNext, isAct
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
         setUploadedVideos([]);
+        uploadChannelDefaultAppliedRef.current = false;
         setUploadChannelFilter("all");
+        clearStoredUploadChannelPreference();
         setUploadedVideosError(null);
         showAppToast({ message: data.message || "Upload history cleared", type: "success" });
       } else {
@@ -225,7 +331,7 @@ export default function Statistics({ queue, nextUploadTime, timeUntilNext, isAct
         uploadHistoryFull={uploadedVideos}
         uploadedVideosTotalCount={uploadedVideos?.length ?? 0}
         uploadChannelFilter={uploadChannelFilter}
-        onUploadChannelFilterChange={setUploadChannelFilter}
+        onUploadChannelFilterChange={setUploadChannelFilterPersisted}
         ytChannels={ytChannels}
         loadingUploadedVideos={loadingUploadedVideos}
         syncingFromQueue={syncingFromQueue}
