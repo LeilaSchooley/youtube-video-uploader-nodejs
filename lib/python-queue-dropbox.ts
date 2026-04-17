@@ -175,7 +175,8 @@ export async function mergeManifestJsonOnDropbox(
 }
 
 /**
- * Dropbox paths to `*.json` in `queueRoot/manifests`, sorted by filename (worker tick).
+ * Dropbox paths to `*.json` in `queueRoot/manifests` (or queue root if manifests/ is empty),
+ * sorted by filename (worker tick).
  */
 export async function listManifestJsonPathsSortedDropbox(
   queueRoot: string,
@@ -183,36 +184,42 @@ export async function listManifestJsonPathsSortedDropbox(
   sessionId: string | undefined,
   refresh: string | null | undefined,
 ): Promise<string[]> {
+  const root = normalizeDropboxPath(queueRoot);
   const manifestsDir = joinDropbox(queueRoot, "manifests");
-  let items: Awaited<ReturnType<typeof listDropboxItems>>;
-  try {
-    items = await listDropboxItems(
-      manifestsDir,
-      accessToken,
-      sessionId,
-      refresh ?? null,
-    );
-  } catch (e) {
-    console.error(
-      `[PYTHON-QUEUE-DBX] Cannot list manifests dir ${manifestsDir}:`,
-      e,
-    );
-    return [];
+  const pathsFromDir = async (dir: string): Promise<string[]> => {
+    let items: Awaited<ReturnType<typeof listDropboxItems>>;
+    try {
+      items = await listDropboxItems(
+        dir,
+        accessToken,
+        sessionId,
+        refresh ?? null,
+      );
+    } catch (e) {
+      console.error(`[PYTHON-QUEUE-DBX] Cannot list dir ${dir}:`, e);
+      return [];
+    }
+    return items
+      .filter(
+        (i) => i.type === "file" && i.name.toLowerCase().endsWith(".json"),
+      )
+      .map((f) =>
+        f.id.startsWith("/")
+          ? normalizeDropboxPath(f.id)
+          : normalizeDropboxPath(path.posix.join(dir, f.name)),
+      );
+  };
+
+  const fromManifests = await pathsFromDir(manifestsDir);
+  if (fromManifests.length > 0) {
+    return fromManifests.sort((a, b) => a.localeCompare(b));
   }
-  return items
-    .filter(
-      (i) => i.type === "file" && i.name.toLowerCase().endsWith(".json"),
-    )
-    .map((f) =>
-      f.id.startsWith("/")
-        ? normalizeDropboxPath(f.id)
-        : normalizeDropboxPath(path.posix.join(manifestsDir, f.name)),
-    )
-    .sort((a, b) => a.localeCompare(b));
+  const fromRoot = await pathsFromDir(root);
+  return fromRoot.sort((a, b) => a.localeCompare(b));
 }
 
 /**
- * List pending manifest entries under `queueRoot/manifests/*.json` on Dropbox.
+ * List pending manifest entries (`queueRoot/manifests/*.json` or `queueRoot/*.json` if manifests/ empty).
  */
 export async function listPendingManifestsFromDropboxSorted(
   queueRoot: string,
@@ -220,33 +227,15 @@ export async function listPendingManifestsFromDropboxSorted(
   sessionId: string | undefined,
   refresh: string | null | undefined,
 ): Promise<ParsedManifestEntry[]> {
-  const manifestsDir = joinDropbox(queueRoot, "manifests");
-  let items: Awaited<ReturnType<typeof listDropboxItems>>;
-  try {
-    items = await listDropboxItems(
-      manifestsDir,
-      accessToken,
-      sessionId,
-      refresh ?? null,
-    );
-  } catch (e) {
-    console.error(
-      `[PYTHON-QUEUE-DBX] Cannot list manifests dir ${manifestsDir}:`,
-      e,
-    );
-    return [];
-  }
-
-  const jsonFiles = items.filter(
-    (i) => i.type === "file" && i.name.toLowerCase().endsWith(".json"),
+  const paths = await listManifestJsonPathsSortedDropbox(
+    queueRoot,
+    accessToken,
+    sessionId,
+    refresh,
   );
-
   const entries: ParsedManifestEntry[] = [];
 
-  for (const f of jsonFiles) {
-    const manifestPath = f.id.startsWith("/")
-      ? normalizeDropboxPath(f.id)
-      : joinDropbox(manifestsDir, f.name);
+  for (const manifestPath of paths) {
     const manifest = await downloadAndParseManifest(
       manifestPath,
       accessToken,

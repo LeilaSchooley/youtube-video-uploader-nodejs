@@ -83,7 +83,7 @@ describe("detectDropboxQueueAuto", () => {
     expect(detectLayout).toHaveBeenCalled();
   });
 
-  it("skips layout when sample manifest does not parse", async () => {
+  it("accepts first python_queue path when sample parse fails but manifests exist (does not scan further roots)", async () => {
     detectLayout.mockImplementation(async (path: string) => {
       if (path === "/queue") {
         return {
@@ -131,10 +131,11 @@ describe("detectDropboxQueueAuto", () => {
 
     const r = await detectDropboxQueueAuto("token", "sid", null);
     expect(r.found).toBe(true);
-    expect(r.path).toBe("/youtube_pipeline/queue");
+    expect(r.path).toBe("/queue");
+    expect(r.validatedSample).toBe(false);
   });
 
-  it("returns invalid_manifest_sample when only bad layouts exist", async () => {
+  it("accepts python_queue when sample manifest does not parse but layout has JSON counts", async () => {
     detectLayout.mockResolvedValue({
       mode: "python_queue",
       manifestCount: 1,
@@ -145,8 +146,9 @@ describe("detectDropboxQueueAuto", () => {
     downloadParse.mockResolvedValue(null);
 
     const r = await detectDropboxQueueAuto("token", "sid", null);
-    expect(r.found).toBe(false);
-    expect(r.reason).toBe("invalid_manifest_sample");
+    expect(r.found).toBe(true);
+    expect(r.path).toBe("/bad");
+    expect(r.validatedSample).toBe(false);
   });
 
   it("returns no_dropbox_queue when nothing matches", async () => {

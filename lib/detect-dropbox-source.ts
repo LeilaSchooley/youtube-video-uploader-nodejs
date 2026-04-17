@@ -83,6 +83,23 @@ async function countJsonManifests(
   );
 }
 
+/** JSON manifest files placed directly under queue root (some bots use this instead of manifests/). */
+async function countJsonManifestsAtQueueRoot(
+  queueRoot: string,
+  accessToken: string,
+  sessionId: string | undefined,
+  refresh: string | null | undefined,
+): Promise<number> {
+  return countInFolder(
+    queueRoot,
+    accessToken,
+    sessionId,
+    refresh,
+    (name, type) => type === "file" && lowerName(name).endsWith(".json"),
+    MAX_MANIFEST_JSON_COUNT,
+  );
+}
+
 async function countVideos(
   videosPath: string,
   accessToken: string,
@@ -163,20 +180,30 @@ export async function detectDropboxPythonQueueLayout(
     const videosPath = joinPosix(root, "videos");
     const thumbsPath = joinPosix(root, "thumbnails");
 
-    const hasManifests = await folderExists(
+    const hasManifestsDir = await folderExists(
       manifestsPath,
       accessToken,
       sessionId,
       sessionRefreshToken,
     );
-    if (!hasManifests) continue;
-
-    const manifestCount = await countJsonManifests(
-      manifestsPath,
-      accessToken,
-      sessionId,
-      sessionRefreshToken,
-    );
+    let manifestCount = 0;
+    if (hasManifestsDir) {
+      manifestCount = await countJsonManifests(
+        manifestsPath,
+        accessToken,
+        sessionId,
+        sessionRefreshToken,
+      );
+    }
+    if (manifestCount === 0) {
+      manifestCount = await countJsonManifestsAtQueueRoot(
+        root,
+        accessToken,
+        sessionId,
+        sessionRefreshToken,
+      );
+    }
+    if (manifestCount === 0) continue;
 
     const hasVideos = await folderExists(
       videosPath,

@@ -133,16 +133,29 @@ export async function detectDropboxQueueAuto(
         sessionId,
         refresh,
       );
-      if (!ok) continue;
-
-      return {
-        found: true,
-        path: probe.resolvedRoot,
-        manifestCount: probe.manifestCount,
-        videoCount: probe.videoCount,
-        thumbnailCount: probe.thumbnailCount,
-        validatedSample: true,
-      };
+      if (ok) {
+        return {
+          found: true,
+          path: probe.resolvedRoot,
+          manifestCount: probe.manifestCount,
+          videoCount: probe.videoCount,
+          thumbnailCount: probe.thumbnailCount,
+          validatedSample: true,
+        };
+      }
+      // Layout matches and we see JSON manifests, but none parsed (timeouts, schema, encoding).
+      // Still accept so Queue mode works on slow/production hosts; worker may log parse errors.
+      if ((probe.manifestCount ?? 0) > 0) {
+        return {
+          found: true,
+          path: probe.resolvedRoot,
+          manifestCount: probe.manifestCount,
+          videoCount: probe.videoCount,
+          thumbnailCount: probe.thumbnailCount,
+          validatedSample: false,
+        };
+      }
+      continue;
     } catch {
       hadDropboxError = true;
     }
