@@ -18,6 +18,7 @@ export type DropboxAuthContextValue = {
   hasDropboxAuth: boolean | null;
   dropboxAuthLoading: boolean;
   connectDropbox: () => Promise<void>;
+  disconnectDropbox: () => Promise<void>;
 };
 
 const DropboxAuthContext = createContext<DropboxAuthContextValue | null>(
@@ -108,9 +109,40 @@ export function DropboxAuthProvider({
     }
   }, [onToast]);
 
+  const disconnectDropbox = useCallback(async () => {
+    try {
+      const response = await fetch("/api/auth/dropbox/disconnect", {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.ok) {
+        setHasDropboxAuth(false);
+        if (typeof window !== "undefined") {
+          localStorage.setItem(DASHBOARD_STORAGE.hasDropboxAuth, "false");
+        }
+        onToast?.({ message: "Dropbox disconnected", type: "success" });
+      } else {
+        onToast?.({
+          message:
+            (data as { error?: string }).error ||
+            "Failed to disconnect Dropbox",
+          type: "error",
+        });
+      }
+    } catch {
+      onToast?.({ message: "Failed to disconnect Dropbox", type: "error" });
+    }
+  }, [onToast]);
+
   const value = useMemo(
-    () => ({ hasDropboxAuth, dropboxAuthLoading, connectDropbox }),
-    [hasDropboxAuth, dropboxAuthLoading, connectDropbox],
+    () => ({
+      hasDropboxAuth,
+      dropboxAuthLoading,
+      connectDropbox,
+      disconnectDropbox,
+    }),
+    [hasDropboxAuth, dropboxAuthLoading, connectDropbox, disconnectDropbox],
   );
 
   return (

@@ -40,7 +40,7 @@ export default function Header({
   handleChannelChange,
   handleDeleteAccount,
 }: HeaderProps) {
-  const { hasDropboxAuth, dropboxAuthLoading, connectDropbox } =
+  const { hasDropboxAuth, dropboxAuthLoading, connectDropbox, disconnectDropbox } =
     useDropboxAuth();
 
   return (
@@ -85,10 +85,21 @@ export default function Header({
             {dropboxAuthLoading ? (
               <span className="text-xs text-muted-foreground">Checking…</span>
             ) : hasDropboxAuth === true ? (
-              <span className="text-xs text-emerald-700 dark:text-emerald-300 flex items-center gap-1 font-medium">
-                <span aria-hidden>✓</span>
-                Connected
-              </span>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs text-emerald-700 dark:text-emerald-300 flex items-center gap-1 font-medium">
+                  <span aria-hidden>✓</span>
+                  Connected
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 rounded-lg text-xs px-3 border-red-200 text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950/50"
+                  onClick={() => void disconnectDropbox()}
+                >
+                  Disconnect
+                </Button>
+              </div>
             ) : (
               <Button
                 type="button"

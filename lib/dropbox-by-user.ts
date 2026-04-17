@@ -74,3 +74,12 @@ export function setDropboxTokensForUser(
   store[userId] = tokens;
   writeStore(store);
 }
+
+/** Remove persisted Dropbox tokens for this Google user (e.g. disconnect). */
+export function clearDropboxTokensForUser(userId: string): void {
+  if (!userId || typeof userId !== "string") return;
+  const store = readStore();
+  if (!(userId in store)) return;
+  delete store[userId];
+  writeStore(store);
+}
