@@ -159,7 +159,8 @@ export default function UnifiedActivityView({
       return json;
     },
     enabled: manifestVisible,
-    refetchInterval: manifestVisible ? 4000 : false,
+    /** Slower than bulk queue polling to reduce Dropbox 429 bursts while listing manifests. */
+    refetchInterval: manifestVisible ? 8000 : false,
   });
 
   const retryMutation = useMutation({

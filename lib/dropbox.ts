@@ -399,16 +399,55 @@ export async function listDropboxVideosRecursive(
   return videos;
 }
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Backoff delay for Dropbox 429 / 503 (shared by upload + download paths).
+ * Honors Dropbox `retry_after`, HTTP Retry-After, and exponential backoff.
+ */
+function dropboxRateLimitRetryDelayMs(error: any, attempt: number): number {
+  let retryAfterMs = Math.min(10000 * attempt, 120000);
+  const retryAfterSec =
+    typeof error?.error?.error?.retry_after === "number"
+      ? error.error.error.retry_after
+      : typeof error?.error?.retry_after === "number"
+        ? error.error.retry_after
+        : undefined;
+  if (retryAfterSec != null && retryAfterSec >= 0) {
+    retryAfterMs = Math.max(retryAfterMs, retryAfterSec * 1000);
+  }
+  const retryAfterHeader =
+    error?.response?.headers?.["retry-after"] ??
+    error?.response?.headers?.["Retry-After"] ??
+    error?.headers?.["retry-after"] ??
+    error?.headers?.["Retry-After"] ??
+    error?.response?.headers?.get?.("retry-after") ??
+    error?.response?.headers?.get?.("Retry-After");
+  if (retryAfterHeader) {
+    const parsed = parseInt(String(retryAfterHeader), 10);
+    if (!isNaN(parsed) && parsed >= 0) {
+      retryAfterMs = Math.max(retryAfterMs, parsed * 1000);
+    }
+  }
+  const MIN_RETRY_MS = 2000;
+  retryAfterMs = Math.max(retryAfterMs, MIN_RETRY_MS);
+  retryAfterMs = Math.min(retryAfterMs, 300000);
+  return retryAfterMs;
+}
+
 /**
  * Download a file from Dropbox as a stream
- * Automatically refreshes token if it expires (401 error)
+ * Automatically refreshes token if it expires (401 error).
+ * Retries on 429 / 503 with backoff (same policy as uploads).
  */
 export async function downloadDropboxFile(
   filePath: string,
   accessToken: string,
   sessionId?: string,
   sessionRefreshToken?: string | null,
+  attempt = 1,
 ): Promise<Readable> {
+  const MAX_RETRIES = 6;
   console.log(`[DROPBOX] Downloading file: ${filePath}`);
   console.log(
     `[DROPBOX] Token available: ${!!accessToken}, Token length: ${accessToken?.length || 0}`,
@@ -466,6 +505,40 @@ export async function downloadDropboxFile(
 
     return stream;
   } catch (error: any) {
+    const status =
+      error?.status ?? error?.statusCode ?? error?.response?.status;
+    const is429 = status === 429;
+    const is503 = status === 503;
+    if ((is429 || is503) && attempt <= MAX_RETRIES) {
+      if (attempt === 1) {
+        console.log(
+          `[DROPBOX] ${status} error structure (download):`,
+          JSON.stringify(
+            {
+              status: error?.status,
+              statusCode: error?.statusCode,
+              responseStatus: error?.response?.status,
+              error: error?.error,
+            },
+            null,
+            2,
+          ),
+        );
+      }
+      const retryAfterMs = dropboxRateLimitRetryDelayMs(error, attempt);
+      console.warn(
+        `[DROPBOX] ${is503 ? "Service unavailable (503)" : "Rate limited (429)"} downloading ${filePath}, retry ${attempt}/${MAX_RETRIES} in ${Math.round(retryAfterMs / 1000)}s`,
+      );
+      await sleep(retryAfterMs);
+      return downloadDropboxFile(
+        filePath,
+        accessToken,
+        sessionId,
+        sessionRefreshToken,
+        attempt + 1,
+      );
+    }
+
     // Handle 401 errors (token refresh)
     const newToken = await handleDropbox401Error(
       error,
@@ -481,6 +554,7 @@ export async function downloadDropboxFile(
         newToken,
         sessionId,
         sessionRefreshToken,
+        1,
       );
     }
 
@@ -497,8 +571,6 @@ export async function downloadDropboxFile(
     );
   }
 }
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * Upload file contents to Dropbox (overwrites existing file)
@@ -554,48 +626,7 @@ export async function uploadDropboxFile(
         );
       }
 
-      // Start with longer delays: 10s, 20s, 40s, 60s, 90s, 120s
-      let retryAfterMs = Math.min(10000 * attempt, 120000);
-
-      // Respect Dropbox's retry_after (nested in error.error for too_many_write_operations)
-      // Guide: "too_many_write_operations returns Retry-After of zero" → still retry with a pause; rapid retries count against limits
-      const retryAfterSec =
-        typeof error?.error?.error?.retry_after === "number"
-          ? error.error.error.retry_after
-          : typeof error?.error?.retry_after === "number"
-            ? error.error.retry_after
-            : undefined;
-      if (retryAfterSec != null && retryAfterSec >= 0) {
-        retryAfterMs = Math.max(retryAfterMs, retryAfterSec * 1000);
-        if (attempt === 1 && retryAfterSec > 0) {
-          console.log(
-            `[DROPBOX] Using Dropbox retry_after: ${retryAfterSec}s (${retryAfterMs}ms)`,
-          );
-        }
-      }
-      // Check response headers (Dropbox SDK might wrap response)
-      const retryAfterHeader =
-        error?.response?.headers?.["retry-after"] ??
-        error?.response?.headers?.["Retry-After"] ??
-        error?.headers?.["retry-after"] ??
-        error?.headers?.["Retry-After"] ??
-        error?.response?.headers?.get?.("retry-after") ??
-        error?.response?.headers?.get?.("Retry-After");
-      if (retryAfterHeader) {
-        const parsed = parseInt(String(retryAfterHeader), 10);
-        if (!isNaN(parsed) && parsed >= 0) {
-          retryAfterMs = Math.max(retryAfterMs, parsed * 1000);
-          if (attempt === 1 && parsed > 0) {
-            console.log(
-              `[DROPBOX] Using Retry-After header: ${parsed}s (${retryAfterMs}ms)`,
-            );
-          }
-        }
-      }
-      // Minimum delay: avoid zero-delay retries (rate limited requests count; rapid loops are counter-productive)
-      const MIN_RETRY_MS = 2000;
-      retryAfterMs = Math.max(retryAfterMs, MIN_RETRY_MS);
-      retryAfterMs = Math.min(retryAfterMs, 300000); // cap 5 min
+      const retryAfterMs = dropboxRateLimitRetryDelayMs(error, attempt);
 
       console.warn(
         `[DROPBOX] ${is503 ? "Service unavailable (503)" : "Rate limited (429)"} uploading ${filePath}, retry ${attempt}/${MAX_RETRIES} in ${Math.round(retryAfterMs / 1000)}s`,

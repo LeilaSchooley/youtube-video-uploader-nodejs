@@ -69,7 +69,8 @@ export async function listManifestQueueRows(
   sessionId: string | undefined,
   refresh: string | null | undefined,
 ): Promise<ManifestQueueRow[]> {
-  const MANIFEST_ROW_CONCURRENCY = 6;
+  /** Keep low: parallel manifest reads + video checks can trigger Dropbox 429. */
+  const MANIFEST_ROW_CONCURRENCY = 2;
   const paths = await listManifestJsonPathsSortedDropbox(
     queueRoot,
     accessToken,
