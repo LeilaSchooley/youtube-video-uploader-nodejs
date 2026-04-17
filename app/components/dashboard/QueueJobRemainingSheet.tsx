@@ -1,5 +1,6 @@
 "use client";
 
+import type { AppToastPayload } from "@/app/app-toast-context";
 import type { RemainingRow } from "./queue-job-detail-helpers";
 
 type Props = {
@@ -7,7 +8,7 @@ type Props = {
   selectedJobId: string;
   isCollapsed: boolean;
   setIsCollapsed: (value: boolean) => void;
-  showAppToast: (opts: { message: string; type?: "success" | "error" | "info" }) => void;
+  showAppToast: (opts: AppToastPayload) => void;
 };
 
 export default function QueueJobRemainingSheet({

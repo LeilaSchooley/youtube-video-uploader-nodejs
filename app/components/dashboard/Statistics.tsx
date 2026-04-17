@@ -6,11 +6,6 @@ import StatisticsQueueOverview from "./StatisticsQueueOverview";
 import StatisticsUploadedVideosPanel from "./StatisticsUploadedVideosPanel";
 import type { ConfirmFn, UploadedVideoRecord } from "./statistics-types";
 
-interface ProgressItem {
-  index: number;
-  status: string;
-}
-
 interface StatisticsProps {
   queue: import("./types").BulkJob[];
   nextUploadTime: Date | null;

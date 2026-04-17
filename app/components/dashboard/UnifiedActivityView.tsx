@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { useAppToast } from "@/app/app-toast-context";
 import { dashboardQueryKeys } from "@/lib/dashboard-queries";
 import type { ManifestQueueRow } from "@/lib/manifest-queue-list";
@@ -143,6 +144,7 @@ export default function UnifiedActivityView({
 }: UnifiedActivityViewProps) {
   const showToast = useAppToast();
   const queryClient = useQueryClient();
+  const [collapsed, setCollapsed] = useState(false);
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: manifestQueueQueryKey,
@@ -269,6 +271,14 @@ export default function UnifiedActivityView({
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
+              onClick={() => setCollapsed((v) => !v)}
+              aria-expanded={!collapsed}
+              className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50"
+            >
+              {collapsed ? "Expand" : "Collapse"}
+            </button>
+            <button
+              type="button"
               onClick={() => void refetch()}
               className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50"
             >
@@ -285,141 +295,145 @@ export default function UnifiedActivityView({
         ) : null}
       </div>
 
-      {errMsg && (
-        <div className="px-4 py-2 text-sm text-amber-800 dark:text-amber-200 bg-amber-50/80 dark:bg-amber-950/30 border-b border-amber-200 dark:border-amber-800">
-          Manifest queue error: {errMsg}
-        </div>
-      )}
-      {manifestLoading && !hasBulk ? (
-        <div className="p-4 text-sm text-gray-500 dark:text-gray-400 animate-pulse">
-          Loading manifest jobs…
-        </div>
-      ) : !tableHasRows && !manifestLoading ? (
-        <div className="p-4 text-sm text-gray-500 dark:text-gray-400">
-          No bulk jobs yet
-          {showManifestBlock ? (
-            <>
-              {" "}
-              and no manifest JSON files in{" "}
-              <code className="text-xs">manifests/</code>
-            </>
-          ) : null}
-          . Add a bulk upload from Upload Videos, or configure a Dropbox bot
-          folder with manifests.
-        </div>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead className="bg-gray-50 dark:bg-gray-900/50 text-left text-gray-600 dark:text-gray-400">
-              <tr>
-                <th className="px-4 py-2 font-medium w-28">Source</th>
-                <th className="px-4 py-2 font-medium">Item</th>
-                <th className="px-4 py-2 font-medium">Status</th>
-                <th className="px-4 py-2 font-medium">Progress / detail</th>
-                <th className="px-4 py-2 font-medium w-36">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-              {bulkJobs.map((job) => {
-                const { label, progressLine, displayStatus } =
-                  bulkJobSummary(job);
-                const selected = selectedBulkJobId === job.id;
-                return (
-                  <tr
-                    key={job.id}
-                    onClick={() => {
-                      setSelectedBulkJobId(job.id);
-                      void fetchJobStatus(job.id);
-                      void fetchQueue();
-                    }}
-                    className={`text-gray-800 dark:text-gray-200 cursor-pointer ${
-                      selected
-                        ? "bg-blue-50/90 dark:bg-blue-950/40"
-                        : "hover:bg-gray-50 dark:hover:bg-gray-800/50"
-                    }`}
-                  >
-                    <td className="px-4 py-2 whitespace-nowrap">
-                      <span className="inline-flex items-center rounded-md bg-sky-100 dark:bg-sky-900/50 text-sky-800 dark:text-sky-200 px-2 py-0.5 text-xs font-medium">
-                        Bulk
-                      </span>
-                    </td>
-                    <td className="px-4 py-2 max-w-[220px]">
-                      <div className="truncate font-medium" title={label}>
-                        {label}
-                      </div>
-                      <div
-                        className="text-xs text-gray-500 dark:text-gray-400 font-mono truncate"
-                        title={job.id}
-                      >
-                        {job.id}
-                      </div>
-                    </td>
-                    <td className="px-4 py-2 whitespace-nowrap capitalize">
-                      {displayStatus}
-                    </td>
-                    <td className="px-4 py-2 text-gray-600 dark:text-gray-300">
-                      {progressLine}
-                    </td>
-                    <td className="px-4 py-2">
-                      <span className="text-indigo-600 dark:text-indigo-400 text-sm font-medium">
-                        Details →
-                      </span>
-                    </td>
+      {!collapsed && (
+        <>
+          {errMsg && (
+            <div className="px-4 py-2 text-sm text-amber-800 dark:text-amber-200 bg-amber-50/80 dark:bg-amber-950/30 border-b border-amber-200 dark:border-amber-800">
+              Manifest queue error: {errMsg}
+            </div>
+          )}
+          {manifestLoading && !hasBulk ? (
+            <div className="p-4 text-sm text-gray-500 dark:text-gray-400 animate-pulse">
+              Loading manifest jobs…
+            </div>
+          ) : !tableHasRows && !manifestLoading ? (
+            <div className="p-4 text-sm text-gray-500 dark:text-gray-400">
+              No bulk jobs yet
+              {showManifestBlock ? (
+                <>
+                  {" "}
+                  and no manifest JSON files in{" "}
+                  <code className="text-xs">manifests/</code>
+                </>
+              ) : null}
+              . Add a bulk upload from Upload Videos, or configure a Dropbox bot
+              folder with manifests.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead className="bg-gray-50 dark:bg-gray-900/50 text-left text-gray-600 dark:text-gray-400">
+                  <tr>
+                    <th className="px-4 py-2 font-medium w-28">Source</th>
+                    <th className="px-4 py-2 font-medium">Item</th>
+                    <th className="px-4 py-2 font-medium">Status</th>
+                    <th className="px-4 py-2 font-medium">Progress / detail</th>
+                    <th className="px-4 py-2 font-medium w-36">Action</th>
                   </tr>
-                );
-              })}
+                </thead>
+                <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                  {bulkJobs.map((job) => {
+                    const { label, progressLine, displayStatus } =
+                      bulkJobSummary(job);
+                    const selected = selectedBulkJobId === job.id;
+                    return (
+                      <tr
+                        key={job.id}
+                        onClick={() => {
+                          setSelectedBulkJobId(job.id);
+                          void fetchJobStatus(job.id);
+                          void fetchQueue();
+                        }}
+                        className={`text-gray-800 dark:text-gray-200 cursor-pointer ${
+                          selected
+                            ? "bg-blue-50/90 dark:bg-blue-950/40"
+                            : "hover:bg-gray-50 dark:hover:bg-gray-800/50"
+                        }`}
+                      >
+                        <td className="px-4 py-2 whitespace-nowrap">
+                          <span className="inline-flex items-center rounded-md bg-sky-100 dark:bg-sky-900/50 text-sky-800 dark:text-sky-200 px-2 py-0.5 text-xs font-medium">
+                            Bulk
+                          </span>
+                        </td>
+                        <td className="px-4 py-2 max-w-[220px]">
+                          <div className="truncate font-medium" title={label}>
+                            {label}
+                          </div>
+                          <div
+                            className="text-xs text-gray-500 dark:text-gray-400 font-mono truncate"
+                            title={job.id}
+                          >
+                            {job.id}
+                          </div>
+                        </td>
+                        <td className="px-4 py-2 whitespace-nowrap capitalize">
+                          {displayStatus}
+                        </td>
+                        <td className="px-4 py-2 text-gray-600 dark:text-gray-300">
+                          {progressLine}
+                        </td>
+                        <td className="px-4 py-2">
+                          <span className="text-indigo-600 dark:text-indigo-400 text-sm font-medium">
+                            Details →
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
 
-              {showManifestBlock &&
-                manifestFiltered.map((r) => (
-                  <tr
-                    key={r.manifestPath}
-                    className="text-gray-800 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800/50"
-                  >
-                    <td className="px-4 py-2 whitespace-nowrap">
-                      <span className="inline-flex items-center rounded-md bg-violet-100 dark:bg-violet-900/50 text-violet-800 dark:text-violet-200 px-2 py-0.5 text-xs font-medium">
-                        Manifest
-                      </span>
-                    </td>
-                    <td className="px-4 py-2 max-w-[220px]">
-                      <div className="truncate font-medium" title={r.title}>
-                        {r.title}
-                      </div>
-                      <div
-                        className="text-xs text-gray-500 dark:text-gray-400 truncate font-mono"
-                        title={r.manifestPath}
+                  {showManifestBlock &&
+                    manifestFiltered.map((r) => (
+                      <tr
+                        key={r.manifestPath}
+                        className="text-gray-800 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800/50"
                       >
-                        {r.manifestPath.split("/").pop()}
-                      </div>
-                    </td>
-                    <td className="px-4 py-2 whitespace-nowrap">
-                      <ManifestStatusCell row={r} />
-                    </td>
-                    <td className="px-4 py-2">
-                      <span
-                        className={
-                          r.videoReady
-                            ? "text-green-700 dark:text-green-400"
-                            : "text-amber-700 dark:text-amber-300"
-                        }
-                      >
-                        Video {r.videoReady ? "ready" : "missing"}
-                      </span>
-                      <span className="text-gray-500 dark:text-gray-400 ml-2">
-                        · retries {r.retry_count}/{MANIFEST_MAX_AUTO_RETRIES}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2 whitespace-nowrap">
-                      <ManifestActionCell
-                        row={r}
-                        busy={retryMutation.isPending}
-                        onRetry={() => retryMutation.mutate(r.manifestPath)}
-                      />
-                    </td>
-                  </tr>
-                ))}
-            </tbody>
-          </table>
-        </div>
+                        <td className="px-4 py-2 whitespace-nowrap">
+                          <span className="inline-flex items-center rounded-md bg-violet-100 dark:bg-violet-900/50 text-violet-800 dark:text-violet-200 px-2 py-0.5 text-xs font-medium">
+                            Manifest
+                          </span>
+                        </td>
+                        <td className="px-4 py-2 max-w-[220px]">
+                          <div className="truncate font-medium" title={r.title}>
+                            {r.title}
+                          </div>
+                          <div
+                            className="text-xs text-gray-500 dark:text-gray-400 truncate font-mono"
+                            title={r.manifestPath}
+                          >
+                            {r.manifestPath.split("/").pop()}
+                          </div>
+                        </td>
+                        <td className="px-4 py-2 whitespace-nowrap">
+                          <ManifestStatusCell row={r} />
+                        </td>
+                        <td className="px-4 py-2">
+                          <span
+                            className={
+                              r.videoReady
+                                ? "text-green-700 dark:text-green-400"
+                                : "text-amber-700 dark:text-amber-300"
+                            }
+                          >
+                            Video {r.videoReady ? "ready" : "missing"}
+                          </span>
+                          <span className="text-gray-500 dark:text-gray-400 ml-2">
+                            · retries {r.retry_count}/{MANIFEST_MAX_AUTO_RETRIES}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2 whitespace-nowrap">
+                          <ManifestActionCell
+                            row={r}
+                            busy={retryMutation.isPending}
+                            onRetry={() => retryMutation.mutate(r.manifestPath)}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

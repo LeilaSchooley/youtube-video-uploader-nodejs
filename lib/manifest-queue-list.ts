@@ -21,6 +21,28 @@ export interface ManifestQueueRow {
   terminal: boolean;
 }
 
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let cursor = 0;
+
+  async function worker(): Promise<void> {
+    while (true) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= items.length) return;
+      out[index] = await mapper(items[index], index);
+    }
+  }
+
+  const width = Math.max(1, Math.min(concurrency, items.length));
+  await Promise.all(Array.from({ length: width }, () => worker()));
+  return out;
+}
+
 function rowFromManifest(
   manifestPath: string,
   manifest: PythonManifest,
@@ -47,31 +69,43 @@ export async function listManifestQueueRows(
   sessionId: string | undefined,
   refresh: string | null | undefined,
 ): Promise<ManifestQueueRow[]> {
+  const MANIFEST_ROW_CONCURRENCY = 6;
   const paths = await listManifestJsonPathsSortedDropbox(
     queueRoot,
     accessToken,
     sessionId,
     refresh,
   );
-  const rows: ManifestQueueRow[] = [];
-  for (const manifestPath of paths) {
-    const manifest = await downloadAndParseManifest(
-      manifestPath,
-      accessToken,
-      sessionId,
-      refresh,
-    );
-    if (!manifest) continue;
-    const videoReady = await dropboxVideoExists(
-      queueRoot,
-      manifest.videoPath,
-      accessToken,
-      sessionId,
-      refresh,
-    );
-    rows.push(rowFromManifest(manifestPath, manifest, videoReady));
-  }
-  return rows;
+
+  const rows = await mapWithConcurrency(
+    paths,
+    MANIFEST_ROW_CONCURRENCY,
+    async (manifestPath): Promise<ManifestQueueRow | null> => {
+      const manifest = await downloadAndParseManifest(
+        manifestPath,
+        accessToken,
+        sessionId,
+        refresh,
+      );
+      if (!manifest) return null;
+
+      const status = manifest.upload_status ?? "queued";
+      const videoReady =
+        status === "done"
+          ? true
+          : await dropboxVideoExists(
+              queueRoot,
+              manifest.videoPath,
+              accessToken,
+              sessionId,
+              refresh,
+            );
+
+      return rowFromManifest(manifestPath, manifest, videoReady);
+    },
+  );
+
+  return rows.filter((row): row is ManifestQueueRow => row !== null);
 }
 
 export function manifestRowsToCsv(rows: ManifestQueueRow[]): string {

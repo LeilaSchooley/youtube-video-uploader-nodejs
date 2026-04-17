@@ -49,7 +49,7 @@ export default function QueueModeStrip({
   }
 
   const paused = status?.paused ?? false;
-  const hb = status?.heartbeat;
+  const hb = status?.heartbeat ?? null;
   const hbRecent =
     !!hb &&
     Date.now() - new Date(hb.lastRunAt).getTime() < 2 * 60 * 1000;

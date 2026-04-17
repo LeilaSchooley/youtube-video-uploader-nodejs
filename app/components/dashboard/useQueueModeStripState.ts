@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { AppToastPayload } from "@/app/app-toast-context";
 import { DASHBOARD_STORAGE } from "@/lib/dashboard-storage-keys";
 import { readStorageValue, removeStorageValue, writeStorageValue } from "./dashboard-storage";
 
@@ -20,7 +21,7 @@ type DetectApiJson = {
 
 type Params = {
   fetchQueue: () => Promise<void>;
-  showAppToast: (opts: { message: string; type?: "success" | "error" | "info" }) => void;
+  showAppToast: (opts: AppToastPayload) => void;
   hasDropboxAuth: boolean | null;
   dropboxAuthLoading: boolean;
   onRequestManualDropboxQueue?: () => void;

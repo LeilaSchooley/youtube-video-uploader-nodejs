@@ -1,5 +1,6 @@
 "use client";
 
+import type { AppToastPayload } from "@/app/app-toast-context";
 import type { BulkJob } from "./types";
 
 type Props = {
@@ -14,7 +15,7 @@ type Props = {
     cancelLabel?: string;
     variant?: "danger" | "default";
   }) => Promise<boolean>;
-  showAppToast: (opts: { message: string; type?: "success" | "error" | "info" }) => void;
+  showAppToast: (opts: AppToastPayload) => void;
 };
 
 export default function QueueJobDetailHeader({
