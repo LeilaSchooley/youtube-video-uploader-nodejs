@@ -100,5 +100,14 @@ export function getAllDropboxPythonQueueSessions(): Array<{
       });
     }
   }
-  return out;
+  /** One worker pass per queue root — duplicate session rows (re-login) used to list the same folder N times. */
+  const seenRoots = new Set<string>();
+  const deduped: typeof out = [];
+  for (const row of out) {
+    const key = row.rootPath.toLowerCase();
+    if (seenRoots.has(key)) continue;
+    seenRoots.add(key);
+    deduped.push(row);
+  }
+  return deduped;
 }

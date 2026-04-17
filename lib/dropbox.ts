@@ -435,6 +435,26 @@ function dropboxRateLimitRetryDelayMs(error: any, attempt: number): number {
   return retryAfterMs;
 }
 
+/** TCP / TLS drops (ECONNRESET, etc.) — retry with backoff, not user error. */
+function isTransientDropboxNetworkError(error: unknown): boolean {
+  const msg = String(
+    (error as { message?: string })?.message ?? error ?? "",
+  ).toLowerCase();
+  const code = (error as { code?: string })?.code;
+  if (
+    code === "ECONNRESET" ||
+    code === "ETIMEDOUT" ||
+    code === "ECONNREFUSED" ||
+    code === "ENOTFOUND" ||
+    code === "EAI_AGAIN"
+  ) {
+    return true;
+  }
+  return /econnreset|etimedout|socket hang up|econnrefused|network|fetch failed/i.test(
+    msg,
+  );
+}
+
 /**
  * Download a file from Dropbox as a stream
  * Automatically refreshes token if it expires (401 error).
@@ -938,6 +958,7 @@ export async function listDropboxItems(
   accessToken: string,
   sessionId?: string,
   sessionRefreshToken?: string | null,
+  attempt = 1,
 ): Promise<
   Array<{
     id: string;
@@ -947,6 +968,7 @@ export async function listDropboxItems(
     modifiedTime?: string;
   }>
 > {
+  const MAX_RETRIES = 6;
   const dbx = getDropboxClient(accessToken);
 
   try {
@@ -1013,6 +1035,41 @@ export async function listDropboxItems(
     console.log(`[DROPBOX] Total items fetched: ${allItems.length}`);
     return allItems;
   } catch (error: any) {
+    const status =
+      error?.status ?? error?.statusCode ?? error?.response?.status;
+    const is429 = status === 429;
+    const is503 = status === 503;
+    if ((is429 || is503) && attempt <= MAX_RETRIES) {
+      const retryAfterMs = dropboxRateLimitRetryDelayMs(error, attempt);
+      console.warn(
+        `[DROPBOX] ${is503 ? "503" : "429"} listing folder, retry ${attempt}/${MAX_RETRIES} in ${Math.round(retryAfterMs / 1000)}s`,
+      );
+      await sleep(retryAfterMs);
+      return listDropboxItems(
+        folderPath,
+        accessToken,
+        sessionId,
+        sessionRefreshToken,
+        attempt + 1,
+      );
+    }
+
+    if (isTransientDropboxNetworkError(error) && attempt <= MAX_RETRIES) {
+      const delay = Math.min(1500 * attempt, 20000);
+      console.warn(
+        `[DROPBOX] Transient network error listing folder (attempt ${attempt}/${MAX_RETRIES}), retry in ${delay}ms:`,
+        error?.message || error,
+      );
+      await sleep(delay);
+      return listDropboxItems(
+        folderPath,
+        accessToken,
+        sessionId,
+        sessionRefreshToken,
+        attempt + 1,
+      );
+    }
+
     // Handle 401 errors (token refresh)
     const newToken = await handleDropbox401Error(
       error,
@@ -1028,6 +1085,7 @@ export async function listDropboxItems(
         newToken,
         sessionId,
         sessionRefreshToken,
+        1,
       );
     }
 
