@@ -87,6 +87,7 @@ export default function Statistics({ queue, nextUploadTime, timeUntilNext, isAct
   const showAppToast = useAppToast();
   const [uploadedVideos, setUploadedVideos] = useState<UploadedVideoRecord[] | null>(null);
   const [uploadChannelFilter, setUploadChannelFilter] = useState<string>("all");
+  const [uploadVideoTypeFilter, setUploadVideoTypeFilter] = useState<string>("all");
   const [ytChannels, setYtChannels] = useState<Array<{ id: string; title: string }>>([]);
   const [ytChannelsResolved, setYtChannelsResolved] = useState(false);
   const uploadChannelDefaultAppliedRef = useRef(false);
@@ -176,11 +177,24 @@ export default function Statistics({ queue, nextUploadTime, timeUntilNext, isAct
     writeStoredUploadChannelPreference(value);
   }, []);
 
+  const setUploadVideoTypeFilterPersisted = useCallback((value: string) => {
+    setUploadVideoTypeFilter(value);
+  }, []);
+
   const displayedUploadedVideos = useMemo(() => {
     if (uploadedVideos === null) return null;
-    if (uploadChannelFilter === "all") return uploadedVideos;
-    return uploadedVideos.filter((v) => v.channelId === uploadChannelFilter);
-  }, [uploadedVideos, uploadChannelFilter]);
+    let filtered = uploadedVideos;
+    
+    if (uploadChannelFilter !== "all") {
+      filtered = filtered.filter((v) => v.channelId === uploadChannelFilter);
+    }
+    
+    if (uploadVideoTypeFilter !== "all") {
+      filtered = filtered.filter((v) => (v.videoType || "untyped") === uploadVideoTypeFilter);
+    }
+    
+    return filtered;
+  }, [uploadedVideos, uploadChannelFilter, uploadVideoTypeFilter]);
 
   const uploadsByDay = useMemo(() => {
     if (!displayedUploadedVideos?.length) return [];
@@ -343,6 +357,8 @@ export default function Statistics({ queue, nextUploadTime, timeUntilNext, isAct
         uploadedVideosTotalCount={uploadedVideos?.length ?? 0}
         uploadChannelFilter={uploadChannelFilter}
         onUploadChannelFilterChange={setUploadChannelFilterPersisted}
+        uploadVideoTypeFilter={uploadVideoTypeFilter}
+        onUploadVideoTypeFilterChange={setUploadVideoTypeFilterPersisted}
         ytChannels={ytChannels}
         loadingUploadedVideos={loadingUploadedVideos}
         syncingFromQueue={syncingFromQueue}

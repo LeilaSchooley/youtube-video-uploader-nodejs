@@ -10,10 +10,12 @@ type Props = {
   uploadedVideos: UploadedVideoRecord[] | null;
   /** Full list from the server (for channel filter options) */
   uploadHistoryFull: UploadedVideoRecord[] | null;
-  /** Unfiltered list length (for “showing X of Y”) */
+  /** Unfiltered list length (for "showing X of Y") */
   uploadedVideosTotalCount: number;
   uploadChannelFilter: string;
   onUploadChannelFilterChange: (value: string) => void;
+  uploadVideoTypeFilter: string;
+  onUploadVideoTypeFilterChange: (value: string) => void;
   ytChannels: Array<{ id: string; title: string }>;
   loadingUploadedVideos: boolean;
   syncingFromQueue: boolean;
@@ -41,6 +43,8 @@ export default function StatisticsUploadedVideosPanel({
   uploadedVideosTotalCount,
   uploadChannelFilter,
   onUploadChannelFilterChange,
+  uploadVideoTypeFilter,
+  onUploadVideoTypeFilterChange,
   ytChannels,
   loadingUploadedVideos,
   syncingFromQueue,
@@ -59,6 +63,16 @@ export default function StatisticsUploadedVideosPanel({
     const s = new Set<string>();
     for (const v of uploadHistoryFull) {
       if (v.channelId) s.add(v.channelId);
+    }
+    return s;
+  })();
+
+  const videoTypesInData = (() => {
+    if (!uploadHistoryFull) return new Set<string>();
+    const s = new Set<string>();
+    for (const v of uploadHistoryFull) {
+      const type = v.videoType || "untyped";
+      s.add(type);
     }
     return s;
   })();
@@ -85,21 +99,42 @@ export default function StatisticsUploadedVideosPanel({
             {!collapsed && (
               <>
                 {uploadedVideos !== null && uploadedVideosTotalCount > 0 && (
-                  <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-                    <span className="whitespace-nowrap">YouTube channel</span>
-                    <select
-                      className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1.5 text-sm max-w-[min(100vw-2rem,280px)]"
-                      value={uploadChannelFilter}
-                      onChange={(e) => onUploadChannelFilterChange(e.target.value)}
-                    >
-                      <option value="all">All channels ({uploadedVideosTotalCount})</option>
-                      {Array.from(channelIdsInData).map((id) => (
-                        <option key={id} value={id}>
-                          {channelTitleFor(id, ytChannels)} ({id.slice(0, 8)}…)
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                  <>
+                    <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                      <span className="whitespace-nowrap">YouTube channel</span>
+                      <select
+                        className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1.5 text-sm max-w-[min(100vw-2rem,280px)]"
+                        value={uploadChannelFilter}
+                        onChange={(e) => onUploadChannelFilterChange(e.target.value)}
+                      >
+                        <option value="all">All channels ({uploadedVideosTotalCount})</option>
+                        {Array.from(channelIdsInData).map((id) => (
+                          <option key={id} value={id}>
+                            {channelTitleFor(id, ytChannels)} ({id.slice(0, 8)}…)
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {videoTypesInData.size > 0 && (
+                      <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                        <span className="whitespace-nowrap">Video type</span>
+                        <select
+                          className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1.5 text-sm"
+                          value={uploadVideoTypeFilter}
+                          onChange={(e) => onUploadVideoTypeFilterChange(e.target.value)}
+                        >
+                          <option value="all">All types</option>
+                          {Array.from(videoTypesInData)
+                            .sort()
+                            .map((type) => (
+                              <option key={type} value={type}>
+                                {type.charAt(0).toUpperCase() + type.slice(1)}
+                              </option>
+                            ))}
+                        </select>
+                      </label>
+                    )}
+                  </>
                 )}
                 <Button type="button" onClick={() => void loadUploadedVideos(false)} disabled={loadingUploadedVideos} className="bg-indigo-600 text-white hover:bg-indigo-700">
                   {loadingUploadedVideos ? "Loading…" : "Load list"}
