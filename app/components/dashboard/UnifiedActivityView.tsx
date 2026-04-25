@@ -233,6 +233,38 @@ export default function UnifiedActivityView({
     },
   });
 
+  const deleteAllMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/manifest-queue/delete-all", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+      });
+      const json = (await res.json()) as { error?: string; deleted?: number };
+      if (!res.ok) {
+        throw new Error(json.error || "Delete all failed");
+      }
+      return json;
+    },
+    onSuccess: async (data) => {
+      const count = data.deleted ?? 0;
+      showToast({
+        message: `Deleted ${count} terminal manifest${count !== 1 ? "s" : ""}`,
+        type: "success",
+      });
+      await queryClient.invalidateQueries({ queryKey: manifestQueueQueryKey });
+      await queryClient.invalidateQueries({
+        queryKey: dashboardQueryKeys.queueBundle,
+      });
+    },
+    onError: (e: Error) => {
+      showToast({
+        message: e.message || "Could not delete all manifests",
+        type: "error",
+      });
+    },
+  });
+
   const exportFailedCsv = async () => {
     try {
       const res = await fetch("/api/manifest-queue/export?status=failed", {
@@ -334,6 +366,27 @@ export default function UnifiedActivityView({
             >
               Export failed manifests (CSV)
             </button>
+            {(data?.rows ?? []).some((r) => r.terminal) && (
+              <button
+                type="button"
+                disabled={deleteAllMutation.isPending}
+                onClick={() => {
+                  const count = (data?.rows ?? []).filter((r) => r.terminal).length;
+                  if (
+                    confirm(
+                      `Delete all ${count} terminal (failed) manifest${count !== 1 ? "s" : ""}? This cannot be undone.`
+                    )
+                  ) {
+                    void deleteAllMutation.mutate();
+                  }
+                }}
+                className="text-sm px-3 py-1.5 rounded-lg border border-red-300 dark:border-red-700 text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 disabled:opacity-50"
+              >
+                {deleteAllMutation.isPending
+                  ? "Deleting…"
+                  : `Delete all (${(data?.rows ?? []).filter((r) => r.terminal).length})`}
+              </button>
+            )}
           </div>
         ) : null}
       </div>
