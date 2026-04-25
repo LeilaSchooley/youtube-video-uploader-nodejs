@@ -411,6 +411,4 @@ export function getPythonQueueUiSummary(): PythonQueueUiSummary {
     processedCount: countJsonFilesInDir(processedDir(root)),
     shortsUploadedTodayUtc: countPythonManifestShortsUploadedTodayUtc(),
   };
-  };
-}
 }
