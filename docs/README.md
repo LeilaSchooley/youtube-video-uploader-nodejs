@@ -155,6 +155,7 @@ In another terminal, still run `npm run worker` so bulk jobs complete.
 | `DROPBOX_APP_KEY` | For Dropbox | Dropbox app key |
 | `DROPBOX_APP_SECRET` | For Dropbox | Dropbox app secret |
 | `DROPBOX_REDIRECT_URI` | For Dropbox | Defaults by replacing `/api/auth/callback` with `/api/auth/dropbox/callback` on the Google redirect base — set explicitly if that does not match your host. |
+| `APP_LOCK_PASSWORD` | No | If set, app/API are password-gated via `/unlock` until a valid unlock cookie is issued. |
 | `UPLOADS_DIR` | No | Override directory for staged uploads (`update-metadata` route); default is `./uploads`. |
 | `WORKER_LOG_JSON` | No | If `1` or `true`, worker logs in JSON form (`lib/worker-logger.ts`). |
 

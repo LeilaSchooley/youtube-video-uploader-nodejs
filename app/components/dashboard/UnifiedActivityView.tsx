@@ -133,29 +133,48 @@ function ManifestActionCell({
   }
   if (row.upload_status === "failed") {
     return (
-      <button
-        type="button"
-        disabled={busy}
-        onClick={(e) => {
-          e.stopPropagation();
-          onRetry();
-        }}
-        className="text-sm px-2.5 py-1 rounded-md bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-50"
-      >
-        Retry
-      </button>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={(e) => {
+            e.stopPropagation();
+            onRetry();
+          }}
+          className="text-sm px-2.5 py-1 rounded-md bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-50"
+        >
+          Retry
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (confirm("Delete this manifest from Dropbox queue?")) onDelete();
+          }}
+          className="text-sm px-2.5 py-1 rounded-md bg-red-600 text-white hover:bg-red-500 disabled:opacity-50"
+        >
+          Delete
+        </button>
+      </div>
     );
   }
   if (row.upload_status === "done") {
     return <span className="text-xs text-gray-500 dark:text-gray-400">—</span>;
   }
   return (
-    <span
-      className="text-xs text-gray-500 dark:text-gray-400"
-      title="Worker uploads on schedule"
+    <button
+      type="button"
+      disabled={busy}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (confirm("Delete this pending manifest from Dropbox queue?")) onDelete();
+      }}
+      className="text-sm px-2.5 py-1 rounded-md bg-red-600 text-white hover:bg-red-500 disabled:opacity-50"
+      title="Remove this item from pending queue"
     >
-      Worker
-    </span>
+      Delete
+    </button>
   );
 }
 
@@ -171,6 +190,7 @@ export default function UnifiedActivityView({
   const showToast = useAppToast();
   const queryClient = useQueryClient();
   const [collapsed, setCollapsed] = useState(true); // Start collapsed
+  const [pendingOnly, setPendingOnly] = useState(true);
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: manifestQueueQueryKey,
@@ -278,6 +298,75 @@ export default function UnifiedActivityView({
     },
   });
 
+  const clearPendingMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/manifest-queue/action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ action: "delete-pending" }),
+      });
+      const json = (await res.json()) as { error?: string; deleted?: number };
+      if (!res.ok) {
+        throw new Error(json.error || "Clear pending failed");
+      }
+      return json;
+    },
+    onSuccess: async (data) => {
+      const count = data.deleted ?? 0;
+      showToast({
+        message: `Cleared ${count} pending manifest${count !== 1 ? "s" : ""} (undo available)`,
+        type: "success",
+      });
+      await queryClient.invalidateQueries({ queryKey: manifestQueueQueryKey });
+      await queryClient.invalidateQueries({
+        queryKey: dashboardQueryKeys.queueBundle,
+      });
+    },
+    onError: (e: Error) => {
+      showToast({
+        message: e.message || "Could not clear pending manifests",
+        type: "error",
+      });
+    },
+  });
+
+  const undoClearPendingMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/manifest-queue/action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ action: "undo-clear-pending" }),
+      });
+      const json = (await res.json()) as { error?: string; restored?: number };
+      if (!res.ok) {
+        throw new Error(json.error || "Undo clear pending failed");
+      }
+      return json;
+    },
+    onSuccess: async (data) => {
+      const count = data.restored ?? 0;
+      showToast({
+        message:
+          count > 0
+            ? `Restored ${count} manifest${count !== 1 ? "s" : ""} to pending queue`
+            : "Nothing to restore",
+        type: "success",
+      });
+      await queryClient.invalidateQueries({ queryKey: manifestQueueQueryKey });
+      await queryClient.invalidateQueries({
+        queryKey: dashboardQueryKeys.queueBundle,
+      });
+    },
+    onError: (e: Error) => {
+      showToast({
+        message: e.message || "Could not undo clear pending",
+        type: "error",
+      });
+    },
+  });
+
   const exportFailedCsv = async () => {
     try {
       const res = await fetch("/api/manifest-queue/export?status=failed", {
@@ -320,14 +409,29 @@ export default function UnifiedActivityView({
   });
 
   const manifestRows = data?.rows ?? [];
-  const manifestFiltered = q
-    ? manifestRows.filter(
-        (r) =>
-          r.title.toLowerCase().includes(q) ||
-          r.manifestPath.toLowerCase().includes(q) ||
-          r.videoPath.toLowerCase().includes(q),
+  const pendingManifestRows = manifestRows.filter(
+    (r) => !r.terminal && r.upload_status !== "done",
+  );
+  const pendingCount = pendingManifestRows.length;
+  const manifestFiltered = manifestRows.filter((r) => {
+    if (
+      q &&
+      !(
+        r.title.toLowerCase().includes(q) ||
+        r.manifestPath.toLowerCase().includes(q) ||
+        r.videoPath.toLowerCase().includes(q)
       )
-    : manifestRows;
+    ) {
+      return false;
+    }
+
+    if (!pendingOnly) {
+      return true;
+    }
+
+    // Pending-only hides terminal failures and done rows.
+    return !r.terminal && r.upload_status !== "done";
+  });
 
   const errMsg = isError && error instanceof Error ? error.message : null;
   const hasBulk = bulkJobs.length > 0;
@@ -379,6 +483,47 @@ export default function UnifiedActivityView({
               className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50"
             >
               Refresh
+            </button>
+            <button
+              type="button"
+              onClick={() => setPendingOnly((v) => !v)}
+              className={`text-sm px-3 py-1.5 rounded-lg border ${
+                pendingOnly
+                  ? "border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/30"
+                  : "border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200"
+              } hover:bg-gray-50 dark:hover:bg-gray-700/50`}
+              title={pendingOnly ? "Showing only pending manifest rows" : "Showing all manifest rows"}
+            >
+              {pendingOnly ? `Pending only (${pendingCount})` : `Show all (${manifestRows.length})`}
+            </button>
+            {pendingCount > 0 && (
+              <button
+                type="button"
+                disabled={clearPendingMutation.isPending}
+                onClick={() => {
+                  if (
+                    confirm(
+                      `Clear all ${pendingCount} pending manifest${pendingCount !== 1 ? "s" : ""} from queue? You can undo once.`,
+                    )
+                  ) {
+                    void clearPendingMutation.mutate();
+                  }
+                }}
+                className="text-sm px-3 py-1.5 rounded-lg border border-red-300 dark:border-red-700 text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 disabled:opacity-50"
+              >
+                {clearPendingMutation.isPending
+                  ? "Clearing…"
+                  : `Clear pending (${pendingCount})`}
+              </button>
+            )}
+            <button
+              type="button"
+              disabled={undoClearPendingMutation.isPending}
+              onClick={() => void undoClearPendingMutation.mutate()}
+              className="text-sm px-3 py-1.5 rounded-lg border border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/30 disabled:opacity-50"
+              title="Restore the most recent clear pending action"
+            >
+              {undoClearPendingMutation.isPending ? "Restoring…" : "Undo last clear"}
             </button>
             <button
               type="button"

@@ -305,6 +305,29 @@ export async function moveDropboxManifestToFailed(
   );
 }
 
+export async function moveDropboxManifestToManifests(
+  manifestDropboxPath: string,
+  queueRoot: string,
+  accessToken: string,
+  sessionId: string | undefined,
+  refresh: string | null | undefined,
+): Promise<void> {
+  const destDir = joinDropbox(queueRoot, "manifests");
+  await ensureDropboxFolder(
+    destDir,
+    accessToken,
+    sessionId,
+    refresh ?? null,
+  );
+  await moveDropboxFile(
+    manifestDropboxPath,
+    destDir,
+    accessToken,
+    sessionId,
+    refresh ?? null,
+  );
+}
+
 export async function deleteDropboxManifest(
   manifestDropboxPath: string,
   accessToken: string,

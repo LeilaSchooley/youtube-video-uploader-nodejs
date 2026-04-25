@@ -46,8 +46,8 @@ export async function GET() {
 
     return NextResponse.json({
       authenticated: true,
-      name,
-      picture,
+      name: name ?? session.userId ?? "Account",
+      picture: picture ?? "",
       hasDropbox: !!dropboxToken,
     });
   } catch (error: any) {

@@ -112,7 +112,12 @@ export async function listManifestQueueRows(
     },
   );
 
-  return rows.filter((row): row is ManifestQueueRow => row !== null);
+  const nonNullRows = rows.filter((row): row is ManifestQueueRow => row !== null);
+
+  // Auto-prune completed entries from Activity view.
+  // A manifest with upload_status="done" should normally be moved to processed/ and
+  // not remain in queue/manifests. If it lingers (e.g., Dropbox move conflict), hide it.
+  return nonNullRows.filter((row) => row.upload_status !== "done");
 }
 
 export function manifestRowsToCsv(rows: ManifestQueueRow[]): string {

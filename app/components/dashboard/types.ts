@@ -1,7 +1,7 @@
 export interface User {
   authenticated: boolean;
-  name: string;
-  picture: string;
+  name?: string | null;
+  picture?: string | null;
 }
 
 export interface Message {

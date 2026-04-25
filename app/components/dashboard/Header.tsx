@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useDropboxAuth } from "@/app/components/dashboard/DropboxAuthContext";
 import { Button } from "@/components/ui/button";
 import {
@@ -42,6 +43,19 @@ export default function Header({
 }: HeaderProps) {
   const { hasDropboxAuth, dropboxAuthLoading, connectDropbox, disconnectDropbox } =
     useDropboxAuth();
+  const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
+  const displayName = user?.name?.trim() || "Account";
+  const pictureUrl = user?.picture?.trim() || "";
+  const fallbackInitial = displayName.charAt(0).toUpperCase() || "A";
+  const showFallbackAvatar = !pictureUrl || avatarLoadFailed;
+  const selectedChannelInfo = availableChannels.find(
+    (channel) => channel.userId === selectedChannel,
+  );
+  const selectedChannelName = selectedChannelInfo?.displayName?.trim() || null;
+
+  useEffect(() => {
+    setAvatarLoadFailed(false);
+  }, [pictureUrl]);
 
   return (
     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-10 pb-6 border-b border-gray-200 dark:border-gray-700">
@@ -59,21 +73,35 @@ export default function Header({
           <div className="flex items-center gap-3 p-3 bg-gradient-to-r from-red-50 via-pink-50 to-red-50 dark:from-red-900/20 dark:via-pink-900/20 dark:to-red-900/20 rounded-xl border-2 border-red-100 dark:border-red-800/50 shadow-sm hover:shadow-md transition-shadow">
             <div className="relative">
               <div className="absolute inset-0 bg-red-500/20 rounded-full blur-xl"></div>
-              {/* eslint-disable-next-line @next/next/no-img-element -- Google profile URL; dynamic remote */}
-              <img
-                src={user.picture}
-                alt={user.name}
-                className="w-10 h-10 rounded-full object-cover border-2 border-red-600 dark:border-red-400 shadow-lg relative z-10"
-              />
+              {pictureUrl && !avatarLoadFailed ? (
+                // eslint-disable-next-line @next/next/no-img-element -- Google profile URL; dynamic remote
+                <img
+                  src={pictureUrl}
+                  alt={displayName}
+                  onError={() => setAvatarLoadFailed(true)}
+                  className="w-10 h-10 rounded-full object-cover border-2 border-red-600 dark:border-red-400 shadow-lg relative z-10"
+                />
+              ) : null}
+              <span
+                className={`w-10 h-10 rounded-full border-2 border-red-600 dark:border-red-400 shadow-lg relative z-10 inline-flex items-center justify-center text-sm font-bold text-red-700 dark:text-red-200 bg-red-100 dark:bg-red-900/60 ${showFallbackAvatar ? "" : "hidden"}`}
+                aria-hidden={showFallbackAvatar ? "false" : "true"}
+              >
+                {fallbackInitial}
+              </span>
             </div>
             <div>
               <p className="text-sm font-semibold text-gray-800 dark:text-white">
-                {user.name}
+                {displayName}
               </p>
               <p className="text-xs text-gray-600 dark:text-gray-400 flex items-center gap-1">
                 <span className="text-green-500">✓</span>
                 <span>Connected</span>
               </p>
+              {selectedChannelName ? (
+                <p className="text-[11px] text-gray-600 dark:text-gray-400 mt-0.5">
+                  Channel: <span className="font-medium">{selectedChannelName}</span>
+                </p>
+              ) : null}
             </div>
           </div>
         )}
