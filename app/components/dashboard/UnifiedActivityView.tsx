@@ -158,7 +158,7 @@ export default function UnifiedActivityView({
 }: UnifiedActivityViewProps) {
   const showToast = useAppToast();
   const queryClient = useQueryClient();
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true); // Start collapsed
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: manifestQueueQueryKey,
@@ -179,11 +179,11 @@ export default function UnifiedActivityView({
 
   const retryMutation = useMutation({
     mutationFn: async (manifestPath: string) => {
-      const res = await fetch("/api/manifest-queue/retry", {
+      const res = await fetch("/api/manifest-queue/action", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ manifestPath }),
+        body: JSON.stringify({ action: "retry", manifestPath }),
       });
       const json = (await res.json()) as { error?: string };
       if (!res.ok) {
@@ -207,11 +207,11 @@ export default function UnifiedActivityView({
 
   const deleteMutation = useMutation({
     mutationFn: async (manifestPath: string) => {
-      const res = await fetch("/api/manifest-queue/delete", {
+      const res = await fetch("/api/manifest-queue/action", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ manifestPath }),
+        body: JSON.stringify({ action: "delete", manifestPath }),
       });
       const json = (await res.json()) as { error?: string };
       if (!res.ok) {
@@ -235,10 +235,11 @@ export default function UnifiedActivityView({
 
   const deleteAllMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch("/api/manifest-queue/delete-all", {
+      const res = await fetch("/api/manifest-queue/action", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
+        body: JSON.stringify({ action: "delete-all" }),
       });
       const json = (await res.json()) as { error?: string; deleted?: number };
       if (!res.ok) {
@@ -327,8 +328,13 @@ export default function UnifiedActivityView({
     <div className="mb-6 rounded-xl border border-gray-200 dark:border-gray-700 bg-white/60 dark:bg-gray-800/60 overflow-hidden">
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-gray-200 dark:border-gray-700">
         <div>
-          <div className="font-semibold text-gray-800 dark:text-gray-200">
+          <div className="font-semibold text-gray-800 dark:text-gray-200 flex items-center gap-2">
             Activity
+            {showManifestBlock && (
+              <span className="text-[11px] text-gray-500 dark:text-gray-400 font-normal">
+                {isFetching ? "⟳ auto-refreshing" : collapsed ? "(collapsed)" : "(expanded)"}
+              </span>
+            )}
           </div>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 max-w-2xl">
             Bulk upload jobs and Dropbox manifest jobs in one place. Select a

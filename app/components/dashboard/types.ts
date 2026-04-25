@@ -121,6 +121,8 @@ export interface PythonQueueData {
   uploadsTodayUtc: number;
   /** Shorts uploaded today (UTC) */
   shortsUploadedTodayUtc?: number;
+  /** Video type breakdown (short, review, etc.) for today's uploads */
+  videoTypeBreakdownTodayUtc?: Record<string, number>;
   /** Where pending manifests are read from for this session */
   source?: "filesystem" | "dropbox" | "both";
   /** Session has persisted Dropbox python-queue root */

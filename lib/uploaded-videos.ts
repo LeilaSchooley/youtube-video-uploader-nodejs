@@ -209,3 +209,26 @@ export function countPythonManifestShortsUploadedTodayUtc(): number {
   }
   return n;
 }
+
+/**
+ * Count uploads by videoType today (UTC midnight) from Python manifest worker.
+ * Returns breakdown like { "short": 5, "review": 3, "montage": 2 }
+ */
+export function countPythonManifestVideoTypeBreakdownTodayUtc(): Record<string, number> {
+  const list = readRecords();
+  const start = new Date();
+  start.setUTCHours(0, 0, 0, 0);
+  const minTime = start.getTime();
+  const counts: Record<string, number> = {};
+
+  for (const r of list) {
+    if (!r.jobId.startsWith(PYTHON_MANIFEST_JOB_PREFIX)) continue;
+    if (!r.videoId) continue;
+    const t = new Date(r.uploadedAt).getTime();
+    if (t < minTime) continue;
+
+    const type = r.videoType || "unknown";
+    counts[type] = (counts[type] ?? 0) + 1;
+  }
+  return counts;
+}

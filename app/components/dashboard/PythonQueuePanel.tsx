@@ -200,7 +200,7 @@ export default function PythonQueuePanel({
       </div>
 
       {/* Stats row */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-px bg-violet-100/60 dark:bg-violet-950/50 p-px text-center">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-violet-100/60 dark:bg-violet-950/50 p-px text-center">
         <Stat
           value={pending}
           label="Pending"
@@ -214,13 +214,24 @@ export default function PythonQueuePanel({
             ) : undefined
           }
         />
-        <Stat tone="sky" value={data.uploadsTodayUtc} label="Today (UTC)" />
-        <Stat
-          tone="fuchsia"
-          value={data.shortsUploadedTodayUtc ?? 0}
-          label="Shorts today"
-          color="text-fuchsia-700 dark:text-fuchsia-300"
-        />
+        
+        {/* Today stat with type breakdown */}
+        <div className="py-2.5 px-2 bg-sky-50/80 dark:bg-sky-950/25">
+          <div className="text-xl font-bold tabular-nums tracking-tight text-sky-800 dark:text-sky-200">
+            {data.uploadsTodayUtc}
+          </div>
+          {data.videoTypeBreakdownTodayUtc && Object.keys(data.videoTypeBreakdownTodayUtc).length > 0 ? (
+            <div className="text-[11px] font-medium text-gray-600 dark:text-gray-400 mt-0.5 leading-tight">
+              {Object.entries(data.videoTypeBreakdownTodayUtc)
+                .filter(([, count]) => count > 0)
+                .map(([type, count]) => `${count} ${type}`)
+                .join(" · ")}
+            </div>
+          ) : (
+            <div className="text-[11px] font-medium text-gray-500 dark:text-gray-400 mt-0.5 leading-tight">Today (UTC)</div>
+          )}
+        </div>
+        
         <Stat
           tone="emerald"
           value={data.processedCount}
@@ -271,13 +282,12 @@ function fmtSec(sec: number): string {
 }
 
 const statToneClass: Record<
-  "neutral" | "violet" | "sky" | "fuchsia" | "emerald",
+  "neutral" | "violet" | "sky" | "emerald",
   string
 > = {
   neutral: "bg-white/90 dark:bg-gray-950/70",
   violet: "bg-violet-50/90 dark:bg-violet-950/35",
   sky: "bg-sky-50/80 dark:bg-sky-950/25",
-  fuchsia: "bg-fuchsia-50/70 dark:bg-fuchsia-950/25",
   emerald: "bg-emerald-50/70 dark:bg-emerald-950/25",
 };
 
