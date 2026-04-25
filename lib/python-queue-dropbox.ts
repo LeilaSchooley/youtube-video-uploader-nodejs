@@ -273,13 +273,47 @@ export async function moveDropboxManifestToProcessed(
     sessionId,
     refresh ?? null,
   );
-  await moveDropboxFile(
-    manifestDropboxPath,
-    destDir,
-    accessToken,
-    sessionId,
-    refresh ?? null,
-  );
+  try {
+    await moveDropboxFile(
+      manifestDropboxPath,
+      destDir,
+      accessToken,
+      sessionId,
+      refresh ?? null,
+    );
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    const lower = msg.toLowerCase();
+    const isConflict =
+      lower.includes("409") ||
+      lower.includes("conflict") ||
+      lower.includes("path/conflict");
+
+    if (!isConflict) {
+      throw error;
+    }
+
+    // Idempotent recovery: destination already has this manifest.
+    // Delete the source from manifests/ so worker does not loop forever.
+    try {
+      await deleteDropboxFile(
+        manifestDropboxPath,
+        accessToken,
+        sessionId,
+        refresh ?? null,
+      );
+      console.warn(
+        `[PYTHON-QUEUE-DBX] Move conflict for ${manifestDropboxPath}; deleted source manifest from queue (destination already exists).`,
+      );
+      return;
+    } catch (deleteErr: unknown) {
+      const deleteMsg =
+        deleteErr instanceof Error ? deleteErr.message : String(deleteErr);
+      throw new Error(
+        `Move conflict and failed to delete source manifest ${manifestDropboxPath}: ${deleteMsg}`,
+      );
+    }
+  }
 }
 
 export async function moveDropboxManifestToFailed(
