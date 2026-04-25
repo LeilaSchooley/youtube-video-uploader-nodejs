@@ -47,6 +47,8 @@ export interface NormalizedManifest {
   manifest: PythonManifest;
   videoType: string;
   isShort: boolean;
+  /** True when is_short was requested but video exceeds 60 s — treated as regular upload */
+  shortDowngraded: boolean;
   sourceUploadId?: string;
   title: string;
   description: string;
@@ -199,9 +201,19 @@ export function parseManifestJson(data: unknown): PythonManifest | null {
   return norm;
 }
 
-export function normalizeManifest(manifest: PythonManifest): NormalizedManifest {
+export function normalizeManifest(
+  manifest: PythonManifest,
+  durationSeconds?: number | null,
+): NormalizedManifest {
   const videoType = String(manifest.video_type || "review").toLowerCase();
-  const isShort = manifest.is_short === true || videoType === "short";
+  let isShort = manifest.is_short === true || videoType === "short";
+
+  // YouTube requires Shorts to be ≤ 60 s. Downgrade silently if we know the duration.
+  const shortDowngraded =
+    isShort &&
+    typeof durationSeconds === "number" &&
+    durationSeconds > 60;
+  if (shortDowngraded) isShort = false;
 
   let title = manifest.title ?? "";
   let description = manifest.description ?? "";
@@ -221,6 +233,7 @@ export function normalizeManifest(manifest: PythonManifest): NormalizedManifest 
     manifest,
     videoType,
     isShort,
+    shortDowngraded,
     sourceUploadId,
     title,
     description,

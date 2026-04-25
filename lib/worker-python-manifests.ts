@@ -43,6 +43,7 @@ import { getDropboxFileMetadata } from "./dropbox";
 import { getPythonManifestDailySlotsRemaining } from "./server-upload-schedule";
 import type { UploadTask } from "./worker-upload";
 import { workerUploadVideo } from "./worker-upload";
+import { getVideoDurationSeconds } from "./video-duration";
 
 /** In-process locks for Dropbox manifest paths (single-worker assumption). */
 const dropboxPythonLocks = new Set<string>();
@@ -150,7 +151,22 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
         lastHeartbeatId = `python:${mid}`;
         writeHeartbeat(lastHeartbeatId);
         loadSessions();
-        const normalizedManifest = normalizeManifest(manifest);
+
+        // Check duration before normalizing so Shorts > 60 s are downgraded.
+        let fsDuration: number | null = null;
+        {
+          const earlyPath = resolveUnderQueueRoot(root, manifest.videoPath);
+          if (earlyPath && fs.existsSync(earlyPath)) {
+            fsDuration = await getVideoDurationSeconds(earlyPath);
+          }
+        }
+        const normalizedManifest = normalizeManifest(manifest, fsDuration);
+        if (normalizedManifest.shortDowngraded) {
+          workerLog.warn("Python manifest queue: Short downgraded — video exceeds 60 s, uploading as regular video", {
+            manifestId: mid,
+            durationSeconds: fsDuration,
+          });
+        }
 
         const sessionId =
           manifest.sessionId?.trim() || process.env.PYTHON_SESSION_ID?.trim();

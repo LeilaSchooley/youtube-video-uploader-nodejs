@@ -44,6 +44,7 @@ describe("normalizeManifestJsonShape / parseManifestJson", () => {
 
     expect(normalized.videoType).toBe("short");
     expect(normalized.isShort).toBe(true);
+    expect(normalized.shortDowngraded).toBe(false);
     expect(normalized.sourceUploadId).toBe("review-123");
     expect(normalized.title).toHaveLength(100);
     expect(normalized.description).toBe(
@@ -60,6 +61,7 @@ describe("normalizeManifestJsonShape / parseManifestJson", () => {
 
     expect(normalized.videoType).toBe("review");
     expect(normalized.isShort).toBe(false);
+    expect(normalized.shortDowngraded).toBe(false);
     expect(normalized.title).toBe("Review title");
     expect(normalized.description).toBe("Review description");
   });
@@ -75,5 +77,39 @@ describe("normalizeManifestJsonShape / parseManifestJson", () => {
 
     expect(normalized.videoType).toBe("review");
     expect(normalized.isShort).toBe(true);
+    expect(normalized.shortDowngraded).toBe(false);
+  });
+
+  it("downgrades Short to regular video when duration exceeds 60 s", () => {
+    const normalized = normalizeManifest(
+      {
+        title: "Too long short",
+        description: "Desc",
+        videoPath: "v.mp4",
+        is_short: true,
+      },
+      61,
+    );
+
+    expect(normalized.isShort).toBe(false);
+    expect(normalized.shortDowngraded).toBe(true);
+    // Title and description should NOT have Shorts treatment applied
+    expect(normalized.title).toBe("Too long short");
+    expect(normalized.description).toBe("Desc");
+  });
+
+  it("keeps Short metadata when duration is exactly 60 s", () => {
+    const normalized = normalizeManifest(
+      {
+        title: "Edge case short",
+        description: "Desc",
+        videoPath: "v.mp4",
+        is_short: true,
+      },
+      60,
+    );
+
+    expect(normalized.isShort).toBe(true);
+    expect(normalized.shortDowngraded).toBe(false);
   });
 });
