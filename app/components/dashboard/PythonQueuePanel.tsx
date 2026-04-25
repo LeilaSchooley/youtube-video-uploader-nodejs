@@ -203,16 +203,9 @@ export default function PythonQueuePanel({
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-violet-100/60 dark:bg-violet-950/50 p-px text-center">
         <Stat
           value={pending}
-          label="Pending"
+          label={shortsCount > 0 ? `Pending (${shortsCount} Shorts)` : "Pending"}
           tone="violet"
           color={pending > 0 ? "text-violet-700 dark:text-violet-300" : undefined}
-          suffix={
-            shortsCount > 0 ? (
-              <span className="ml-1 text-xs font-medium text-fuchsia-600 dark:text-fuchsia-400 align-middle">
-                {shortsCount}×#shorts
-              </span>
-            ) : undefined
-          }
         />
         
         {/* Today stat with type breakdown */}
@@ -224,8 +217,11 @@ export default function PythonQueuePanel({
             <div className="text-[11px] font-medium text-gray-600 dark:text-gray-400 mt-0.5 leading-tight">
               {Object.entries(data.videoTypeBreakdownTodayUtc)
                 .filter(([, count]) => count > 0)
-                .map(([type, count]) => `${count} ${type}`)
-                .join(" · ")}
+                .map(([type, count]) => {
+                  const emoji = type === "short" ? "🎬" : type === "review" ? "📝" : type === "montage" ? "🎞️" : "📹";
+                  return `${emoji} ${count}`;
+                })
+                .join(" ")}
             </div>
           ) : (
             <div className="text-[11px] font-medium text-gray-500 dark:text-gray-400 mt-0.5 leading-tight">Today (UTC)</div>
@@ -249,9 +245,18 @@ export default function PythonQueuePanel({
           {capEnabled && limit ? (
             <>
               <div className={`text-sm font-semibold ${capReached ? "text-rose-600 dark:text-rose-400" : "text-gray-700 dark:text-gray-200"}`}>
-                {limit.remainingToday}/{limit.videosPerDay} left today
+                {limit.remainingToday}/{limit.videosPerDay} left
               </div>
-              <div className={`text-[11px] mt-0.5 leading-tight ${capReached ? "text-rose-500 dark:text-rose-400 font-medium" : "text-gray-400 dark:text-gray-500"}`}>
+              {/* Progress bar */}
+              <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 mt-1.5 overflow-hidden">
+                <div
+                  className={`h-full transition-all ${
+                    capReached ? "bg-rose-500" : "bg-sky-500"
+                  }`}
+                  style={{ width: `${Math.round((limit.videosPerDay - limit.remainingToday) / limit.videosPerDay * 100)}%` }}
+                />
+              </div>
+              <div className={`text-[11px] mt-1 leading-tight ${capReached ? "text-rose-500 dark:text-rose-400 font-medium" : "text-gray-400 dark:text-gray-500"}`}>
                 {capReached ? `Resets in ${resetIn} ↺` : `Resets in ${resetIn}`}
               </div>
             </>

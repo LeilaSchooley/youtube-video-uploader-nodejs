@@ -75,22 +75,34 @@ function bulkJobSummary(job: BulkJob): {
 function ManifestStatusCell({ row }: { row: ManifestQueueRow }) {
   if (row.terminal) {
     return (
-      <span className="text-red-700 dark:text-red-400" title={row.last_error}>
-        Failed (max retries)
+      <span className="inline-flex items-center gap-1.5 text-red-700 dark:text-red-400" title={row.last_error}>
+        <span className="text-lg leading-none">🔴</span>
+        <span>Failed (max retries)</span>
       </span>
     );
   }
   if (row.upload_status === "failed") {
     return (
-      <span className="text-orange-700 dark:text-orange-300" title={row.last_error}>
-        Failed (will retry)
+      <span className="inline-flex items-center gap-1.5 text-orange-700 dark:text-orange-300" title={row.last_error}>
+        <span className="text-lg leading-none">🟡</span>
+        <span>Failed (will retry)</span>
       </span>
     );
   }
   if (row.upload_status === "done") {
-    return <span className="text-gray-500">Done</span>;
+    return (
+      <span className="inline-flex items-center gap-1.5 text-gray-500">
+        <span className="text-lg leading-none">✓</span>
+        <span>Done</span>
+      </span>
+    );
   }
-  return <span className="text-gray-600 dark:text-gray-400">Queued</span>;
+  return (
+    <span className="inline-flex items-center gap-1.5 text-gray-600 dark:text-gray-400">
+      <span className="text-lg leading-none">🟢</span>
+      <span>Ready</span>
+    </span>
+  );
 }
 
 function ManifestActionCell({
@@ -329,6 +341,9 @@ export default function UnifiedActivityView({
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-gray-200 dark:border-gray-700">
         <div>
           <div className="font-semibold text-gray-800 dark:text-gray-200 flex items-center gap-2">
+            {showManifestBlock && (
+              <span className="text-lg leading-none">{collapsed ? "▶" : "▼"}</span>
+            )}
             Activity
             {showManifestBlock && (
               <span className="text-[11px] text-gray-500 dark:text-gray-400 font-normal">
@@ -368,8 +383,9 @@ export default function UnifiedActivityView({
             <button
               type="button"
               onClick={() => void exportFailedCsv()}
-              className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50"
+              className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50 inline-flex items-center gap-1.5"
             >
+              <span>📥</span>
               Export failed manifests (CSV)
             </button>
             {(data?.rows ?? []).some((r) => r.terminal) && (
@@ -386,8 +402,9 @@ export default function UnifiedActivityView({
                     void deleteAllMutation.mutate();
                   }
                 }}
-                className="text-sm px-3 py-1.5 rounded-lg border border-red-300 dark:border-red-700 text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 disabled:opacity-50"
+                className="text-sm px-3 py-1.5 rounded-lg border border-red-300 dark:border-red-700 text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 disabled:opacity-50 inline-flex items-center gap-1.5"
               >
+                <span>🗑️</span>
                 {deleteAllMutation.isPending
                   ? "Deleting…"
                   : `Delete all (${(data?.rows ?? []).filter((r) => r.terminal).length})`}

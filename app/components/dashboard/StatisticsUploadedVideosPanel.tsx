@@ -191,7 +191,34 @@ export default function StatisticsUploadedVideosPanel({
             {uploadedVideos && (
               <div className="overflow-x-auto">
                 {uploadedVideos.length === 0 ? (
-                  <p className="text-gray-500 dark:text-gray-400 text-sm">No uploaded videos in this view.</p>
+                  <div className="text-center py-8 px-4">
+                    <p className="text-gray-600 dark:text-gray-300 text-sm mb-3">
+                      📭 No uploads found in this view.
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
+                      {uploadedVideosTotalCount === 0 
+                        ? "No uploads recorded yet. Complete an upload and come back, or" 
+                        : uploadChannelFilter !== "all"
+                        ? "This channel has no recorded uploads. Try"
+                        : "Try"}
+                    </p>
+                    <div className="flex flex-col sm:flex-row gap-2 justify-center">
+                      <button
+                        onClick={() => void syncFromQueue()}
+                        disabled={syncingFromQueue}
+                        className="text-sm px-3 py-1.5 rounded-lg bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-200 dark:hover:bg-emerald-900/60 disabled:opacity-50"
+                      >
+                        🔄 {syncingFromQueue ? "Syncing…" : "Sync from queue"}
+                      </button>
+                      <button
+                        onClick={() => void loadUploadedVideos(true)}
+                        disabled={loadingUploadedVideos}
+                        className="text-sm px-3 py-1.5 rounded-lg bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-200 dark:hover:bg-indigo-900/60 disabled:opacity-50"
+                      >
+                        📂 {loadingUploadedVideos ? "Loading…" : "Load history"}
+                      </button>
+                    </div>
+                  </div>
                 ) : (
                   <table className="w-full text-sm border border-gray-200 dark:border-gray-600 rounded-lg overflow-hidden">
                     <thead>
