@@ -97,13 +97,27 @@ function ManifestActionCell({
   row,
   busy,
   onRetry,
+  onDelete,
 }: {
   row: ManifestQueueRow;
   busy: boolean;
   onRetry: () => void;
+  onDelete: () => void;
 }) {
   if (row.terminal) {
-    return <span className="text-xs text-gray-500 dark:text-gray-400">—</span>;
+    return (
+      <button
+        type="button"
+        disabled={busy}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (confirm("Delete this failed manifest from Dropbox?")) onDelete();
+        }}
+        className="text-sm px-2.5 py-1 rounded-md bg-red-600 text-white hover:bg-red-500 disabled:opacity-50"
+      >
+        Delete
+      </button>
+    );
   }
   if (row.upload_status === "failed") {
     return (
@@ -186,6 +200,34 @@ export default function UnifiedActivityView({
     onError: (e: Error) => {
       showToast({
         message: e.message || "Could not retry manifest",
+        type: "error",
+      });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (manifestPath: string) => {
+      const res = await fetch("/api/manifest-queue/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ manifestPath }),
+      });
+      const json = (await res.json()) as { error?: string };
+      if (!res.ok) {
+        throw new Error(json.error || "Delete failed");
+      }
+    },
+    onSuccess: async () => {
+      showToast({ message: "Manifest deleted", type: "success" });
+      await queryClient.invalidateQueries({ queryKey: manifestQueueQueryKey });
+      await queryClient.invalidateQueries({
+        queryKey: dashboardQueryKeys.queueBundle,
+      });
+    },
+    onError: (e: Error) => {
+      showToast({
+        message: e.message || "Could not delete manifest",
         type: "error",
       });
     },
@@ -424,8 +466,9 @@ export default function UnifiedActivityView({
                         <td className="px-4 py-2 whitespace-nowrap">
                           <ManifestActionCell
                             row={r}
-                            busy={retryMutation.isPending}
+                            busy={retryMutation.isPending || deleteMutation.isPending}
                             onRetry={() => retryMutation.mutate(r.manifestPath)}
+                            onDelete={() => deleteMutation.mutate(r.manifestPath)}
                           />
                         </td>
                       </tr>

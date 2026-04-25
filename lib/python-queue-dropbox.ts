@@ -9,6 +9,7 @@ import {
   uploadDropboxFile,
   listDropboxItems,
   moveDropboxFile,
+  deleteDropboxFile,
   ensureDropboxFolder,
   getDropboxFileMetadata,
 } from "@/lib/dropbox";
@@ -298,6 +299,20 @@ export async function moveDropboxManifestToFailed(
   await moveDropboxFile(
     manifestDropboxPath,
     destDir,
+    accessToken,
+    sessionId,
+    refresh ?? null,
+  );
+}
+
+export async function deleteDropboxManifest(
+  manifestDropboxPath: string,
+  accessToken: string,
+  sessionId: string | undefined,
+  refresh: string | null | undefined,
+): Promise<void> {
+  await deleteDropboxFile(
+    manifestDropboxPath,
     accessToken,
     sessionId,
     refresh ?? null,
