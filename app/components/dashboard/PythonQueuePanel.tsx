@@ -200,7 +200,7 @@ export default function PythonQueuePanel({
       </div>
 
       {/* Stats row */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-violet-100/60 dark:bg-violet-950/50 p-px text-center">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-px bg-violet-100/60 dark:bg-violet-950/50 p-px text-center">
         <Stat
           value={pending}
           label="Pending"
@@ -215,6 +215,12 @@ export default function PythonQueuePanel({
           }
         />
         <Stat tone="sky" value={data.uploadsTodayUtc} label="Today (UTC)" />
+        <Stat
+          tone="fuchsia"
+          value={data.shortsUploadedTodayUtc ?? 0}
+          label="Shorts today"
+          color="text-fuchsia-700 dark:text-fuchsia-300"
+        />
         <Stat
           tone="emerald"
           value={data.processedCount}
@@ -265,12 +271,13 @@ function fmtSec(sec: number): string {
 }
 
 const statToneClass: Record<
-  "neutral" | "violet" | "sky" | "emerald",
+  "neutral" | "violet" | "sky" | "fuchsia" | "emerald",
   string
 > = {
   neutral: "bg-white/90 dark:bg-gray-950/70",
   violet: "bg-violet-50/90 dark:bg-violet-950/35",
   sky: "bg-sky-50/80 dark:bg-sky-950/25",
+  fuchsia: "bg-fuchsia-50/70 dark:bg-fuchsia-950/25",
   emerald: "bg-emerald-50/70 dark:bg-emerald-950/25",
 };
 

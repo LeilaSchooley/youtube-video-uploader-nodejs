@@ -17,6 +17,10 @@ export interface UploadedVideoRecord {
   uploadedAt: string; // ISO
   /** YouTube channel that received the upload (from API). Omitted on older rows. */
   channelId?: string;
+  /** Video type (short, montage, review, etc.). For Shorts tracking. */
+  videoType?: string;
+  /** True if uploaded as a YouTube Short. For Shorts tracking. */
+  isShort?: boolean;
 }
 
 function ensureDataDir(): void {
@@ -185,4 +189,23 @@ export function backfillFromBulkQueue(): number {
     writeRecords(Array.from(byVideoId.values()));
   }
   return added;
+}
+
+/**
+ * Count Shorts uploads recorded today (UTC midnight) from the Python manifest worker.
+ */
+export function countPythonManifestShortsUploadedTodayUtc(): number {
+  const list = readRecords();
+  const start = new Date();
+  start.setUTCHours(0, 0, 0, 0);
+  const minTime = start.getTime();
+  let n = 0;
+  for (const r of list) {
+    if (!r.jobId.startsWith(PYTHON_MANIFEST_JOB_PREFIX)) continue;
+    if (!r.videoId) continue;
+    if (!r.isShort) continue;
+    const t = new Date(r.uploadedAt).getTime();
+    if (t >= minTime) n++;
+  }
+  return n;
 }

@@ -119,6 +119,8 @@ export interface PythonQueueData {
   failedCount: number;
   processedCount: number;
   uploadsTodayUtc: number;
+  /** Shorts uploaded today (UTC) */
+  shortsUploadedTodayUtc?: number;
   /** Where pending manifests are read from for this session */
   source?: "filesystem" | "dropbox" | "both";
   /** Session has persisted Dropbox python-queue root */

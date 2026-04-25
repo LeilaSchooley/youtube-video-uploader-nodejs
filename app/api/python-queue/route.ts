@@ -3,7 +3,7 @@ import { getSession } from "@/lib/session";
 import { getDropboxToken } from "@/lib/auth";
 import { getPythonQueueDataForSession } from "@/lib/python-queue-ui";
 import { readWorkerUploadSchedule } from "@/lib/server-upload-schedule";
-import { countPythonManifestUploadsTodayUtc } from "@/lib/uploaded-videos";
+import { countPythonManifestUploadsTodayUtc, countPythonManifestShortsUploadedTodayUtc } from "@/lib/uploaded-videos";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +39,7 @@ export async function GET() {
       session.dropboxRefreshToken ?? null,
     );
     const uploadsTodayUtc = countPythonManifestUploadsTodayUtc();
+    const shortsUploadedTodayUtc = countPythonManifestShortsUploadedTodayUtc();
     const sched = readWorkerUploadSchedule();
     const capNum = parseInt(sched.videosPerDay.trim(), 10);
     const manifestDailyLimit =
@@ -55,6 +56,7 @@ export async function GET() {
       JSON.stringify({
         ...summary,
         uploadsTodayUtc,
+        shortsUploadedTodayUtc,
         manifestDailyLimit,
       }),
       { headers: { "Content-Type": "application/json" } },

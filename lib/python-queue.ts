@@ -5,6 +5,7 @@
 
 import fs from "fs";
 import path from "path";
+import { countPythonManifestShortsUploadedTodayUtc } from "@/lib/uploaded-videos";
 
 export { MANIFEST_MAX_AUTO_RETRIES } from "@/lib/manifest-upload-constants";
 
@@ -344,6 +345,8 @@ export interface PythonQueueUiSummary {
   pending: PythonQueueUiItem[];
   failedCount: number;
   processedCount: number;
+  /** Shorts uploaded today (UTC) for stats display */
+  shortsUploadedTodayUtc?: number;
 }
 
 function countJsonFilesInDir(dir: string): number {
@@ -406,5 +409,8 @@ export function getPythonQueueUiSummary(): PythonQueueUiSummary {
     pending,
     failedCount: countJsonFilesInDir(failedDir(root)),
     processedCount: countJsonFilesInDir(processedDir(root)),
+    shortsUploadedTodayUtc: countPythonManifestShortsUploadedTodayUtc(),
   };
+  };
+}
 }

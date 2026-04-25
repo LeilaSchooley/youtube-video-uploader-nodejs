@@ -324,6 +324,8 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
             jobId,
             uploadedAt: new Date().toISOString(),
             channelId: result.channelId,
+            videoType: normalizedManifest.videoType,
+            isShort: normalizedManifest.isShort,
           });
           if (dailyUploadSlotsLeft !== null) {
             dailyUploadSlotsLeft--;
@@ -643,6 +645,8 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
           jobId: dbJobId,
           uploadedAt: new Date().toISOString(),
           channelId: result.channelId,
+          videoType: normalizedManifest.videoType,
+          isShort: normalizedManifest.isShort,
         });
         if (dailyUploadSlotsLeft !== null) {
           dailyUploadSlotsLeft--;
