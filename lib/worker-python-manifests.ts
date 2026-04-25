@@ -402,6 +402,24 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
       }
 
       if (!shouldWorkerProcessManifest(manifest)) {
+        // Already done or terminally failed — move out of the queue so it isn't
+        // re-downloaded every tick.
+        try {
+          await moveDropboxManifestToProcessed(
+            manifestPath,
+            queueRoot,
+            qToken,
+            queueOwnerSessionId,
+            qSession.dropboxRefreshToken ?? null,
+          );
+          workerLog.info("Python manifest queue (Dropbox): moving already-terminal manifest to processed", {
+            manifestPath,
+            upload_status: manifest.upload_status,
+            retry_count: manifest.retry_count,
+          });
+        } catch {
+          // best effort — will retry next tick
+        }
         releaseDropboxPythonLock(lockKey);
         continue;
       }
