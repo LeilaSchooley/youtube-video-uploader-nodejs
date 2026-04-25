@@ -102,6 +102,7 @@ export default function PythonQueuePanel({
 
   const pending = data.pending.length;
   const pythonLockedCount = data.pending.filter((p) => p.locked).length;
+  const shortsCount = data.pending.filter((p) => p.isShort).length;
   const workerRecent =
     !!workerHeartbeat &&
     Date.now() - new Date(workerHeartbeat.lastRunAt).getTime() < 2 * 60 * 1000;
@@ -205,6 +206,13 @@ export default function PythonQueuePanel({
           label="Pending"
           tone="violet"
           color={pending > 0 ? "text-violet-700 dark:text-violet-300" : undefined}
+          suffix={
+            shortsCount > 0 ? (
+              <span className="ml-1 text-xs font-medium text-fuchsia-600 dark:text-fuchsia-400 align-middle">
+                {shortsCount}×#shorts
+              </span>
+            ) : undefined
+          }
         />
         <Stat tone="sky" value={data.uploadsTodayUtc} label="Today (UTC)" />
         <Stat

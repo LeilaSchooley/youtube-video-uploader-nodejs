@@ -3,6 +3,7 @@
  */
 
 import type { PythonManifest } from "@/lib/python-queue";
+import { normalizeManifest } from "@/lib/python-queue";
 import {
   listManifestJsonPathsSortedDropbox,
   downloadAndParseManifest,
@@ -19,6 +20,8 @@ export interface ManifestQueueRow {
   retry_count: number;
   last_error: string;
   terminal: boolean;
+  videoType: string;
+  isShort: boolean;
 }
 
 async function mapWithConcurrency<T, R>(
@@ -51,6 +54,7 @@ function rowFromManifest(
   const st = manifest.upload_status ?? "queued";
   const rc = manifest.retry_count ?? 0;
   const terminal = isTerminalManifestJob(manifest);
+  const norm = normalizeManifest(manifest);
   return {
     manifestPath,
     title: manifest.title,
@@ -60,6 +64,8 @@ function rowFromManifest(
     retry_count: rc,
     last_error: (manifest.last_error ?? "").slice(0, 500),
     terminal,
+    videoType: norm.videoType,
+    isShort: norm.isShort,
   };
 }
 
@@ -119,6 +125,8 @@ export function manifestRowsToCsv(rows: ManifestQueueRow[]): string {
     "retry_count",
     "terminal",
     "last_error",
+    "video_type",
+    "is_short",
   ];
   const esc = (s: string) => {
     const t = String(s ?? "").replace(/"/g, '""');
@@ -136,6 +144,8 @@ export function manifestRowsToCsv(rows: ManifestQueueRow[]): string {
         String(r.retry_count),
         r.terminal ? "true" : "false",
         esc(r.last_error),
+        esc(r.videoType),
+        r.isShort ? "true" : "false",
       ].join(","),
     ),
   ];

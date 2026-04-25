@@ -12,6 +12,9 @@ export interface PythonManifest {
   id?: string;
   title: string;
   description: string;
+  video_type?: string;
+  is_short?: boolean;
+  source_upload_id?: string;
   /** Absolute path or path relative to PYTHON_QUEUE_ROOT */
   videoPath: string;
   thumbnailPath?: string;
@@ -38,6 +41,15 @@ export interface ParsedManifestEntry {
   manifestPath: string;
   manifest: PythonManifest;
   priority: number;
+}
+
+export interface NormalizedManifest {
+  manifest: PythonManifest;
+  videoType: string;
+  isShort: boolean;
+  sourceUploadId?: string;
+  title: string;
+  description: string;
 }
 
 function getQueueRoot(): string | null {
@@ -187,6 +199,34 @@ export function parseManifestJson(data: unknown): PythonManifest | null {
   return norm;
 }
 
+export function normalizeManifest(manifest: PythonManifest): NormalizedManifest {
+  const videoType = String(manifest.video_type || "review").toLowerCase();
+  const isShort = manifest.is_short === true || videoType === "short";
+
+  let title = manifest.title ?? "";
+  let description = manifest.description ?? "";
+
+  if (isShort) {
+    title = title.slice(0, 100);
+    description = [
+      "🔗 Full review + best deals below",
+      "",
+      description,
+    ].join("\n").trim();
+  }
+
+  const sourceUploadId = manifest.source_upload_id?.trim() || undefined;
+
+  return {
+    manifest,
+    videoType,
+    isShort,
+    sourceUploadId,
+    title,
+    description,
+  };
+}
+
 export function parseManifestFile(manifestPath: string): PythonManifest | null {
   try {
     const raw = fs.readFileSync(manifestPath, "utf8");
@@ -276,6 +316,8 @@ export interface PythonQueueUiItem {
   locked: boolean;
   videoReady: boolean;
   fileName: string;
+  videoType: string;
+  isShort: boolean;
 }
 
 export interface PythonQueueUiSummary {
@@ -329,6 +371,7 @@ export function getPythonQueueUiSummary(): PythonQueueUiSummary {
     const id = manifestId(e.manifest, e.manifestPath);
     const videoAbs = resolveUnderQueueRoot(root, e.manifest.videoPath);
     const locked = fs.existsSync(`${e.manifestPath}.lock`);
+    const norm = normalizeManifest(e.manifest);
     return {
       id,
       title: e.manifest.title,
@@ -336,6 +379,8 @@ export function getPythonQueueUiSummary(): PythonQueueUiSummary {
       locked,
       videoReady: !!videoAbs && fs.existsSync(videoAbs),
       fileName: path.basename(e.manifestPath),
+      videoType: norm.videoType,
+      isShort: norm.isShort,
     };
   });
 

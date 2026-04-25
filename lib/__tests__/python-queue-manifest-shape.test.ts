@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  normalizeManifest,
   normalizeManifestJsonShape,
   parseManifestJson,
 } from "@/lib/python-queue";
@@ -30,5 +31,49 @@ describe("normalizeManifestJsonShape / parseManifestJson", () => {
   it("normalizeManifestJsonShape returns same object reference when no change", () => {
     const o = { title: "t", description: "d", videoPath: "v.mp4" };
     expect(normalizeManifestJsonShape(o)).toBe(o);
+  });
+
+  it("normalizes Shorts metadata safely for older and newer manifests", () => {
+    const normalized = normalizeManifest({
+      title: "x".repeat(120),
+      description: "Main description",
+      videoPath: "v.mp4",
+      video_type: "short",
+      source_upload_id: " review-123 ",
+    });
+
+    expect(normalized.videoType).toBe("short");
+    expect(normalized.isShort).toBe(true);
+    expect(normalized.sourceUploadId).toBe("review-123");
+    expect(normalized.title).toHaveLength(100);
+    expect(normalized.description).toBe(
+      "🔗 Full review + best deals below\n\nMain description",
+    );
+  });
+
+  it("defaults legacy manifests to review and non-short", () => {
+    const normalized = normalizeManifest({
+      title: "Review title",
+      description: "Review description",
+      videoPath: "v.mp4",
+    });
+
+    expect(normalized.videoType).toBe("review");
+    expect(normalized.isShort).toBe(false);
+    expect(normalized.title).toBe("Review title");
+    expect(normalized.description).toBe("Review description");
+  });
+
+  it("treats explicit is_short as authoritative", () => {
+    const normalized = normalizeManifest({
+      title: "Clip",
+      description: "Desc",
+      videoPath: "v.mp4",
+      video_type: "review",
+      is_short: true,
+    });
+
+    expect(normalized.videoType).toBe("review");
+    expect(normalized.isShort).toBe(true);
   });
 });

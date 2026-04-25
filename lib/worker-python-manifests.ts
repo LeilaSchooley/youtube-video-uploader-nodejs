@@ -14,6 +14,7 @@ import {
   listPendingManifestsSorted,
   manifestId,
   moveManifestToProcessed,
+  normalizeManifest,
   releaseLock,
   resolveUnderQueueRoot,
   tryAcquireLock,
@@ -149,6 +150,7 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
         lastHeartbeatId = `python:${mid}`;
         writeHeartbeat(lastHeartbeatId);
         loadSessions();
+        const normalizedManifest = normalizeManifest(manifest);
 
         const sessionId =
           manifest.sessionId?.trim() || process.env.PYTHON_SESSION_ID?.trim();
@@ -182,11 +184,11 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
         }
 
         if (uploadedTitles) {
-          const t = manifest.title.toLowerCase().trim();
+          const t = normalizedManifest.title.toLowerCase().trim();
           if (t && uploadedTitles.has(t)) {
             workerLog.info("Python manifest queue: skipping duplicate title", {
               manifestId: mid,
-              title: manifest.title,
+              title: normalizedManifest.title,
             });
             moveManifestToProcessed(manifestPath);
             processedThisTick++;
@@ -222,8 +224,8 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
             name: path.basename(videoAbs),
             path: videoAbs,
           },
-          title: manifest.title,
-          description: manifest.description,
+          title: normalizedManifest.title,
+          description: normalizedManifest.description,
           privacyStatus: manifest.privacyStatus,
           publishDate: manifest.publishDate,
           madeForKids: manifest.madeForKids,
@@ -302,7 +304,7 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
           fsUploadSucceeded = true;
           appendUploadedVideo({
             videoId: result.videoId,
-            title: manifest.title,
+            title: normalizedManifest.title,
             jobId,
             uploadedAt: new Date().toISOString(),
             channelId: result.channelId,
@@ -405,6 +407,7 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
       }
 
       const mid = manifestId(manifest, manifestPath);
+      const normalizedManifest = normalizeManifest(manifest);
       lastHeartbeatId = `python:${mid}`;
       writeHeartbeat(lastHeartbeatId);
       loadSessions();
@@ -450,11 +453,11 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
       }
 
       if (uploadedTitles) {
-        const t = manifest.title.toLowerCase().trim();
+        const t = normalizedManifest.title.toLowerCase().trim();
         if (t && uploadedTitles.has(t)) {
           workerLog.info(
             "Python manifest queue (Dropbox): skipping duplicate title",
-            { manifestId: mid, title: manifest.title },
+            { manifestId: mid, title: normalizedManifest.title },
           );
           await moveDropboxManifestToProcessed(
             manifestPath,
@@ -517,8 +520,8 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
 
       const item: UploadTask["item"] = {
         dropboxFileId: videoDropboxPath,
-        title: manifest.title,
-        description: manifest.description,
+        title: normalizedManifest.title,
+        description: normalizedManifest.description,
         privacyStatus: manifest.privacyStatus,
         publishDate: manifest.publishDate,
         madeForKids: manifest.madeForKids,
@@ -602,7 +605,7 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
         dbUploadSucceeded = true;
         appendUploadedVideo({
           videoId: result.videoId,
-          title: manifest.title,
+          title: normalizedManifest.title,
           jobId: dbJobId,
           uploadedAt: new Date().toISOString(),
           channelId: result.channelId,

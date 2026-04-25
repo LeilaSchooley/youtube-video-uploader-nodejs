@@ -113,6 +113,8 @@ export interface PythonQueueData {
     locked: boolean;
     videoReady: boolean;
     fileName: string;
+    videoType?: string;
+    isShort?: boolean;
   }>;
   failedCount: number;
   processedCount: number;

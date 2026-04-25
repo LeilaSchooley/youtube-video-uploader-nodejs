@@ -11,6 +11,7 @@ import {
   getPythonMaxPerTick,
   getPythonQueueUiSummary,
   manifestId,
+  normalizeManifest,
   type PythonQueueUiItem,
 } from "@/lib/python-queue";
 import { listDropboxItems } from "@/lib/dropbox";
@@ -144,6 +145,7 @@ export async function getPythonQueueDataForSession(
       sessionId,
       dropboxRefreshToken ?? null,
     );
+    const norm = normalizeManifest(manifest);
     pending.push({
       id,
       title: manifest.title,
@@ -154,6 +156,8 @@ export async function getPythonQueueDataForSession(
       locked: false,
       videoReady,
       fileName: f.name,
+      videoType: norm.videoType,
+      isShort: norm.isShort,
     });
   }
 
