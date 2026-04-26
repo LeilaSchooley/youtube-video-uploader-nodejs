@@ -112,7 +112,6 @@ export async function detectDropboxQueueAuto(
     ordered,
   );
 
-  let sawPythonQueueLayout = false;
   let hadDropboxError = false;
 
   for (const candidate of ordered) {
@@ -125,47 +124,29 @@ export async function detectDropboxQueueAuto(
       );
       if (probe.mode !== "python_queue") continue;
 
-      sawPythonQueueLayout = true;
+      let validatedSample = false;
+      try {
+        validatedSample = await validateSampleManifest(
+          probe.resolvedRoot,
+          accessToken,
+          sessionId,
+          refresh,
+        );
+      } catch {
+        validatedSample = false;
+      }
 
-      const ok = await validateSampleManifest(
-        probe.resolvedRoot,
-        accessToken,
-        sessionId,
-        refresh,
-      );
-      if (ok) {
-        return {
-          found: true,
-          path: probe.resolvedRoot,
-          manifestCount: probe.manifestCount,
-          videoCount: probe.videoCount,
-          thumbnailCount: probe.thumbnailCount,
-          validatedSample: true,
-        };
-      }
-      // Layout matches and we see JSON manifests, but none parsed (timeouts, schema, encoding).
-      // Still accept so Queue mode works on slow/production hosts; worker may log parse errors.
-      if ((probe.manifestCount ?? 0) > 0) {
-        return {
-          found: true,
-          path: probe.resolvedRoot,
-          manifestCount: probe.manifestCount,
-          videoCount: probe.videoCount,
-          thumbnailCount: probe.thumbnailCount,
-          validatedSample: false,
-        };
-      }
-      continue;
+      return {
+        found: true,
+        path: probe.resolvedRoot,
+        manifestCount: probe.manifestCount,
+        videoCount: probe.videoCount,
+        thumbnailCount: probe.thumbnailCount,
+        validatedSample,
+      };
     } catch {
       hadDropboxError = true;
     }
-  }
-
-  if (sawPythonQueueLayout) {
-    return {
-      found: false,
-      reason: "invalid_manifest_sample",
-    };
   }
 
   if (hadDropboxError) {
