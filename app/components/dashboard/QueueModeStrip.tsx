@@ -29,6 +29,8 @@ export default function QueueModeStrip({
     actionLoading,
     dropboxPythonQueue,
     queueRootPath,
+    detectedQueuePath,
+    detectedLayoutCounts,
     scanningDropbox,
     notFoundReason,
     layoutCounts,
@@ -36,6 +38,7 @@ export default function QueueModeStrip({
     runAutoDetect,
     postAction,
     handleChangeFolder,
+    useDetectedQueue,
   } = useQueueModeStripState({
     fetchQueue,
     showAppToast,
@@ -112,6 +115,8 @@ export default function QueueModeStrip({
           scanningDropbox={scanningDropbox}
           dropboxPythonQueue={dropboxPythonQueue}
           queueRootPath={queueRootPath}
+          detectedQueuePath={detectedQueuePath}
+          detectedLayoutCounts={detectedLayoutCounts}
           layoutCounts={layoutCounts}
           py={py}
           notFoundReason={notFoundReason}
@@ -123,6 +128,7 @@ export default function QueueModeStrip({
           statusCounts={status?.counts || {}}
           actionLoading={actionLoading}
           onRefreshDetect={() => void runAutoDetect(true)}
+          onUseDetectedQueue={useDetectedQueue}
           onChangeFolder={handleChangeFolder}
           onManualFolderSelect={onRequestManualDropboxQueue}
           onPostAction={postAction}

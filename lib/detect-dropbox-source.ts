@@ -67,6 +67,16 @@ async function countInFolder(
   return n;
 }
 
+async function safeCount(
+  countFn: () => Promise<number>,
+): Promise<number> {
+  try {
+    return await countFn();
+  } catch {
+    return 0;
+  }
+}
+
 async function countJsonManifests(
   manifestsPath: string,
   accessToken: string,
@@ -176,76 +186,91 @@ export async function detectDropboxPythonQueueLayout(
   const candidates: string[] = [base, joinPosix(base, "queue")];
 
   for (const root of candidates) {
-    const manifestsPath = joinPosix(root, "manifests");
-    const videosPath = joinPosix(root, "videos");
-    const thumbsPath = joinPosix(root, "thumbnails");
+    try {
+      const manifestsPath = joinPosix(root, "manifests");
+      const videosPath = joinPosix(root, "videos");
+      const thumbsPath = joinPosix(root, "thumbnails");
 
-    const hasManifestsDir = await folderExists(
-      manifestsPath,
-      accessToken,
-      sessionId,
-      sessionRefreshToken,
-    );
-    let manifestCount = 0;
-    if (hasManifestsDir) {
-      manifestCount = await countJsonManifests(
+      const hasManifestsDir = await folderExists(
         manifestsPath,
         accessToken,
         sessionId,
         sessionRefreshToken,
       );
-    }
-    if (manifestCount === 0) {
-      manifestCount = await countJsonManifestsAtQueueRoot(
-        root,
+      const hasVideos = await folderExists(
+        videosPath,
         accessToken,
         sessionId,
         sessionRefreshToken,
       );
-    }
-    if (manifestCount === 0) continue;
+      const hasThumbs = await folderExists(
+        thumbsPath,
+        accessToken,
+        sessionId,
+        sessionRefreshToken,
+      );
 
-    const hasVideos = await folderExists(
-      videosPath,
-      accessToken,
-      sessionId,
-      sessionRefreshToken,
-    );
-    const hasThumbs = await folderExists(
-      thumbsPath,
-      accessToken,
-      sessionId,
-      sessionRefreshToken,
-    );
+      // Valid queue layout can exist even when manifests folder is temporarily empty.
+      const hasQueueLayoutDirs = hasManifestsDir && (hasVideos || hasThumbs);
 
-    const videoCount = hasVideos
-      ? await countVideos(
-          videosPath,
-          accessToken,
-          sessionId,
-          sessionRefreshToken,
-        )
-      : 0;
-    const thumbnailCount = hasThumbs
-      ? await countThumbnails(
-          thumbsPath,
-          accessToken,
-          sessionId,
-          sessionRefreshToken,
-        )
-      : 0;
+      let manifestCount = 0;
+      if (hasManifestsDir) {
+        manifestCount = await safeCount(() =>
+          countJsonManifests(
+            manifestsPath,
+            accessToken,
+            sessionId,
+            sessionRefreshToken,
+          ),
+        );
+      }
+      if (manifestCount === 0) {
+        manifestCount = await safeCount(() =>
+          countJsonManifestsAtQueueRoot(
+            root,
+            accessToken,
+            sessionId,
+            sessionRefreshToken,
+          ),
+        );
+      }
 
-    const looksPython =
-      manifestCount > 0 && (hasVideos || hasThumbs);
+      const videoCount = hasVideos
+        ? await safeCount(() =>
+            countVideos(
+              videosPath,
+              accessToken,
+              sessionId,
+              sessionRefreshToken,
+            ),
+          )
+        : 0;
+      const thumbnailCount = hasThumbs
+        ? await safeCount(() =>
+            countThumbnails(
+              thumbsPath,
+              accessToken,
+              sessionId,
+              sessionRefreshToken,
+            ),
+          )
+        : 0;
 
-    if (looksPython) {
-      return {
-        mode: "python_queue",
-        manifestCount,
-        videoCount,
-        thumbnailCount,
-        resolvedRoot: root,
-      };
+      const looksPython =
+        hasQueueLayoutDirs || (manifestCount > 0 && (hasVideos || hasThumbs));
+
+      if (looksPython) {
+        return {
+          mode: "python_queue",
+          manifestCount,
+          videoCount,
+          thumbnailCount,
+          resolvedRoot: root,
+        };
+      }
+    } catch {
+      // Keep probing other candidate roots instead of failing hard.
+      continue;
     }
   }
 

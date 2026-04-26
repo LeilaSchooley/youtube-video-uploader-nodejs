@@ -35,6 +35,8 @@ export function useQueueModeStripState(params: Params) {
   const [actionLoading, setActionLoading] = useState(false);
   const [dropboxPythonQueue, setDropboxPythonQueue] = useState(false);
   const [queueRootPath, setQueueRootPath] = useState<string | null>(null);
+  const [detectedQueuePath, setDetectedQueuePath] = useState<string | null>(null);
+  const [detectedLayoutCounts, setDetectedLayoutCounts] = useState<{ manifestCount: number; videoCount: number; thumbnailCount: number } | null>(null);
   const [scanningDropbox, setScanningDropbox] = useState(false);
   const [notFoundReason, setNotFoundReason] = useState<string | null>(null);
   const [layoutCounts, setLayoutCounts] = useState<{ manifestCount: number; videoCount: number; thumbnailCount: number } | null>(null);
@@ -61,6 +63,10 @@ export function useQueueModeStripState(params: Params) {
         const configured = src?.success === true && src?.sourceType === "dropbox_python_queue" && !!src?.rootPath;
         setDropboxPythonQueue(configured);
         setQueueRootPath(configured ? (src.rootPath as string) : null);
+        if (configured) {
+          setDetectedQueuePath(null);
+          setDetectedLayoutCounts(null);
+        }
       }
     } catch {
       /* ignore */
@@ -83,26 +89,28 @@ export function useQueueModeStripState(params: Params) {
         return;
       }
       if (j.found && j.path) {
-        const save = await fetch("/api/queue-source", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({ sourceType: "dropbox_python_queue", rootPath: j.path }),
-        });
-        const saveBody = await save.json();
-        if (!save.ok) {
-          showAppToast({ message: saveBody.error || "Could not save queue folder", type: "error" });
-          setNotFoundReason("dropbox_error");
-          return;
-        }
         writeStorageValue(DASHBOARD_STORAGE.lastDetectedDropboxQueuePath, j.path);
-        setLayoutCounts({ manifestCount: j.manifestCount ?? 0, videoCount: j.videoCount ?? 0, thumbnailCount: j.thumbnailCount ?? 0 });
-        setDropboxPythonQueue(true);
-        setQueueRootPath(j.path);
-        if (typeof window !== "undefined") window.dispatchEvent(new Event("zondiscounts-queue-source-updated"));
-        await loadStatus();
-        await fetchQueue();
+        setDetectedQueuePath(j.path);
+        setDetectedLayoutCounts({
+          manifestCount: j.manifestCount ?? 0,
+          videoCount: j.videoCount ?? 0,
+          thumbnailCount: j.thumbnailCount ?? 0,
+        });
+        setLayoutCounts({
+          manifestCount: j.manifestCount ?? 0,
+          videoCount: j.videoCount ?? 0,
+          thumbnailCount: j.thumbnailCount ?? 0,
+        });
+        setNotFoundReason(null);
+        if (_force) {
+          showAppToast({
+            message: `Queue layout detected at ${j.path}. Click "Use detected queue" to enable it.`,
+            type: "info",
+          });
+        }
       } else {
+        setDetectedQueuePath(null);
+        setDetectedLayoutCounts(null);
         setLayoutCounts(null);
         setNotFoundReason(j.reason || "no_dropbox_queue");
       }
@@ -112,7 +120,7 @@ export function useQueueModeStripState(params: Params) {
     } finally {
       setScanningDropbox(false);
     }
-  }, [fetchQueue, loadStatus, showAppToast]);
+  }, [showAppToast]);
 
   runAutoDetectRef.current = runAutoDetect;
 
@@ -183,6 +191,8 @@ export function useQueueModeStripState(params: Params) {
     removeStorageValue(DASHBOARD_STORAGE.lastDetectedDropboxQueuePath);
     setDropboxPythonQueue(false);
     setQueueRootPath(null);
+    setDetectedQueuePath(null);
+    setDetectedLayoutCounts(null);
     setLayoutCounts(null);
     setNotFoundReason(null);
     if (typeof window !== "undefined") window.dispatchEvent(new Event("zondiscounts-queue-source-updated"));
@@ -190,8 +200,45 @@ export function useQueueModeStripState(params: Params) {
     onRequestManualDropboxQueue?.();
   };
 
+  const useDetectedQueue = async () => {
+    if (!detectedQueuePath) {
+      showAppToast({ message: "No detected queue path to apply", type: "error" });
+      return;
+    }
+    try {
+      const save = await fetch("/api/queue-source", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          sourceType: "dropbox_python_queue",
+          rootPath: detectedQueuePath,
+        }),
+      });
+      const saveBody = await save.json();
+      if (!save.ok) {
+        showAppToast({ message: saveBody.error || "Could not save queue folder", type: "error" });
+        return;
+      }
+      setDropboxPythonQueue(true);
+      setQueueRootPath(detectedQueuePath);
+      setLayoutCounts(detectedLayoutCounts);
+      setDetectedQueuePath(null);
+      setDetectedLayoutCounts(null);
+      setNotFoundReason(null);
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("zondiscounts-queue-source-updated"));
+      }
+      await loadStatus();
+      await fetchQueue();
+      showAppToast({ message: "Queue source enabled", type: "success" });
+    } catch {
+      showAppToast({ message: "Could not enable detected queue", type: "error" });
+    }
+  };
+
   return {
-    mode, hydrated, status, actionLoading, dropboxPythonQueue, queueRootPath, scanningDropbox, notFoundReason, layoutCounts,
-    persistMode, runAutoDetect, postAction, handleChangeFolder,
+    mode, hydrated, status, actionLoading, dropboxPythonQueue, queueRootPath, detectedQueuePath, detectedLayoutCounts, scanningDropbox, notFoundReason, layoutCounts,
+    persistMode, runAutoDetect, postAction, handleChangeFolder, useDetectedQueue,
   };
 }

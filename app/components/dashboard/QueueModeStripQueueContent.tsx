@@ -10,6 +10,8 @@ type Props = {
   scanningDropbox: boolean;
   dropboxPythonQueue: boolean;
   queueRootPath: string | null;
+  detectedQueuePath: string | null;
+  detectedLayoutCounts: { manifestCount: number; videoCount: number; thumbnailCount: number } | null;
   layoutCounts: { manifestCount: number; videoCount: number; thumbnailCount: number } | null;
   py: any;
   notFoundReason: string | null;
@@ -21,6 +23,7 @@ type Props = {
   statusCounts: { queued?: number; uploading?: number; done?: number; failed?: number };
   actionLoading: boolean;
   onRefreshDetect: () => void;
+  onUseDetectedQueue: () => Promise<void> | void;
   onChangeFolder: () => Promise<void>;
   onManualFolderSelect?: () => void;
   onPostAction: (path: "start" | "stop") => Promise<void>;
@@ -52,6 +55,21 @@ export default function QueueModeStripQueueContent(props: Props) {
               <div className="flex flex-wrap gap-2 mt-2">
                 <Button type="button" variant="secondary" size="sm" disabled={props.scanningDropbox} onClick={props.onRefreshDetect}>Refresh scan</Button>
                 <Button type="button" variant="outline" size="sm" disabled={props.scanningDropbox} onClick={() => void props.onChangeFolder()}>Change folder</Button>
+              </div>
+            </div>
+          ) : null}
+          {!props.dropboxPythonQueue && props.detectedQueuePath && !props.scanningDropbox ? (
+            <div className="rounded-2xl border border-blue-200/90 bg-gradient-to-br from-blue-50 via-indigo-50/40 to-white px-4 py-3.5 text-sm text-blue-950 shadow-md shadow-blue-900/5 dark:border-blue-800/70 dark:from-blue-950/35 dark:via-indigo-950/20 dark:to-gray-950/50 dark:text-blue-100 ring-1 ring-blue-100/80 dark:ring-blue-900/40" role="status">
+              <div className="font-semibold mb-1 flex items-center gap-2">
+                <span className="flex h-2 w-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.6)]" aria-hidden />
+                Queue layout detected (not enabled yet)
+              </div>
+              <p className="font-mono text-xs break-all mb-2">{props.detectedQueuePath}</p>
+              {props.detectedLayoutCounts && <p className="text-xs mb-2">Folder scan: <strong>{props.detectedLayoutCounts.manifestCount}</strong> manifests, <strong>{props.detectedLayoutCounts.videoCount}</strong> videos, <strong>{props.detectedLayoutCounts.thumbnailCount}</strong> thumbnails</p>}
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" size="sm" onClick={() => void props.onUseDetectedQueue()}>Use detected queue</Button>
+                <Button type="button" size="sm" variant="secondary" onClick={props.onRefreshDetect}>Scan again</Button>
+                <Button type="button" size="sm" variant="outline" onClick={() => void props.onChangeFolder()}>Select folder manually</Button>
               </div>
             </div>
           ) : null}
