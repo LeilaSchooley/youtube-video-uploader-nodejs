@@ -21,6 +21,10 @@ export interface UploadedVideoRecord {
   videoType?: string;
   /** True if uploaded as a YouTube Short. For Shorts tracking. */
   isShort?: boolean;
+  /** Comment state for manifest-driven uploads. */
+  commentStatus?: "pending" | "posted" | "failed" | "skipped";
+  commentPosted?: boolean;
+  commentError?: string;
 }
 
 function ensureDataDir(): void {

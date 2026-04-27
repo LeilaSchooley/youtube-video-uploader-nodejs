@@ -40,7 +40,16 @@ export async function GET(request: NextRequest) {
     );
 
     if (format === "csv") {
-      const headers = ["videoId", "title", "jobId", "uploadedAt", "channelId"];
+      const headers = [
+        "videoId",
+        "title",
+        "jobId",
+        "uploadedAt",
+        "channelId",
+        "commentStatus",
+        "commentPosted",
+        "commentError",
+      ];
       const escape = (v: unknown) => {
         const s = v == null ? "" : String(v);
         if (s.includes(",") || s.includes('"') || s.includes("\n") || s.includes("\r")) {

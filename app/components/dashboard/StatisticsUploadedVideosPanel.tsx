@@ -12,6 +12,8 @@ type Props = {
   uploadHistoryFull: UploadedVideoRecord[] | null;
   /** Unfiltered list length (for "showing X of Y") */
   uploadedVideosTotalCount: number;
+  /** Auto-refresh interval in milliseconds while stats tab is active */
+  autoPollMs: number;
   uploadChannelFilter: string;
   onUploadChannelFilterChange: (value: string) => void;
   uploadVideoTypeFilter: string;
@@ -41,6 +43,7 @@ export default function StatisticsUploadedVideosPanel({
   uploadedVideos,
   uploadHistoryFull,
   uploadedVideosTotalCount,
+  autoPollMs,
   uploadChannelFilter,
   onUploadChannelFilterChange,
   uploadVideoTypeFilter,
@@ -87,6 +90,9 @@ export default function StatisticsUploadedVideosPanel({
               History is stored on this server per Google login. If you use multiple YouTube channels with the same Google account, filter by channel. The default picks your last choice (saved in this browser), otherwise the newest upload that has channel metadata. Rows from before this update may not have a channel column.
             </p>
           </div>
+          <p className="text-[11px] text-gray-500 dark:text-gray-400">
+            Auto-refresh: every {Math.max(1, Math.round(autoPollMs / 1000))}s while this tab is open
+          </p>
           <div className="flex flex-wrap gap-2">
             <Button
               type="button"
@@ -227,6 +233,7 @@ export default function StatisticsUploadedVideosPanel({
                         <th className="p-2 font-semibold">Channel</th>
                         <th className="p-2 font-semibold">Video ID</th>
                         <th className="p-2 font-semibold">Job ID</th>
+                        <th className="p-2 font-semibold">Comment</th>
                         <th className="p-2 font-semibold">Uploaded at</th>
                       </tr>
                     </thead>
@@ -243,6 +250,22 @@ export default function StatisticsUploadedVideosPanel({
                             </a>
                           </td>
                           <td className="p-2 font-mono text-xs text-gray-600 dark:text-gray-400">{v.jobId}</td>
+                          <td className="p-2 text-xs">
+                            {v.commentStatus === "posted" ? (
+                              <span className="text-emerald-700 dark:text-emerald-300">✅ Posted</span>
+                            ) : v.commentStatus === "failed" ? (
+                              <span
+                                className="text-amber-700 dark:text-amber-300"
+                                title={v.commentError || "Comment posting failed"}
+                              >
+                                ⚠ Failed
+                              </span>
+                            ) : v.commentStatus === "skipped" ? (
+                              <span className="text-gray-500 dark:text-gray-400">⏭ Skipped</span>
+                            ) : (
+                              <span className="text-gray-400 dark:text-gray-500">—</span>
+                            )}
+                          </td>
                           <td className="p-2 text-gray-600 dark:text-gray-400">{new Date(v.uploadedAt).toLocaleString()}</td>
                         </tr>
                       ))}

@@ -66,5 +66,24 @@ export async function postTopLevelComment(
 }
 
 export function formatCommentPostError(error: unknown): string {
-  return getErrorMessage(error).slice(0, 4000);
+  const raw = getErrorMessage(error);
+  const lower = raw.toLowerCase();
+
+  if (
+    lower.includes("insufficientpermissions") ||
+    lower.includes("insufficient permission") ||
+    lower.includes("youtube.force-ssl") ||
+    lower.includes("forbidden")
+  ) {
+    return `${raw} — re-login Google for comment scope (youtube.force-ssl).`.slice(
+      0,
+      4000,
+    );
+  }
+
+  if (lower.includes("commentsdisabled") || lower.includes("comments are disabled")) {
+    return `${raw} — comments are disabled for this video/channel.`.slice(0, 4000);
+  }
+
+  return raw.slice(0, 4000);
 }

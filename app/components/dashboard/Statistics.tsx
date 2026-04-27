@@ -6,6 +6,9 @@ import StatisticsQueueOverview from "./StatisticsQueueOverview";
 import StatisticsUploadedVideosPanel from "./StatisticsUploadedVideosPanel";
 import type { ConfirmFn, UploadedVideoRecord } from "./statistics-types";
 
+const STATS_AUTO_POLL_MS = 10_000;
+const STATS_CHANNELS_POLL_MS = 60_000;
+
 const UPLOAD_HISTORY_CHANNEL_STORAGE_KEY =
   "youtube-uploader-stats-upload-channel-filter";
 
@@ -95,6 +98,20 @@ export default function Statistics({ queue, nextUploadTime, timeUntilNext, isAct
   const [syncingFromQueue, setSyncingFromQueue] = useState(false);
   const [uploadedVideosError, setUploadedVideosError] = useState<string | null>(null);
 
+  const fetchYtChannels = useCallback(async () => {
+    setYtChannelsResolved(false);
+    try {
+      const r = await fetch("/api/youtube/channels", { credentials: "include" });
+      const d = (await r.json()) as { channels?: Array<{ id: string; title: string }> };
+      if (Array.isArray(d.channels)) setYtChannels(d.channels);
+      else setYtChannels([]);
+    } catch {
+      setYtChannels([]);
+    } finally {
+      setYtChannelsResolved(true);
+    }
+  }, []);
+
   const loadUploadedVideos = useCallback(async (backfill = false) => {
     setLoadingUploadedVideos(true);
     setUploadedVideosError(null);
@@ -123,20 +140,31 @@ export default function Statistics({ queue, nextUploadTime, timeUntilNext, isAct
 
   useEffect(() => {
     if (!isActive) return;
-    setYtChannelsResolved(false);
-    void fetch("/api/youtube/channels", { credentials: "include" })
-      .then((r) => r.json())
-      .then((d: { channels?: Array<{ id: string; title: string }> }) => {
-        if (Array.isArray(d.channels)) setYtChannels(d.channels);
-        else setYtChannels([]);
-      })
-      .catch(() => {
-        setYtChannels([]);
-      })
-      .finally(() => {
-        setYtChannelsResolved(true);
-      });
-  }, [isActive]);
+    void fetchYtChannels();
+  }, [isActive, fetchYtChannels]);
+
+  useEffect(() => {
+    if (!isActive) return;
+    const id = setInterval(() => {
+      if (!loadingUploadedVideos && !syncingFromQueue) {
+        void loadUploadedVideos(false);
+      }
+    }, STATS_AUTO_POLL_MS);
+    return () => clearInterval(id);
+  }, [
+    isActive,
+    loadingUploadedVideos,
+    syncingFromQueue,
+    loadUploadedVideos,
+  ]);
+
+  useEffect(() => {
+    if (!isActive) return;
+    const id = setInterval(() => {
+      void fetchYtChannels();
+    }, STATS_CHANNELS_POLL_MS);
+    return () => clearInterval(id);
+  }, [isActive, fetchYtChannels]);
 
   useEffect(() => {
     if (!isActive || uploadedVideos === null || !ytChannelsResolved) return;
@@ -355,6 +383,7 @@ export default function Statistics({ queue, nextUploadTime, timeUntilNext, isAct
         uploadedVideos={displayedUploadedVideos}
         uploadHistoryFull={uploadedVideos}
         uploadedVideosTotalCount={uploadedVideos?.length ?? 0}
+        autoPollMs={STATS_AUTO_POLL_MS}
         uploadChannelFilter={uploadChannelFilter}
         onUploadChannelFilterChange={setUploadChannelFilterPersisted}
         uploadVideoTypeFilter={uploadVideoTypeFilter}

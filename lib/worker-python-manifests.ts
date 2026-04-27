@@ -81,6 +81,32 @@ type PythonWorkItem =
       manifestPath: string;
     };
 
+function pickCommentMetaFromPatch(patch: Record<string, unknown>): {
+  commentStatus?: "pending" | "posted" | "failed" | "skipped";
+  commentPosted?: boolean;
+  commentError?: string;
+} {
+  const commentStatusRaw = patch.comment_status;
+  const commentStatus =
+    commentStatusRaw === "pending" ||
+    commentStatusRaw === "posted" ||
+    commentStatusRaw === "failed" ||
+    commentStatusRaw === "skipped"
+      ? commentStatusRaw
+      : undefined;
+  const commentPosted =
+    typeof patch.comment_posted === "boolean" ? patch.comment_posted : undefined;
+  const commentError =
+    typeof patch.comment_last_error === "string" && patch.comment_last_error.trim()
+      ? patch.comment_last_error
+      : undefined;
+  return {
+    commentStatus,
+    commentPosted,
+    commentError,
+  };
+}
+
 async function buildManifestCommentPatch(
   youtube: ReturnType<typeof google.youtube>,
   manifest: PythonManifest,
@@ -398,15 +424,6 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
 
         if (result.success && result.videoId) {
           fsUploadSucceeded = true;
-          appendUploadedVideo({
-            videoId: result.videoId,
-            title: normalizedManifest.title,
-            jobId,
-            uploadedAt: new Date().toISOString(),
-            channelId: result.channelId,
-            videoType: normalizedManifest.videoType,
-            isShort: normalizedManifest.isShort,
-          });
           if (dailyUploadSlotsLeft !== null) {
             dailyUploadSlotsLeft--;
           }
@@ -426,6 +443,19 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
               },
             ),
           );
+          const commentMeta = pickCommentMetaFromPatch(patch);
+          appendUploadedVideo({
+            videoId: result.videoId,
+            title: normalizedManifest.title,
+            jobId,
+            uploadedAt: new Date().toISOString(),
+            channelId: result.channelId,
+            videoType: normalizedManifest.videoType,
+            isShort: normalizedManifest.isShort,
+            commentStatus: commentMeta.commentStatus,
+            commentPosted: commentMeta.commentPosted,
+            commentError: commentMeta.commentError,
+          });
           try {
             mergeManifestJobPatchOnFs(manifestPath, patch);
           } catch { /* best effort — move will clean up */ }
@@ -755,15 +785,6 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
 
       if (result.success && result.videoId) {
         dbUploadSucceeded = true;
-        appendUploadedVideo({
-          videoId: result.videoId,
-          title: normalizedManifest.title,
-          jobId: dbJobId,
-          uploadedAt: new Date().toISOString(),
-          channelId: result.channelId,
-          videoType: normalizedManifest.videoType,
-          isShort: normalizedManifest.isShort,
-        });
         if (dailyUploadSlotsLeft !== null) {
           dailyUploadSlotsLeft--;
         }
@@ -783,6 +804,19 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
             },
           ),
         );
+        const commentMeta = pickCommentMetaFromPatch(patch);
+        appendUploadedVideo({
+          videoId: result.videoId,
+          title: normalizedManifest.title,
+          jobId: dbJobId,
+          uploadedAt: new Date().toISOString(),
+          channelId: result.channelId,
+          videoType: normalizedManifest.videoType,
+          isShort: normalizedManifest.isShort,
+          commentStatus: commentMeta.commentStatus,
+          commentPosted: commentMeta.commentPosted,
+          commentError: commentMeta.commentError,
+        });
         try {
           await mergeManifestJsonOnDropbox(
             manifestPath,
