@@ -38,6 +38,34 @@ export async function GET() {
       // When Google scopes are minimal (DISABLE_GOOGLE_SCOPES), userinfo is not available
     }
 
+    try {
+      const youtube = google.youtube({
+        version: "v3",
+        auth: oAuthClient,
+      });
+      const channelRes = await youtube.channels.list({
+        part: ["snippet"],
+        mine: true,
+        maxResults: 1,
+      });
+      const snippet = channelRes.data.items?.[0]?.snippet;
+      const channelTitle = snippet?.title?.trim() || null;
+      const channelPicture =
+        snippet?.thumbnails?.high?.url ||
+        snippet?.thumbnails?.medium?.url ||
+        snippet?.thumbnails?.default?.url ||
+        null;
+
+      if (channelTitle) {
+        name = channelTitle;
+      }
+      if (channelPicture) {
+        picture = channelPicture;
+      }
+    } catch {
+      // Ignore channel metadata failures and keep existing userinfo values
+    }
+
     const dropboxToken = await getDropboxToken(
       session.dropboxToken,
       session.dropboxRefreshToken,
