@@ -59,6 +59,7 @@ export default function StatisticsUploadedVideosPanel({
   syncFromQueue,
   downloadUploadedVideosCsv,
   clearUploadHistory,
+  onTestCommentClick,
 }: Props) {
   const [collapsed, setCollapsed] = useState(false);
 
