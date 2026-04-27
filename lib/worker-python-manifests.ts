@@ -118,6 +118,12 @@ async function buildManifestCommentPatch(
 ): Promise<Record<string, unknown>> {
   const commentText = getManifestTopComment(manifest);
   if (!commentText) {
+    workerLog.info("Python manifest queue: no comment field detected", {
+      ...logContext,
+      videoId,
+      hasTopComment: !!manifest.top_comment,
+      hasPinnedComment: !!manifest.pinned_comment,
+    });
     return {
       comment_status: "skipped",
       comment_posted: false,
@@ -125,7 +131,17 @@ async function buildManifestCommentPatch(
     };
   }
 
+  workerLog.info("Python manifest queue: comment detected, will attempt to post", {
+    ...logContext,
+    videoId,
+    commentLength: commentText.length,
+  });
+
   if (isManifestCommentAlreadyPosted(manifest)) {
+    workerLog.info("Python manifest queue: comment already posted (skipping)", {
+      ...logContext,
+      videoId,
+    });
     return {
       comment_status: "posted",
       comment_posted: true,
