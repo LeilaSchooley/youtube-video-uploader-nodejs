@@ -13,6 +13,8 @@ export interface PythonManifest {
   id?: string;
   title: string;
   description: string;
+  youtube_title?: string;
+  youtube_description?: string;
   video_type?: string;
   is_short?: boolean;
   source_upload_id?: string;
@@ -30,7 +32,14 @@ export interface PythonManifest {
   /** Higher runs first when listing pending jobs */
   priority?: number;
   /** Worker / UI job state (optional; merged into manifest JSON on Dropbox or disk) */
-  upload_status?: "queued" | "uploading" | "done" | "failed";
+  upload_status?: "pending" | "queued" | "uploading" | "uploaded" | "done" | "failed";
+  youtube_video_id?: string;
+  top_comment?: string;
+  pinned_comment?: string;
+  comment_posted?: boolean;
+  comment_status?: "pending" | "posted" | "failed" | "skipped";
+  comment_last_error?: string;
+  description_version?: string;
   /** Upload failures incremented by worker; terminal when >= MANIFEST_MAX_AUTO_RETRIES */
   retry_count?: number;
   last_error?: string;

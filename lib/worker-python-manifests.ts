@@ -19,6 +19,7 @@ import {
   resolveUnderQueueRoot,
   tryAcquireLock,
   type ParsedManifestEntry,
+  type PythonManifest,
 } from "./python-queue";
 import { getAllDropboxPythonQueueSessions } from "./queue-source";
 import {
@@ -44,6 +45,12 @@ import { getPythonManifestDailySlotsRemaining } from "./server-upload-schedule";
 import type { UploadTask } from "./worker-upload";
 import { workerUploadVideo } from "./worker-upload";
 import { getVideoDurationSeconds } from "./video-duration";
+import {
+  formatCommentPostError,
+  getManifestTopComment,
+  isManifestCommentAlreadyPosted,
+  postTopLevelComment,
+} from "./youtube-comments";
 
 /** In-process locks for Dropbox manifest paths (single-worker assumption). */
 const dropboxPythonLocks = new Set<string>();
@@ -73,6 +80,59 @@ type PythonWorkItem =
       queueRoot: string;
       manifestPath: string;
     };
+
+async function buildManifestCommentPatch(
+  youtube: ReturnType<typeof google.youtube>,
+  manifest: PythonManifest,
+  videoId: string,
+  logContext: {
+    source: "python-manifest" | "python-manifest-dropbox";
+    manifestId: string;
+  },
+): Promise<Record<string, unknown>> {
+  const commentText = getManifestTopComment(manifest);
+  if (!commentText) {
+    return {
+      comment_status: "skipped",
+      comment_posted: false,
+      comment_last_error: "",
+    };
+  }
+
+  if (isManifestCommentAlreadyPosted(manifest)) {
+    return {
+      comment_status: "posted",
+      comment_posted: true,
+      comment_last_error: "",
+    };
+  }
+
+  try {
+    const posted = await postTopLevelComment(youtube, videoId, commentText);
+    workerLog.info("Python manifest queue: posted top-level comment", {
+      ...logContext,
+      videoId,
+      commentId: posted.commentId,
+    });
+    return {
+      comment_status: "posted",
+      comment_posted: true,
+      comment_last_error: "",
+    };
+  } catch (error: unknown) {
+    const msg = formatCommentPostError(error);
+    workerLog.warn("Python manifest queue: comment post failed (upload kept as done)", {
+      ...logContext,
+      videoId,
+      error: msg,
+    });
+    return {
+      comment_status: "failed",
+      comment_posted: false,
+      comment_last_error: msg,
+    };
+  }
+}
 
 export async function processPythonManifestJobs(): Promise<string | undefined> {
   loadSessions();
@@ -279,8 +339,28 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
             { manifestId: mid },
           );
           fsUploadSucceeded = true;
+          const existingVideoId =
+            typeof manifest.youtube_video_id === "string" &&
+            manifest.youtube_video_id.trim()
+              ? manifest.youtube_video_id.trim()
+              : "";
+          const patch: Record<string, unknown> = { upload_status: "done" };
+          if (existingVideoId) {
+            Object.assign(
+              patch,
+              await buildManifestCommentPatch(
+                youtube,
+                manifest,
+                existingVideoId,
+                {
+                  source: "python-manifest",
+                  manifestId: mid,
+                },
+              ),
+            );
+          }
           try {
-            mergeManifestJobPatchOnFs(manifestPath, { upload_status: "done" });
+            mergeManifestJobPatchOnFs(manifestPath, patch);
           } catch { /* best effort */ }
           try {
             moveManifestToProcessed(manifestPath);
@@ -330,8 +410,24 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
           if (dailyUploadSlotsLeft !== null) {
             dailyUploadSlotsLeft--;
           }
+          const patch: Record<string, unknown> = {
+            upload_status: "done",
+            youtube_video_id: result.videoId,
+          };
+          Object.assign(
+            patch,
+            await buildManifestCommentPatch(
+              youtube,
+              manifest,
+              result.videoId,
+              {
+                source: "python-manifest",
+                manifestId: mid,
+              },
+            ),
+          );
           try {
-            mergeManifestJobPatchOnFs(manifestPath, { upload_status: "done" });
+            mergeManifestJobPatchOnFs(manifestPath, patch);
           } catch { /* best effort — move will clean up */ }
           try {
             moveManifestToProcessed(manifestPath);
@@ -605,10 +701,30 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
           "Python manifest queue (Dropbox): already uploaded today; marking done and skipping",
           { manifestId: mid },
         );
+        const existingVideoId =
+          typeof manifest.youtube_video_id === "string" &&
+          manifest.youtube_video_id.trim()
+            ? manifest.youtube_video_id.trim()
+            : "";
+        const patch: Record<string, unknown> = { upload_status: "done" };
+        if (existingVideoId) {
+          Object.assign(
+            patch,
+            await buildManifestCommentPatch(
+              youtube,
+              manifest,
+              existingVideoId,
+              {
+                source: "python-manifest-dropbox",
+                manifestId: mid,
+              },
+            ),
+          );
+        }
         try {
           await mergeManifestJsonOnDropbox(
             manifestPath,
-            { upload_status: "done" },
+            patch,
             qToken,
             queueOwnerSessionId,
             qSession.dropboxRefreshToken ?? null,
@@ -651,10 +767,26 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
         if (dailyUploadSlotsLeft !== null) {
           dailyUploadSlotsLeft--;
         }
+        const patch: Record<string, unknown> = {
+          upload_status: "done",
+          youtube_video_id: result.videoId,
+        };
+        Object.assign(
+          patch,
+          await buildManifestCommentPatch(
+            youtube,
+            manifest,
+            result.videoId,
+            {
+              source: "python-manifest-dropbox",
+              manifestId: mid,
+            },
+          ),
+        );
         try {
           await mergeManifestJsonOnDropbox(
             manifestPath,
-            { upload_status: "done" },
+            patch,
             qToken,
             queueOwnerSessionId,
             qSession.dropboxRefreshToken ?? null,

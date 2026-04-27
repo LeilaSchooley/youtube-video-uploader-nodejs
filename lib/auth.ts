@@ -46,11 +46,11 @@ const DISABLE_GOOGLE_EXTRA_SCOPES =
   process.env.GOOGLE_MINIMAL_SCOPES === "true";
 
 const GOOGLE_SCOPES_FULL =
-  "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email";
+  "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.force-ssl https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email";
 
 // YouTube-only (no openid/userinfo). Use when Cloud project restricts to YouTube scopes only.
 const GOOGLE_SCOPES_MINIMAL =
-  "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly";
+  "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.force-ssl https://www.googleapis.com/auth/youtube.readonly";
 
 const scopes = process.env.GOOGLE_SCOPES
   ? process.env.GOOGLE_SCOPES
