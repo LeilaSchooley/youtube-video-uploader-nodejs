@@ -630,6 +630,13 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
         continue;
       }
 
+      workerLog.info("Python manifest queue (Dropbox): resolved upload session", {
+        manifestId: mid,
+        queueOwnerSessionId,
+        uploadSessionId,
+        hasManifestSessionId: !!manifest.sessionId?.trim(),
+      });
+
       if (uploadedTitles) {
         const t = normalizedManifest.title.toLowerCase().trim();
         if (t && uploadedTitles.has(t)) {

@@ -77,9 +77,18 @@ export function setQueueSourceForSession(
   if (record.sourceType === "none") {
     delete shape.bySessionId[sessionId];
   } else {
+    const normalizedRoot = normalizeDropboxPath(record.rootPath);
+    for (const [otherSessionId, other] of Object.entries(shape.bySessionId)) {
+      if (otherSessionId === sessionId) continue;
+      if (other.sourceType !== "dropbox_python_queue") continue;
+      if (normalizeDropboxPath(other.rootPath).toLowerCase() !== normalizedRoot.toLowerCase()) {
+        continue;
+      }
+      delete shape.bySessionId[otherSessionId];
+    }
     shape.bySessionId[sessionId] = {
       sourceType: record.sourceType,
-      rootPath: normalizeDropboxPath(record.rootPath),
+      rootPath: normalizedRoot,
       updatedAt: record.updatedAt || new Date().toISOString(),
     };
   }
@@ -91,23 +100,40 @@ export function getAllDropboxPythonQueueSessions(): Array<{
   rootPath: string;
 }> {
   const { bySessionId } = readFile();
-  const out: Array<{ sessionId: string; rootPath: string }> = [];
+  const out: Array<{ sessionId: string; rootPath: string; updatedAt: string }> = [];
   for (const [sessionId, rec] of Object.entries(bySessionId)) {
     if (rec.sourceType === "dropbox_python_queue" && rec.rootPath?.trim()) {
       out.push({
         sessionId,
         rootPath: normalizeDropboxPath(rec.rootPath),
+        updatedAt:
+          typeof rec.updatedAt === "string" && rec.updatedAt.trim()
+            ? rec.updatedAt
+            : "1970-01-01T00:00:00.000Z",
       });
     }
   }
-  /** One worker pass per queue root — duplicate session rows (re-login) used to list the same folder N times. */
-  const seenRoots = new Set<string>();
-  const deduped: typeof out = [];
+  /** One worker pass per queue root — keep most recently updated session when duplicates exist. */
+  const byRoot = new Map<string, (typeof out)[number]>();
   for (const row of out) {
     const key = row.rootPath.toLowerCase();
-    if (seenRoots.has(key)) continue;
-    seenRoots.add(key);
-    deduped.push(row);
+    const prev = byRoot.get(key);
+    if (!prev) {
+      byRoot.set(key, row);
+      continue;
+    }
+    const rowTime = Date.parse(row.updatedAt);
+    const prevTime = Date.parse(prev.updatedAt);
+    if (!Number.isNaN(rowTime) && Number.isNaN(prevTime)) {
+      byRoot.set(key, row);
+      continue;
+    }
+    if (!Number.isNaN(rowTime) && !Number.isNaN(prevTime) && rowTime >= prevTime) {
+      byRoot.set(key, row);
+    }
   }
-  return deduped;
+  return Array.from(byRoot.values()).map(({ sessionId, rootPath }) => ({
+    sessionId,
+    rootPath,
+  }));
 }
