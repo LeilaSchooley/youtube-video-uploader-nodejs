@@ -4,6 +4,7 @@ import { useAppToast } from "@/app/app-toast-context";
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import StatisticsQueueOverview from "./StatisticsQueueOverview";
 import StatisticsUploadedVideosPanel from "./StatisticsUploadedVideosPanel";
+import { TestCommentDialog } from "./TestCommentDialog";
 import type { ConfirmFn, UploadedVideoRecord } from "./statistics-types";
 
 const STATS_AUTO_POLL_MS = 10_000;
@@ -97,6 +98,8 @@ export default function Statistics({ queue, nextUploadTime, timeUntilNext, isAct
   const [loadingUploadedVideos, setLoadingUploadedVideos] = useState(false);
   const [syncingFromQueue, setSyncingFromQueue] = useState(false);
   const [uploadedVideosError, setUploadedVideosError] = useState<string | null>(null);
+  const [testCommentDialogOpen, setTestCommentDialogOpen] = useState(false);
+  const [testCommentLoading, setTestCommentLoading] = useState(false);
 
   const fetchYtChannels = useCallback(async () => {
     setYtChannelsResolved(false);
@@ -377,6 +380,43 @@ export default function Statistics({ queue, nextUploadTime, timeUntilNext, isAct
     }
   }, [showAppToast]);
 
+  const testCommentPost = useCallback(async (videoId: string, commentText: string) => {
+    setTestCommentLoading(true);
+    try {
+      const res = await fetch("/api/test-comment", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ videoId, commentText }),
+      });
+      const data = await res.json() as {
+        success?: boolean;
+        error?: string;
+        message?: string;
+        commentId?: string;
+      };
+      if (res.ok && data.success) {
+        showAppToast({
+          message: `✅ Comment posted successfully! (ID: ${data.commentId})`,
+          type: "success",
+        });
+        setTestCommentDialogOpen(false);
+      } else {
+        showAppToast({
+          message: `❌ ${data.error || "Failed to post comment"}`,
+          type: "error",
+        });
+      }
+    } catch (e) {
+      showAppToast({
+        message: `Error: ${e instanceof Error ? e.message : "Unknown error"}`,
+        type: "error",
+      });
+    } finally {
+      setTestCommentLoading(false);
+    }
+  }, [showAppToast]);
+
   return (
     <>
       <StatisticsUploadedVideosPanel
@@ -398,6 +438,7 @@ export default function Statistics({ queue, nextUploadTime, timeUntilNext, isAct
         syncFromQueue={syncFromQueue}
         downloadUploadedVideosCsv={downloadUploadedVideosCsv}
         clearUploadHistory={clearUploadHistory}
+        onTestCommentClick={() => setTestCommentDialogOpen(true)}
       />
       <StatisticsQueueOverview
         queueLength={queue.length}
@@ -414,6 +455,12 @@ export default function Statistics({ queue, nextUploadTime, timeUntilNext, isAct
         pendingJobs={pendingJobs}
         failedJobs={failedJobs}
         remaining={remaining}
+      />
+      <TestCommentDialog
+        open={testCommentDialogOpen}
+        onOpenChange={setTestCommentDialogOpen}
+        onSubmit={testCommentPost}
+        isLoading={testCommentLoading}
       />
     </>
   );

@@ -28,6 +28,7 @@ type Props = {
   syncFromQueue: () => Promise<void>;
   downloadUploadedVideosCsv: () => Promise<void>;
   clearUploadHistory: () => Promise<void>;
+  onTestCommentClick?: () => void;
 };
 
 function channelTitleFor(
@@ -153,6 +154,15 @@ export default function StatisticsUploadedVideosPanel({
                   className="bg-emerald-600 text-white hover:bg-emerald-700"
                 >
                   {syncingFromQueue ? "Syncing…" : "Sync from queue"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={onTestCommentClick}
+                  title="Test posting a comment to verify OAuth permissions"
+                  className="text-orange-600 hover:bg-orange-50"
+                >
+                  Test Comment
                 </Button>
                 {uploadedVideos !== null && uploadedVideosTotalCount > 0 ? (
                   <>
