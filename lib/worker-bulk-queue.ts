@@ -1,4 +1,5 @@
 import { getBulkQueue, type BulkUploadItem } from "./bulk-queue";
+import { isWorkerPausedForSession } from "./worker-pause";
 
 /**
  * Get next job that needs processing (pending or processing with more batches)
@@ -20,6 +21,10 @@ export function getNextBulkJobToProcess(): { id: string; status: string } | null
   );
 
   for (const job of queue) {
+    if (isWorkerPausedForSession(job.sessionId)) {
+      continue;
+    }
+
     if (job.status === "pending") {
       return { id: job.id, status: job.status };
     }

@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { setWorkerPaused } from "@/lib/worker-pause";
+import { setWorkerPausedForSession } from "@/lib/worker-pause";
 
 export const dynamic = "force-dynamic";
 
@@ -22,12 +22,12 @@ export async function POST() {
       });
     }
 
-    setWorkerPaused(false);
+    setWorkerPausedForSession(sessionId, false);
     return new Response(
       JSON.stringify({
         success: true,
         message:
-          "Worker processing resumed (pause flag cleared). The worker process must still be running (e.g. pm2 start bulk-upload-worker).",
+          "Worker processing resumed for this account/channel queue.",
       }),
       { headers: { "Content-Type": "application/json" } },
     );

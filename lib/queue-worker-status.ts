@@ -7,7 +7,7 @@ import { getBulkQueue } from "./bulk-queue";
 import type { BulkUploadItem } from "./bulk-queue";
 import { getPythonQueueUiSummary } from "./python-queue";
 import { readHeartbeat } from "./worker-health";
-import { isWorkerPaused } from "./worker-pause";
+import { isWorkerPaused, isWorkerPausedForSession } from "./worker-pause";
 
 function userOwnsBulkJob(
   job: BulkUploadItem,
@@ -52,7 +52,7 @@ export function getQueueWorkerStatus(
   /** When set (e.g. from async Dropbox-aware summary), use instead of disk-only python summary */
   pythonSummaryOverride?: PythonQueueData | null,
 ): QueueWorkerStatusPayload {
-  const paused = isWorkerPaused();
+  const paused = isWorkerPaused() || isWorkerPausedForSession(sessionId);
   const heartbeat = readHeartbeat();
   const fsPy = getPythonQueueUiSummary();
   const py: PythonQueueData = pythonSummaryOverride ?? {

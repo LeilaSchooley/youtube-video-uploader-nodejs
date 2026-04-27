@@ -23,7 +23,7 @@ async function workerLoop(): Promise<void> {
   try {
     if (isWorkerPaused()) {
       workerLog.info(
-        "Worker paused (data/.worker-paused); skipping uploads this tick",
+        "Worker globally paused (data/.worker-paused); skipping uploads this tick",
       );
       writeHeartbeat("paused");
     } else {

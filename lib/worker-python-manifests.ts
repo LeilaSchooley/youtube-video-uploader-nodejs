@@ -40,6 +40,7 @@ import {
 } from "./manifest-job-state";
 import { workerLog } from "./worker-logger";
 import { writeHeartbeat } from "./worker-health";
+import { isWorkerPausedForSession } from "./worker-pause";
 import { getDropboxFileMetadata } from "./dropbox";
 import { getPythonManifestDailySlotsRemaining } from "./server-upload-schedule";
 import type { UploadTask } from "./worker-upload";
@@ -206,6 +207,7 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
   }
 
   for (const { sessionId: qSid, rootPath } of getAllDropboxPythonQueueSessions()) {
+    if (isWorkerPausedForSession(qSid)) continue;
     const qSession = getSession(qSid);
     if (!qSession?.authenticated || !qSession.tokens) continue;
     const qToken = await getDropboxToken(
@@ -282,6 +284,11 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
             manifest,
             "missing_session: set PYTHON_SESSION_ID or sessionId in manifest",
           );
+          processedThisTick++;
+          continue;
+        }
+
+        if (isWorkerPausedForSession(sessionId)) {
           processedThisTick++;
           continue;
         }
@@ -521,6 +528,9 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
     }
 
     const { queueOwnerSessionId, queueRoot, manifestPath } = work;
+    if (isWorkerPausedForSession(queueOwnerSessionId)) {
+      continue;
+    }
     const lockKey = dropboxPythonLockKey(queueOwnerSessionId, manifestPath);
     if (!tryAcquireDropboxPythonLock(lockKey)) continue;
 
@@ -626,6 +636,11 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
           queueOwnerSessionId,
           qSession.dropboxRefreshToken ?? null,
         );
+        processedThisTick++;
+        continue;
+      }
+
+      if (isWorkerPausedForSession(uploadSessionId)) {
         processedThisTick++;
         continue;
       }

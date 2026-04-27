@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { getSession } from "@/lib/session";
-import { setWorkerPaused } from "@/lib/worker-pause";
+import { setWorkerPausedForSession } from "@/lib/worker-pause";
 
 export const dynamic = "force-dynamic";
 
@@ -22,12 +22,12 @@ export async function POST() {
       });
     }
 
-    setWorkerPaused(true);
+    setWorkerPausedForSession(sessionId, true);
     return new Response(
       JSON.stringify({
         success: true,
         message:
-          "Worker processing paused (new uploads will not run until you resume). The worker process keeps running; it only idles.",
+          "Worker processing paused for this account/channel queue only.",
       }),
       { headers: { "Content-Type": "application/json" } },
     );
