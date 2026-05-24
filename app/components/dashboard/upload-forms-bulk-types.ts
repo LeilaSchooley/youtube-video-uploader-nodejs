@@ -26,8 +26,28 @@ export interface UploadFormsBulkSectionProps {
   driveUploadFolderId: string;
   setDriveUploadFolderId: (id: string) => void;
   setDriveUploadFolderName: (name: string) => void;
-  setDriveBrowserContext: (ctx: "drive" | "sheets") => void;
+  setDriveBrowserContext: (
+    ctx: "drive" | "sheets" | "metadata-csv" | "thumbnails",
+  ) => void;
+  setDriveBrowserMode: (mode: "folder" | "file") => void;
   setShowDriveBrowser: (show: boolean) => void;
+  driveUploading: boolean;
+  setDriveUploading: (v: boolean) => void;
+  selectedDriveCsvFileId: string;
+  selectedDriveCsvFileName: string;
+  setSelectedDriveCsvFileId: (id: string) => void;
+  setSelectedDriveCsvFileName: (name: string) => void;
+  driveThumbnailsFolderId: string;
+  setDriveThumbnailsFolderId: (id: string) => void;
+  driveThumbnailsFolderName: string;
+  setDriveThumbnailsFolderName: (name: string) => void;
+  driveSheetNames: Array<{ title: string; sheetId: number }>;
+  loadingDriveSheets: boolean;
+  selectedDriveMetadataSheetName: string;
+  setSelectedDriveMetadataSheetName: (name: string) => void;
+  driveSpreadsheetUrl: string;
+  setDriveSpreadsheetUrl: (url: string) => void;
+  selectedDriveFolderId: string;
   setShowSheetsBrowser: (show: boolean) => void;
   dropboxPythonQueueMode: boolean;
   pythonQueueDetectInfo: PythonQueueDetectInfo | null;
@@ -39,6 +59,9 @@ export interface UploadFormsBulkSectionProps {
   ) => void;
   setShowDropboxBrowser: (show: boolean) => void;
   clearDropboxPythonQueueMode: () => Promise<void>;
+  drivePythonQueueMode: boolean;
+  drivePythonQueueDetectInfo: PythonQueueDetectInfo | null;
+  clearDrivePythonQueueMode: () => Promise<void>;
   skipDuplicateTitles: boolean;
   setSkipDuplicateTitles: (v: boolean) => void;
   dropboxThumbnailsFolderPath: string;

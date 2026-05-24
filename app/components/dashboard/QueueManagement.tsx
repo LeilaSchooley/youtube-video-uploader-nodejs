@@ -69,7 +69,7 @@ export default function QueueManagement({
       <UnifiedActivityView
         queue={queue}
         searchQuery={searchQuery}
-        manifestVisible={!!pythonQueue?.dropboxConfigured}
+        manifestVisible={!!pythonQueue?.manifestQueueConfigured}
         selectedBulkJobId={selectedJobId}
         setSelectedBulkJobId={setSelectedJobId}
         fetchJobStatus={fetchJobStatus}
@@ -101,7 +101,7 @@ export default function QueueManagement({
       />
 
       {queue.length === 0 &&
-        !(pythonQueue?.dropboxConfigured) &&
+        !pythonQueue?.manifestQueueConfigured &&
         !(pythonQueue?.pending && pythonQueue.pending.length > 0) && (
           <QueueManagementEmptyState onGoToUpload={onGoToUpload} />
         )}

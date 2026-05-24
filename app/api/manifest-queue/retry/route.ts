@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { mergeManifestJsonOnDropbox } from "@/lib/python-queue-dropbox";
 import {
   buildManualRetryPatch,
   isManifestPathUnderQueueRoot,
 } from "@/lib/manifest-job-state";
-import { requireManifestQueueDropboxAuth } from "@/lib/manifest-queue-api-auth";
+import { requireManifestQueueAuth } from "@/lib/manifest-queue-api-auth";
+import { mergeManifestPatchForAuth } from "@/lib/manifest-queue-helpers";
 import { jsonApiError } from "@/lib/api-response";
 
 export const dynamic = "force-dynamic";
@@ -12,7 +12,7 @@ export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
   try {
-    const auth = await requireManifestQueueDropboxAuth();
+    const auth = await requireManifestQueueAuth();
     if (!auth.ok) return auth.response;
 
     let body: { manifestPath?: string };
@@ -29,19 +29,16 @@ export async function POST(request: NextRequest) {
 
     if (!isManifestPathUnderQueueRoot(manifestPath, auth.queueRoot)) {
       return jsonApiError(
-        "manifestPath must be under this session’s queue manifests folder",
+        "manifestPath must belong to this session's queue",
         400,
         "INVALID_MANIFEST_PATH",
       );
     }
 
-    const patch = buildManualRetryPatch() as Record<string, unknown>;
-    await mergeManifestJsonOnDropbox(
+    await mergeManifestPatchForAuth(
+      auth,
       manifestPath,
-      patch,
-      auth.accessToken,
-      auth.sessionId,
-      auth.refresh,
+      buildManualRetryPatch() as Record<string, unknown>,
     );
 
     return NextResponse.json({ success: true });

@@ -24,6 +24,7 @@ export function useSheetsMetadata() {
       try {
         const response = await fetch(
           `/api/sheets-info?spreadsheetUrl=${encodeURIComponent(spreadsheetUrl)}`,
+          { credentials: "include" },
         );
         const data = await response.json();
 
@@ -32,9 +33,8 @@ export function useSheetsMetadata() {
           setSpreadsheetTitle(data.title || "");
 
           if (data.sheets && data.sheets.length > 0) {
-            const sheetSelect = document.getElementById(
-              "sheetName",
-            ) as HTMLSelectElement;
+            const sheetSelect = (document.getElementById("driveSheetNameSelect") ||
+              document.getElementById("sheetName")) as HTMLSelectElement | null;
             if (sheetSelect) {
               sheetSelect.value = data.sheets[0].title;
             }

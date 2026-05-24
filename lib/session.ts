@@ -25,6 +25,14 @@ interface SessionData {
   };
   dropboxToken?: string; // Dropbox access token (separate from Google OAuth)
   dropboxRefreshToken?: string; // Dropbox refresh token for automatic token renewal
+  /** Google Drive OAuth (separate Cloud project / GOOGLE_DRIVE_CLIENT_ID) */
+  driveTokens?: {
+    access_token?: string | null;
+    refresh_token?: string | null;
+    expiry_date?: number | null;
+    token_type?: string | null;
+    scope?: string | null;
+  };
   aiAssist?: SessionAiAssist;
 }
 

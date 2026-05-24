@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getOAuthClient } from "@/lib/auth";
+import { getDriveOAuthClientForSession } from "@/lib/auth-drive";
+import type { OAuth2Client } from "google-auth-library";
 import { getSession } from "@/lib/session";
 import { parseDate } from "@/lib/parse-date";
 import { google } from "googleapis";
@@ -80,6 +82,18 @@ export async function POST(request: NextRequest) {
 
     const oAuthClient = getOAuthClient();
     oAuthClient.setCredentials(session.tokens);
+
+    let driveOAuthClient: OAuth2Client | null = null;
+    const getDriveClient = async (): Promise<OAuth2Client> => {
+      if (driveOAuthClient) return driveOAuthClient;
+      driveOAuthClient = await getDriveOAuthClientForSession(sessionId);
+      if (!driveOAuthClient) {
+        throw new Error(
+          "Google Drive not connected. Connect Google Drive in the dashboard header.",
+        );
+      }
+      return driveOAuthClient;
+    };
 
     const csvData: CSVRow[] = [];
     const progress: ProgressItem[] = [];
@@ -211,7 +225,10 @@ export async function POST(request: NextRequest) {
         if (driveFileId) {
           // Handle Drive-based upload
           progress[i].status = "Fetching video from Google Drive...";
-          videoStream = await downloadDriveFile(driveFileId, oAuthClient);
+          videoStream = await downloadDriveFile(
+            driveFileId,
+            await getDriveClient(),
+          );
         } else {
           // Check for URL
           let videoSource: string | null = null;
@@ -273,7 +290,10 @@ export async function POST(request: NextRequest) {
           
           if (driveThumbnailId) {
             progress[i].status = "Uploading Thumbnail from Drive...";
-            thumbnailStream = await downloadDriveFile(driveThumbnailId, oAuthClient);
+            thumbnailStream = await downloadDriveFile(
+              driveThumbnailId,
+              await getDriveClient(),
+            );
           } else {
             // Check for URL
             let thumbnailSource: string | null = null;
@@ -311,21 +331,29 @@ export async function POST(request: NextRequest) {
             switch (csvData[i].post_upload_action!.toLowerCase()) {
               case "rename":
                 // Get file extension and rename to video ID
-                const fileMetadata = await getDriveFileMetadata(driveFileId, oAuthClient);
+                const driveClient = await getDriveClient();
+                const fileMetadata = await getDriveFileMetadata(
+                  driveFileId,
+                  driveClient,
+                );
                 const extension = fileMetadata.name.split('.').pop() || 'mp4';
                 const newName = `${videoId}.${extension}`;
-                await renameDriveFile(driveFileId, newName, oAuthClient);
+                await renameDriveFile(driveFileId, newName, driveClient);
                 progress[i].status = `Uploaded & renamed to ${newName}`;
                 break;
                 
               case "delete":
-                await deleteDriveFile(driveFileId, oAuthClient);
+                await deleteDriveFile(driveFileId, await getDriveClient());
                 progress[i].status = "Uploaded & deleted from Drive";
                 break;
                 
               case "move":
                 if (csvData[i].completed_folder_id) {
-                  await moveDriveFile(driveFileId, csvData[i].completed_folder_id!, oAuthClient);
+                  await moveDriveFile(
+                    driveFileId,
+                    csvData[i].completed_folder_id!,
+                    await getDriveClient(),
+                  );
                   progress[i].status = `Uploaded & moved to folder`;
                 } else {
                   console.warn(`[UPLOAD-CSV] Move action requested but no completed_folder_id provided for row ${i}`);

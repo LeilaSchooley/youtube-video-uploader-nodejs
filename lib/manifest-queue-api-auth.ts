@@ -3,22 +3,39 @@
  */
 
 import { cookies } from "next/headers";
+import type { OAuth2Client } from "google-auth-library";
 import { getSession } from "@/lib/session";
 import { getDropboxToken } from "@/lib/auth";
-import { getQueueSourceForSession } from "@/lib/queue-source";
+import { getDriveOAuthClientForSession } from "@/lib/auth-drive";
+import {
+  getQueueSourceForSession,
+  isPythonManifestQueueSource,
+} from "@/lib/queue-source";
 import { jsonApiError } from "@/lib/api-response";
 
-export type ManifestQueueDropboxAuth =
-  | {
-      ok: true;
-      sessionId: string;
-      accessToken: string;
-      refresh: string | null;
-      queueRoot: string;
-    }
+export type ManifestQueueDropboxAuth = {
+  ok: true;
+  sourceType: "dropbox_python_queue";
+  sessionId: string;
+  accessToken: string;
+  refresh: string | null;
+  queueRoot: string;
+};
+
+export type ManifestQueueDriveAuth = {
+  ok: true;
+  sourceType: "drive_python_queue";
+  sessionId: string;
+  driveClient: OAuth2Client;
+  queueRoot: string;
+};
+
+export type ManifestQueueAuth =
+  | ManifestQueueDropboxAuth
+  | ManifestQueueDriveAuth
   | { ok: false; response: Response };
 
-export async function requireManifestQueueDropboxAuth(): Promise<ManifestQueueDropboxAuth> {
+export async function requireManifestQueueAuth(): Promise<ManifestQueueAuth> {
   const cookieStore = await cookies();
   const sessionId = cookieStore.get("sessionId")?.value;
   if (!sessionId) {
@@ -29,7 +46,7 @@ export async function requireManifestQueueDropboxAuth(): Promise<ManifestQueueDr
   }
 
   const session = getSession(sessionId);
-  if (!session?.authenticated || !session.tokens) {
+  if (!session?.authenticated) {
     return {
       ok: false,
       response: jsonApiError("Not authenticated", 401, "UNAUTHORIZED"),
@@ -37,14 +54,42 @@ export async function requireManifestQueueDropboxAuth(): Promise<ManifestQueueDr
   }
 
   const qs = getQueueSourceForSession(sessionId);
-  if (!qs || qs.sourceType !== "dropbox_python_queue") {
+  if (!qs || !isPythonManifestQueueSource(qs.sourceType)) {
     return {
       ok: false,
       response: jsonApiError(
-        "Dropbox Python manifest queue is not configured for this session",
+        "Python manifest queue is not configured for this session",
         400,
-        "NO_DROPBOX_PYTHON_QUEUE",
+        "NO_PYTHON_MANIFEST_QUEUE",
       ),
+    };
+  }
+
+  if (qs.sourceType === "drive_python_queue") {
+    const driveClient = await getDriveOAuthClientForSession(sessionId);
+    if (!driveClient) {
+      return {
+        ok: false,
+        response: jsonApiError(
+          "Google Drive not connected",
+          401,
+          "DRIVE_REQUIRED",
+        ),
+      };
+    }
+    return {
+      ok: true,
+      sourceType: "drive_python_queue",
+      sessionId,
+      driveClient,
+      queueRoot: qs.rootPath,
+    };
+  }
+
+  if (!session.tokens) {
+    return {
+      ok: false,
+      response: jsonApiError("Not authenticated", 401, "UNAUTHORIZED"),
     };
   }
 
@@ -62,9 +107,29 @@ export async function requireManifestQueueDropboxAuth(): Promise<ManifestQueueDr
 
   return {
     ok: true,
+    sourceType: "dropbox_python_queue",
     sessionId,
     accessToken,
     refresh: session.dropboxRefreshToken ?? null,
     queueRoot: qs.rootPath,
   };
+}
+
+/** @deprecated Use requireManifestQueueAuth */
+export async function requireManifestQueueDropboxAuth(): Promise<
+  ManifestQueueDropboxAuth | { ok: false; response: Response }
+> {
+  const auth = await requireManifestQueueAuth();
+  if (!auth.ok) return auth;
+  if (auth.sourceType !== "dropbox_python_queue") {
+    return {
+      ok: false,
+      response: jsonApiError(
+        "Dropbox Python manifest queue is not configured for this session",
+        400,
+        "NO_DROPBOX_PYTHON_QUEUE",
+      ),
+    };
+  }
+  return auth;
 }

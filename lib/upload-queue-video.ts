@@ -14,10 +14,11 @@ import {
 } from "@/lib/youtube-utils";
 import { parseDate } from "@/lib/parse-date";
 import { getOAuthClient } from "@/lib/auth";
+import type { OAuth2Client } from "google-auth-library";
 import type { BatchProgress, VideoUploadTask } from "@/lib/upload-queue-types";
 
 type Youtube = ReturnType<typeof google.youtube>;
-type OAuthClient = ReturnType<typeof getOAuthClient>;
+type YoutubeOAuthClient = ReturnType<typeof getOAuthClient>;
 type ProgressSend = (data: unknown) => void;
 
 /**
@@ -27,7 +28,8 @@ export async function uploadQueueVideo(
   youtube: Youtube,
   task: VideoUploadTask,
   sendProgress: ProgressSend,
-  oAuthClient: OAuthClient,
+  youtubeOAuthClient: YoutubeOAuthClient,
+  driveOAuthClient?: OAuth2Client | null,
 ): Promise<{ success: boolean; videoId?: string; error?: string }> {
   const { row, videoFile, thumbnailFile } = task;
   const { youtube_title, youtube_description, scheduleTime, privacyStatus } =
@@ -105,7 +107,14 @@ export async function uploadQueueVideo(
         index: task.index,
         title: youtube_title.substring(0, 50),
       });
-      videoStream = await downloadDriveFile(task.driveFileId, oAuthClient);
+      if (!driveOAuthClient) {
+        return {
+          success: false,
+          error:
+            "Google Drive not connected. Connect Google Drive in the dashboard header.",
+        };
+      }
+      videoStream = await downloadDriveFile(task.driveFileId, driveOAuthClient);
     } else if (task.videoUrl && isValidUrl(task.videoUrl)) {
       sendProgress({
         type: "video_fetch_start",
@@ -166,9 +175,12 @@ export async function uploadQueueVideo(
         let thumbnailStream: Readable;
 
         if (task.driveThumbnailId) {
+          if (!driveOAuthClient) {
+            throw new Error("Google Drive not connected");
+          }
           thumbnailStream = await downloadDriveFile(
             task.driveThumbnailId,
-            oAuthClient,
+            driveOAuthClient,
           );
         } else if (task.thumbnailUrl && isValidUrl(task.thumbnailUrl)) {
           thumbnailStream = await fetchFileAsStream(task.thumbnailUrl, {
@@ -236,18 +248,19 @@ export async function uploadQueueVideo(
       task.driveFileId &&
       videoId &&
       task.postUploadAction &&
-      task.postUploadAction !== "none"
+      task.postUploadAction !== "none" &&
+      driveOAuthClient
     ) {
       try {
         switch (task.postUploadAction.toLowerCase()) {
           case "rename": {
             const fileMetadata = await getDriveFileMetadata(
               task.driveFileId,
-              oAuthClient,
+              driveOAuthClient,
             );
             const extension = fileMetadata.name.split(".").pop() || "mp4";
             const newName = `${videoId}.${extension}`;
-            await renameDriveFile(task.driveFileId, newName, oAuthClient);
+            await renameDriveFile(task.driveFileId, newName, driveOAuthClient);
             sendProgress({
               type: "post_upload_action",
               index: task.index,
@@ -259,7 +272,7 @@ export async function uploadQueueVideo(
           }
 
           case "delete":
-            await deleteDriveFile(task.driveFileId, oAuthClient);
+            await deleteDriveFile(task.driveFileId, driveOAuthClient);
             sendProgress({
               type: "post_upload_action",
               index: task.index,
@@ -274,7 +287,7 @@ export async function uploadQueueVideo(
               await moveDriveFile(
                 task.driveFileId,
                 task.completedFolderId,
-                oAuthClient,
+                driveOAuthClient,
               );
               sendProgress({
                 type: "post_upload_action",
@@ -339,7 +352,8 @@ export async function uploadQueueProcessBatch(
   batchNumber: number,
   totalBatches: number,
   sendProgress: ProgressSend,
-  oAuthClient: OAuthClient,
+  youtubeOAuthClient: YoutubeOAuthClient,
+  driveOAuthClient?: OAuth2Client | null,
 ): Promise<BatchProgress> {
   sendProgress({
     type: "batch_start",
@@ -350,7 +364,13 @@ export async function uploadQueueProcessBatch(
 
   const results = await Promise.allSettled(
     batch.map((task) =>
-      uploadQueueVideo(youtube, task, sendProgress, oAuthClient),
+      uploadQueueVideo(
+        youtube,
+        task,
+        sendProgress,
+        youtubeOAuthClient,
+        driveOAuthClient,
+      ),
     ),
   );
 

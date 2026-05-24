@@ -1,21 +1,15 @@
 import { google } from "googleapis";
 import { OAuth2Client } from "google-auth-library";
 import { Readable } from "stream";
+import { getDriveOAuthClientForSession } from "@/lib/auth-drive";
+
+export { isDriveFileId, parseDriveIdFromInput } from "@/lib/drive-ids";
 
 /**
  * Get Google Drive client
  */
 export function getDriveClient(auth: OAuth2Client) {
   return google.drive({ version: "v3", auth });
-}
-
-/**
- * Check if a string looks like a Google Drive file ID
- */
-export function isDriveFileId(str: string): boolean {
-  // Drive file IDs are typically 33 characters, alphanumeric
-  // But can vary, so check for common patterns
-  return /^[a-zA-Z0-9_-]{25,}$/.test(str);
 }
 
 /**
@@ -158,6 +152,74 @@ export async function downloadDriveFile(
     console.error(`[DRIVE] Error downloading file ${fileId}:`, error?.message);
     throw new Error(`Failed to download Drive file: ${error?.message || "Unknown error"}`);
   }
+}
+
+/** Download full file into memory (metadata spreadsheets, etc.). */
+export async function downloadDriveFileToBuffer(
+  fileId: string,
+  auth: OAuth2Client,
+): Promise<Buffer> {
+  const stream = await downloadDriveFile(fileId, auth);
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) {
+    chunks.push(Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
+}
+
+function isDriveUnauthorized(err: unknown): boolean {
+  const e = err as { code?: number; status?: number; message?: string };
+  return (
+    e?.code === 401 ||
+    e?.status === 401 ||
+    !!e?.message?.includes("401") ||
+    !!e?.message?.toLowerCase().includes("invalid credentials")
+  );
+}
+
+/** Run a Drive API call with session tokens; retries once after refresh on 401. */
+export async function withDriveSession<T>(
+  sessionId: string,
+  fn: (auth: OAuth2Client) => Promise<T>,
+): Promise<T> {
+  let client = await getDriveOAuthClientForSession(sessionId);
+  if (!client) {
+    throw new Error(
+      "Google Drive not connected. Connect Google Drive in the dashboard header.",
+    );
+  }
+  try {
+    return await fn(client);
+  } catch (err) {
+    if (!isDriveUnauthorized(err)) throw err;
+    client = await getDriveOAuthClientForSession(sessionId);
+    if (!client) throw err;
+    return await fn(client);
+  }
+}
+
+/**
+ * List image files in a Drive folder (for thumbnail matching).
+ */
+export async function listDriveImagesInFolder(
+  folderId: string,
+  auth: OAuth2Client,
+): Promise<Array<{ id: string; name: string }>> {
+  const drive = getDriveClient(auth);
+  const targetId = folderId === "root" ? "root" : folderId;
+  const response = await drive.files.list({
+    q: `'${targetId}' in parents and mimeType contains 'image/' and trashed=false`,
+    fields: "files(id, name)",
+    pageSize: 1000,
+  });
+  const imageExts = [".jpg", ".jpeg", ".png", ".gif", ".webp"];
+  return (response.data.files || [])
+    .filter((f): f is { id: string; name: string } => !!f.id && !!f.name)
+    .filter((f) => {
+      const ext = f.name.toLowerCase().slice(f.name.lastIndexOf("."));
+      return imageExts.includes(ext);
+    })
+    .map((f) => ({ id: f.id!, name: f.name! }));
 }
 
 /**

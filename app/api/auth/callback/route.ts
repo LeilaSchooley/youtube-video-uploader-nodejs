@@ -11,6 +11,10 @@ import {
   getDropboxTokensForCandidates,
   setDropboxTokensForUser,
 } from "@/lib/dropbox-by-user";
+import {
+  getDriveTokensForCandidates,
+  setDriveTokensForUser,
+} from "@/lib/drive-by-user";
 import { cookies } from "next/headers";
 import { google } from "googleapis";
 
@@ -19,7 +23,7 @@ export const dynamic = "force-dynamic";
 /** Google may expose email, numeric id, or OIDC sub; Dropbox store may use any of them as key. */
 function googleIdentityCandidates(
   userId: string | undefined,
-  tokens: { id_token?: string },
+  tokens: { id_token?: string | null },
 ): string[] {
   const out: string[] = [];
   if (userId?.trim()) out.push(userId.trim());
@@ -185,6 +189,16 @@ export async function GET(request: NextRequest) {
       // Prefer durable per-user store; else keep Dropbox from session (e.g. user connected Dropbox before userId existed)
       const dropboxMerged = dropboxFromFile ?? dropboxFromSession;
 
+      const driveFromFile = getDriveTokensForCandidates(
+        googleIdentityCandidates(userId, tokens),
+      );
+      const driveFromSession = existingSession?.driveTokens;
+      const driveMerged =
+        driveFromFile ??
+        (driveFromSession?.access_token || driveFromSession?.refresh_token
+          ? driveFromSession
+          : undefined);
+
       setSession(sessionId, {
         authenticated: true,
         userId: userId,
@@ -197,6 +211,7 @@ export async function GET(request: NextRequest) {
           dropboxToken: dropboxMerged.dropboxToken,
           dropboxRefreshToken: dropboxMerged.dropboxRefreshToken,
         }),
+        ...(driveMerged && { driveTokens: driveMerged }),
       });
 
       if (dropboxFromFile) {
@@ -218,6 +233,9 @@ export async function GET(request: NextRequest) {
             "[AUTH CALLBACK] Persisted session-only Dropbox tokens to dropbox-by-user",
           );
         }
+      }
+      if (userId && driveMerged) {
+        setDriveTokensForUser(userId, driveMerged);
       }
       console.log("[AUTH CALLBACK] Session saved successfully");
     } catch (sessionError: any) {

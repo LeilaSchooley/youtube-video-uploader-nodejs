@@ -8,6 +8,7 @@ export interface UploadFormsProps {
   setSelectedVideoFile: (file: File | null) => void;
   fileInputRef: RefObject<HTMLInputElement | null>;
   uploading: boolean;
+  singleUploadClearKey?: number;
   handleCsvUpload: (e: FormEvent<HTMLFormElement>) => Promise<void>;
   selectedCsvFile: File | null;
   setSelectedCsvFile: (file: File | null) => void;
@@ -60,4 +61,5 @@ export interface UploadFormsProps {
   schedulingEnabled?: boolean;
   globalVideosPerDay?: string;
   openDropboxQueuePickerNonce?: number;
+  openDriveQueuePickerNonce?: number;
 }

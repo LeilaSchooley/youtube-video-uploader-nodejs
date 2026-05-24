@@ -21,7 +21,11 @@ import {
   type ParsedManifestEntry,
   type PythonManifest,
 } from "./python-queue";
-import { getAllDropboxPythonQueueSessions } from "./queue-source";
+import {
+  getAllDropboxPythonQueueSessions,
+  getAllDrivePythonQueueSessions,
+} from "./queue-source";
+import { getDriveOAuthClientForSession } from "./auth-drive";
 import {
   listManifestJsonPathsSortedDropbox,
   downloadAndParseManifest,
@@ -33,8 +37,19 @@ import {
   dropboxVideoExists,
 } from "./python-queue-dropbox";
 import {
+  listManifestJsonFileIdsSortedDrive,
+  downloadAndParseManifestDrive,
+  mergeManifestJsonOnDrive,
+  moveDriveManifestToProcessed,
+  moveDriveManifestToFailed,
+  driveVideoExists,
+  resolveDriveVideoFileId,
+  resolveDriveThumbnailFileId,
+} from "./python-queue-drive";
+import {
   mergeManifestJobPatchOnFs,
   recordManifestUploadFailureOnDropbox,
+  recordManifestUploadFailureOnDrive,
   recordManifestUploadFailureOnFs,
   shouldWorkerProcessManifest,
 } from "./manifest-job-state";
@@ -53,30 +68,36 @@ import {
   postTopLevelComment,
 } from "./youtube-comments";
 
-/** In-process locks for Dropbox manifest paths (single-worker assumption). */
-const dropboxPythonLocks = new Set<string>();
+/** In-process locks for cloud manifest paths (single-worker assumption). */
+const cloudPythonLocks = new Set<string>();
 
-function dropboxPythonLockKey(
+function cloudPythonLockKey(
   queueOwnerSessionId: string,
   manifestPath: string,
 ): string {
   return `${queueOwnerSessionId}::${manifestPath}`;
 }
 
-function tryAcquireDropboxPythonLock(key: string): boolean {
-  if (dropboxPythonLocks.has(key)) return false;
-  dropboxPythonLocks.add(key);
+function tryAcquireCloudPythonLock(key: string): boolean {
+  if (cloudPythonLocks.has(key)) return false;
+  cloudPythonLocks.add(key);
   return true;
 }
 
-function releaseDropboxPythonLock(key: string): void {
-  dropboxPythonLocks.delete(key);
+function releaseCloudPythonLock(key: string): void {
+  cloudPythonLocks.delete(key);
 }
 
 type PythonWorkItem =
   | { kind: "fs"; entry: ParsedManifestEntry }
   | {
-      kind: "db";
+      kind: "dbx";
+      queueOwnerSessionId: string;
+      queueRoot: string;
+      manifestPath: string;
+    }
+  | {
+      kind: "drv";
       queueOwnerSessionId: string;
       queueRoot: string;
       manifestPath: string;
@@ -179,8 +200,10 @@ async function buildManifestCommentPatch(
 
 export async function processPythonManifestJobs(): Promise<string | undefined> {
   loadSessions();
-  const hasDropboxQueues = getAllDropboxPythonQueueSessions().length > 0;
-  if (!isPythonQueueEnabled() && !hasDropboxQueues) {
+  const hasCloudQueues =
+    getAllDropboxPythonQueueSessions().length > 0 ||
+    getAllDrivePythonQueueSessions().length > 0;
+  if (!isPythonQueueEnabled() && !hasCloudQueues) {
     return undefined;
   }
 
@@ -224,7 +247,27 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
     );
     for (const manifestPath of paths) {
       workQueue.push({
-        kind: "db",
+        kind: "dbx",
+        queueOwnerSessionId: qSid,
+        queueRoot: rootPath,
+        manifestPath,
+      });
+    }
+  }
+
+  for (const { sessionId: qSid, rootPath } of getAllDrivePythonQueueSessions()) {
+    if (isWorkerPausedForSession(qSid)) continue;
+    const qSession = getSession(qSid);
+    if (!qSession?.authenticated) continue;
+    const driveClient = await getDriveOAuthClientForSession(qSid);
+    if (!driveClient) continue;
+    const paths = await listManifestJsonFileIdsSortedDrive(
+      rootPath,
+      driveClient,
+    );
+    for (const manifestPath of paths) {
+      workQueue.push({
+        kind: "drv",
         queueOwnerSessionId: qSid,
         queueRoot: rootPath,
         manifestPath,
@@ -237,6 +280,316 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
 
   for (const work of workQueue) {
     if (processedThisTick >= maxPerTick) break;
+
+    if (work.kind === "drv") {
+      const { queueOwnerSessionId, queueRoot, manifestPath } = work;
+      if (isWorkerPausedForSession(queueOwnerSessionId)) continue;
+      const lockKey = cloudPythonLockKey(queueOwnerSessionId, manifestPath);
+      if (!tryAcquireCloudPythonLock(lockKey)) continue;
+
+      const qSession = getSession(queueOwnerSessionId);
+      if (!qSession?.authenticated) {
+        releaseCloudPythonLock(lockKey);
+        continue;
+      }
+
+      const driveClient = await getDriveOAuthClientForSession(queueOwnerSessionId);
+      if (!driveClient) {
+        releaseCloudPythonLock(lockKey);
+        continue;
+      }
+
+      let drvUploadSucceeded = false;
+      const driveAuth = driveClient;
+
+      try {
+        const manifest = await downloadAndParseManifestDrive(
+          manifestPath,
+          driveClient,
+        );
+        if (!manifest) {
+          await moveDriveManifestToFailed(
+            manifestPath,
+            queueRoot,
+            driveClient,
+          );
+          processedThisTick++;
+          continue;
+        }
+
+        if (!shouldWorkerProcessManifest(manifest)) {
+          try {
+            await moveDriveManifestToProcessed(
+              manifestPath,
+              queueRoot,
+              driveClient,
+            );
+          } catch {
+            /* best effort */
+          }
+          releaseCloudPythonLock(lockKey);
+          continue;
+        }
+
+        const mid = manifestId(manifest, manifestPath);
+        const normalizedManifest = normalizeManifest(manifest);
+        lastHeartbeatId = `python:${mid}`;
+        writeHeartbeat(lastHeartbeatId);
+        loadSessions();
+
+        const uploadSessionId =
+          manifest.sessionId?.trim() ||
+          process.env.PYTHON_SESSION_ID?.trim() ||
+          queueOwnerSessionId;
+        if (!uploadSessionId) {
+          await recordManifestUploadFailureOnDrive(
+            manifestPath,
+            manifest,
+            "no_session: set sessionId in manifest, PYTHON_SESSION_ID, or use queue owner session",
+            driveClient,
+          );
+          processedThisTick++;
+          continue;
+        }
+
+        const uploadSession = getSession(uploadSessionId);
+        if (!uploadSession?.authenticated || !uploadSession.tokens) {
+          await recordManifestUploadFailureOnDrive(
+            manifestPath,
+            manifest,
+            "session_not_authenticated",
+            driveClient,
+          );
+          processedThisTick++;
+          continue;
+        }
+
+        if (isWorkerPausedForSession(uploadSessionId)) {
+          processedThisTick++;
+          continue;
+        }
+
+        if (uploadedTitles) {
+          const t = normalizedManifest.title.toLowerCase().trim();
+          if (t && uploadedTitles.has(t)) {
+            await moveDriveManifestToProcessed(
+              manifestPath,
+              queueRoot,
+              driveClient,
+            );
+            processedThisTick++;
+            continue;
+          }
+        }
+
+        const videoOk = await driveVideoExists(
+          queueRoot,
+          manifest.videoPath,
+          driveClient,
+        );
+        if (!videoOk) {
+          await recordManifestUploadFailureOnDrive(
+            manifestPath,
+            manifest,
+            `video_missing: ${manifest.videoPath}`,
+            driveClient,
+          );
+          processedThisTick++;
+          continue;
+        }
+
+        const videoDriveId = await resolveDriveVideoFileId(
+          queueRoot,
+          manifest.videoPath,
+          driveClient,
+        );
+        if (!videoDriveId) {
+          await recordManifestUploadFailureOnDrive(
+            manifestPath,
+            manifest,
+            `video_resolve_failed: ${manifest.videoPath}`,
+            driveClient,
+          );
+          processedThisTick++;
+          continue;
+        }
+
+        let thumbDriveId: string | undefined;
+        if (manifest.thumbnailPath?.trim()) {
+          const tid = await resolveDriveThumbnailFileId(
+            queueRoot,
+            manifest.thumbnailPath,
+            driveClient,
+          );
+          if (tid) thumbDriveId = tid;
+        }
+
+        const item: UploadTask["item"] = {
+          driveFileId: videoDriveId,
+          title: normalizedManifest.title,
+          description: normalizedManifest.description,
+          privacyStatus: manifest.privacyStatus,
+          publishDate: manifest.publishDate,
+          madeForKids: manifest.madeForKids,
+          ...(thumbDriveId ? { driveThumbnailId: thumbDriveId } : {}),
+        };
+
+        const task: UploadTask = { index: 0, item };
+        const oAuthClient = getOAuthClient();
+        oAuthClient.setCredentials(uploadSession.tokens);
+        const youtube = google.youtube({ version: "v3", auth: oAuthClient });
+
+        const sendProgress = (
+          index: number,
+          status: string,
+          vid?: string,
+          err?: string,
+          duration?: number,
+        ) => {
+          workerLog.info(status, {
+            source: "python-manifest-drive",
+            manifestId: mid,
+            index,
+            videoId: vid,
+            error: err,
+            duration,
+          });
+        };
+
+        if (dailyUploadSlotsLeft !== null && dailyUploadSlotsLeft <= 0) {
+          break;
+        }
+
+        const drvJobId = `python-manifest:${mid}`;
+        if (wasManifestJobUploadedTodayUtc(drvJobId)) {
+          const existingVideoId =
+            typeof manifest.youtube_video_id === "string" &&
+            manifest.youtube_video_id.trim()
+              ? manifest.youtube_video_id.trim()
+              : "";
+          const patch: Record<string, unknown> = { upload_status: "done" };
+          if (existingVideoId) {
+            Object.assign(
+              patch,
+              await buildManifestCommentPatch(youtube, manifest, existingVideoId, {
+                source: "python-manifest-dropbox",
+                manifestId: mid,
+              }),
+            );
+          }
+          try {
+            await mergeManifestJsonOnDrive(manifestPath, patch, driveClient);
+          } catch {
+            /* best effort */
+          }
+          try {
+            await moveDriveManifestToProcessed(
+              manifestPath,
+              queueRoot,
+              driveClient,
+            );
+          } catch {
+            /* best effort */
+          }
+          processedThisTick++;
+          continue;
+        }
+
+        const uploadDriveClient =
+          (await getDriveOAuthClientForSession(uploadSessionId)) ?? driveClient;
+
+        const result = await workerUploadVideo(
+          youtube,
+          task,
+          sendProgress,
+          oAuthClient,
+          undefined,
+          uploadSessionId,
+          null,
+          uploadDriveClient,
+        );
+
+        if (result.success && result.videoId) {
+          drvUploadSucceeded = true;
+          if (dailyUploadSlotsLeft !== null) dailyUploadSlotsLeft--;
+          const patch: Record<string, unknown> = {
+            upload_status: "done",
+            youtube_video_id: result.videoId,
+          };
+          Object.assign(
+            patch,
+            await buildManifestCommentPatch(youtube, manifest, result.videoId, {
+              source: "python-manifest-dropbox",
+              manifestId: mid,
+            }),
+          );
+          const commentMeta = pickCommentMetaFromPatch(patch);
+          appendUploadedVideo({
+            videoId: result.videoId,
+            title: normalizedManifest.title,
+            jobId: drvJobId,
+            uploadedAt: new Date().toISOString(),
+            channelId: result.channelId,
+            videoType: normalizedManifest.videoType,
+            isShort: normalizedManifest.isShort,
+            commentStatus: commentMeta.commentStatus,
+            commentPosted: commentMeta.commentPosted,
+            commentError: commentMeta.commentError,
+          });
+          try {
+            await mergeManifestJsonOnDrive(manifestPath, patch, driveClient);
+          } catch {
+            /* best effort */
+          }
+          try {
+            await moveDriveManifestToProcessed(
+              manifestPath,
+              queueRoot,
+              driveClient,
+            );
+          } catch {
+            /* best effort */
+          }
+        } else {
+          await recordManifestUploadFailureOnDrive(
+            manifestPath,
+            manifest,
+            result.error || "upload_failed",
+            driveClient,
+          );
+        }
+
+        processedThisTick++;
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        workerLog.error("Python manifest queue (Drive): unexpected error", {
+          manifestPath,
+          error: msg,
+        });
+        if (!drvUploadSucceeded) {
+          try {
+            const m = await downloadAndParseManifestDrive(
+              manifestPath,
+              driveAuth,
+            );
+            if (m) {
+              await recordManifestUploadFailureOnDrive(
+                manifestPath,
+                m,
+                msg,
+                driveAuth,
+              );
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+        processedThisTick++;
+      } finally {
+        releaseCloudPythonLock(lockKey);
+      }
+      continue;
+    }
 
     if (work.kind === "fs") {
       const { manifestPath, manifest } = work.entry;
@@ -527,16 +880,18 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
       continue;
     }
 
+    if (work.kind !== "dbx") continue;
+
     const { queueOwnerSessionId, queueRoot, manifestPath } = work;
     if (isWorkerPausedForSession(queueOwnerSessionId)) {
       continue;
     }
-    const lockKey = dropboxPythonLockKey(queueOwnerSessionId, manifestPath);
-    if (!tryAcquireDropboxPythonLock(lockKey)) continue;
+    const lockKey = cloudPythonLockKey(queueOwnerSessionId, manifestPath);
+    if (!tryAcquireCloudPythonLock(lockKey)) continue;
 
     const qSession = getSession(queueOwnerSessionId);
     if (!qSession?.authenticated || !qSession.tokens) {
-      releaseDropboxPythonLock(lockKey);
+      releaseCloudPythonLock(lockKey);
       continue;
     }
 
@@ -546,7 +901,7 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
       queueOwnerSessionId,
     );
     if (!qToken) {
-      releaseDropboxPythonLock(lockKey);
+      releaseCloudPythonLock(lockKey);
       continue;
     }
 
@@ -590,7 +945,7 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
         } catch {
           // best effort — will retry next tick
         }
-        releaseDropboxPythonLock(lockKey);
+        releaseCloudPythonLock(lockKey);
         continue;
       }
 
@@ -600,7 +955,7 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
       writeHeartbeat(lastHeartbeatId);
       loadSessions();
 
-      /** Same session that registered this Dropbox queue almost always owns YouTube too. */
+      /** Same session that registered this cloud queue almost always owns YouTube too. */
       const uploadSessionId =
         manifest.sessionId?.trim() ||
         process.env.PYTHON_SESSION_ID?.trim() ||
@@ -930,7 +1285,7 @@ export async function processPythonManifestJobs(): Promise<string | undefined> {
       }
       processedThisTick++;
     } finally {
-      releaseDropboxPythonLock(lockKey);
+      releaseCloudPythonLock(lockKey);
     }
   }
 

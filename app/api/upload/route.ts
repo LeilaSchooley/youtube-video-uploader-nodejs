@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getOAuthClient } from "@/lib/auth";
+import { getOAuthClient, getDropboxToken } from "@/lib/auth";
+import { getDriveOAuthClientForSession } from "@/lib/auth-drive";
 import { getSession } from "@/lib/session";
 import { google } from "googleapis";
 import { cookies } from "next/headers";
 import { Readable } from "stream";
+import { downloadDriveFile, isDriveFileId } from "@/lib/drive";
+import { downloadDropboxFile } from "@/lib/dropbox";
+import { isDropboxPath } from "@/lib/dropbox";
 import {
   sanitizeYoutubeTitle,
   sanitizeYoutubeDescription,
@@ -39,11 +43,45 @@ export async function POST(request: NextRequest) {
     const privacyStatus = (formData.get("privacyStatus") as string) || "public";
     const publishDate = formData.get("publishDate") as string | null;
     const videoFile = formData.get("video") as File | null;
+    const driveFileId = (formData.get("driveFileId") as string | null)?.trim() || "";
+    const dropboxFilePath =
+      (formData.get("dropboxFilePath") as string | null)?.trim() || "";
 
-    if (!videoFile) {
+    let videoStream: Readable;
+    if (driveFileId && isDriveFileId(driveFileId)) {
+      const driveClient = await getDriveOAuthClientForSession(sessionId);
+      if (!driveClient) {
+        return NextResponse.json(
+          { error: "Google Drive not connected" },
+          { status: 401 },
+        );
+      }
+      videoStream = await downloadDriveFile(driveFileId, driveClient);
+    } else if (dropboxFilePath && isDropboxPath(dropboxFilePath)) {
+      const dropboxToken = await getDropboxToken(
+        session.dropboxToken,
+        session.dropboxRefreshToken,
+        sessionId,
+      );
+      if (!dropboxToken) {
+        return NextResponse.json(
+          { error: "Dropbox not connected" },
+          { status: 401 },
+        );
+      }
+      videoStream = await downloadDropboxFile(
+        dropboxFilePath,
+        dropboxToken,
+        sessionId,
+        session.dropboxRefreshToken ?? null,
+      );
+    } else if (videoFile && videoFile.size > 0) {
+      const bytes = await videoFile.arrayBuffer();
+      videoStream = Readable.from(Buffer.from(bytes));
+    } else {
       return NextResponse.json(
-        { error: "No video uploaded" },
-        { status: 400 }
+        { error: "Choose a video from this device, Dropbox, or Google Drive" },
+        { status: 400 },
       );
     }
 
@@ -90,11 +128,6 @@ export async function POST(request: NextRequest) {
     if (privacyStatus === "private" && publishDate) {
       requestBody.status.publishAt = new Date(publishDate).toISOString();
     }
-
-    // Convert File to stream
-    const bytes = await videoFile.arrayBuffer();
-    const buffer = Buffer.from(bytes);
-    const videoStream = Readable.from(buffer);
 
     const youtube = google.youtube({
       version: "v3",

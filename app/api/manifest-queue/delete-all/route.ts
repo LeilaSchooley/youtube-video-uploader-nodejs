@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
-import { deleteDropboxManifest } from "@/lib/python-queue-dropbox";
-import { requireManifestQueueDropboxAuth } from "@/lib/manifest-queue-api-auth";
-import { listManifestJsonPathsSortedDropbox } from "@/lib/python-queue-dropbox";
-import { downloadAndParseManifest } from "@/lib/python-queue-dropbox";
+import { requireManifestQueueAuth } from "@/lib/manifest-queue-api-auth";
+import {
+  deleteManifestForAuth,
+  downloadManifestForAuth,
+  listManifestPathsSorted,
+} from "@/lib/manifest-queue-helpers";
 import { isTerminalManifestJob } from "@/lib/manifest-job-state";
 import { jsonApiError } from "@/lib/api-response";
 
@@ -11,39 +13,21 @@ export const runtime = "nodejs";
 
 export async function POST() {
   try {
-    const auth = await requireManifestQueueDropboxAuth();
+    const auth = await requireManifestQueueAuth();
     if (!auth.ok) return auth.response;
 
-    // List all manifest paths
-    const paths = await listManifestJsonPathsSortedDropbox(
-      auth.queueRoot,
-      auth.accessToken,
-      auth.sessionId,
-      auth.refresh,
-    );
+    const paths = await listManifestPathsSorted(auth);
 
     let deleted = 0;
     const errors: string[] = [];
 
-    // Check each manifest and delete if terminal
     for (const manifestPath of paths) {
       try {
-        const manifest = await downloadAndParseManifest(
-          manifestPath,
-          auth.accessToken,
-          auth.sessionId,
-          auth.refresh,
-        );
-
+        const manifest = await downloadManifestForAuth(auth, manifestPath);
         if (!manifest) continue;
 
         if (isTerminalManifestJob(manifest)) {
-          await deleteDropboxManifest(
-            manifestPath,
-            auth.accessToken,
-            auth.sessionId,
-            auth.refresh,
-          );
+          await deleteManifestForAuth(auth, manifestPath);
           deleted++;
         }
       } catch (error: unknown) {

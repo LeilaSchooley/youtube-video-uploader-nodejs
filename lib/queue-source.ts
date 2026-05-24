@@ -6,11 +6,14 @@
 import fs from "fs";
 import path from "path";
 
-export type QueueSourceType = "none" | "dropbox_python_queue";
+export type QueueSourceType =
+  | "none"
+  | "dropbox_python_queue"
+  | "drive_python_queue";
 
 export interface QueueSourceRecord {
   sourceType: QueueSourceType;
-  /** Normalized Dropbox path (e.g. /Videos/bot-queue) */
+  /** Dropbox path (e.g. /Videos/bot-queue) or Drive folder ID */
   rootPath: string;
   updatedAt: string;
 }
@@ -56,6 +59,20 @@ export function normalizeDropboxPath(p: string): string {
   return s;
 }
 
+export function normalizeDriveFolderId(p: string): string {
+  return (p || "").trim();
+}
+
+function normalizeRootForSource(
+  sourceType: QueueSourceType,
+  rootPath: string,
+): string {
+  if (sourceType === "dropbox_python_queue") {
+    return normalizeDropboxPath(rootPath);
+  }
+  return normalizeDriveFolderId(rootPath);
+}
+
 export function getQueueSourceForSession(
   sessionId: string,
 ): QueueSourceRecord | null {
@@ -65,7 +82,7 @@ export function getQueueSourceForSession(
   if (!rec.rootPath?.trim()) return null;
   return {
     ...rec,
-    rootPath: normalizeDropboxPath(rec.rootPath),
+    rootPath: normalizeRootForSource(rec.sourceType, rec.rootPath),
   };
 }
 
@@ -77,13 +94,19 @@ export function setQueueSourceForSession(
   if (record.sourceType === "none") {
     delete shape.bySessionId[sessionId];
   } else {
-    const normalizedRoot = normalizeDropboxPath(record.rootPath);
+    const normalizedRoot = normalizeRootForSource(
+      record.sourceType,
+      record.rootPath,
+    );
     for (const [otherSessionId, other] of Object.entries(shape.bySessionId)) {
       if (otherSessionId === sessionId) continue;
-      if (other.sourceType !== "dropbox_python_queue") continue;
-      if (normalizeDropboxPath(other.rootPath).toLowerCase() !== normalizedRoot.toLowerCase()) {
-        continue;
-      }
+      if (other.sourceType !== record.sourceType) continue;
+      const otherRoot = normalizeRootForSource(other.sourceType, other.rootPath);
+      const sameRoot =
+        record.sourceType === "dropbox_python_queue"
+          ? otherRoot.toLowerCase() === normalizedRoot.toLowerCase()
+          : otherRoot === normalizedRoot;
+      if (!sameRoot) continue;
       delete shape.bySessionId[otherSessionId];
     }
     shape.bySessionId[sessionId] = {
@@ -136,4 +159,60 @@ export function getAllDropboxPythonQueueSessions(): Array<{
     sessionId,
     rootPath,
   }));
+}
+
+export function getAllDrivePythonQueueSessions(): Array<{
+  sessionId: string;
+  rootPath: string;
+}> {
+  const { bySessionId } = readFile();
+  const out: Array<{ sessionId: string; rootPath: string; updatedAt: string }> =
+    [];
+  for (const [sessionId, rec] of Object.entries(bySessionId)) {
+    if (rec.sourceType === "drive_python_queue" && rec.rootPath?.trim()) {
+      out.push({
+        sessionId,
+        rootPath: normalizeDriveFolderId(rec.rootPath),
+        updatedAt:
+          typeof rec.updatedAt === "string" && rec.updatedAt.trim()
+            ? rec.updatedAt
+            : "1970-01-01T00:00:00.000Z",
+      });
+    }
+  }
+  const byRoot = new Map<string, (typeof out)[number]>();
+  for (const row of out) {
+    const key = row.rootPath;
+    const prev = byRoot.get(key);
+    if (!prev) {
+      byRoot.set(key, row);
+      continue;
+    }
+    const rowTime = Date.parse(row.updatedAt);
+    const prevTime = Date.parse(prev.updatedAt);
+    if (!Number.isNaN(rowTime) && Number.isNaN(prevTime)) {
+      byRoot.set(key, row);
+      continue;
+    }
+    if (
+      !Number.isNaN(rowTime) &&
+      !Number.isNaN(prevTime) &&
+      rowTime >= prevTime
+    ) {
+      byRoot.set(key, row);
+    }
+  }
+  return Array.from(byRoot.values()).map(({ sessionId, rootPath }) => ({
+    sessionId,
+    rootPath,
+  }));
+}
+
+export function isPythonManifestQueueSource(
+  sourceType: QueueSourceType | undefined,
+): boolean {
+  return (
+    sourceType === "dropbox_python_queue" ||
+    sourceType === "drive_python_queue"
+  );
 }

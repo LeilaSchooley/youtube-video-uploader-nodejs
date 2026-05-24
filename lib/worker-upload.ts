@@ -2,6 +2,7 @@ import { Readable } from "stream";
 import fs from "fs";
 import { google } from "googleapis";
 import { getOAuthClient } from "./auth";
+import type { OAuth2Client } from "google-auth-library";
 import {
   downloadDriveFile,
   isDriveFileId,
@@ -59,7 +60,7 @@ export interface UploadTask {
  */
 async function getVideoStream(
   task: UploadTask,
-  oAuthClient: ReturnType<typeof getOAuthClient>,
+  driveOAuthClient: OAuth2Client | null | undefined,
   dropboxToken?: string,
   sessionId?: string,
   sessionRefreshToken?: string | null,
@@ -68,7 +69,12 @@ async function getVideoStream(
 
   // Priority: Drive > Dropbox > URL > File
   if (item.driveFileId && isDriveFileId(item.driveFileId)) {
-    return await downloadDriveFile(item.driveFileId, oAuthClient);
+    if (!driveOAuthClient) {
+      throw new Error(
+        "Google Drive not connected. Connect Google Drive in the dashboard.",
+      );
+    }
+    return await downloadDriveFile(item.driveFileId, driveOAuthClient);
   }
 
   // Handle Dropbox files
@@ -110,7 +116,7 @@ async function getVideoStream(
  */
 async function getThumbnailStream(
   task: UploadTask,
-  oAuthClient: ReturnType<typeof getOAuthClient>,
+  driveOAuthClient: OAuth2Client | null | undefined,
   dropboxToken?: string,
   sessionId?: string,
   sessionRefreshToken?: string | null,
@@ -119,7 +125,13 @@ async function getThumbnailStream(
 
   // Priority: Drive > Dropbox > URL > File
   if (item.driveThumbnailId && isDriveFileId(item.driveThumbnailId)) {
-    return await downloadDriveFile(item.driveThumbnailId, oAuthClient);
+    if (!driveOAuthClient) {
+      console.warn(
+        "[WORKER] Drive thumbnail requested but Google Drive not connected",
+      );
+      return null;
+    }
+    return await downloadDriveFile(item.driveThumbnailId, driveOAuthClient);
   }
 
   // Handle Dropbox thumbnails
@@ -177,6 +189,7 @@ export async function workerUploadVideo(
   dropboxToken?: string,
   sessionId?: string,
   sessionRefreshToken?: string | null,
+  driveOAuthClient?: OAuth2Client | null,
 ): Promise<{
   success: boolean;
   videoId?: string;
@@ -280,7 +293,7 @@ export async function workerUploadVideo(
       async () => {
         const videoStream = await getVideoStream(
           task,
-          oAuthClient,
+          driveOAuthClient,
           dropboxToken,
           sessionId,
           sessionRefreshToken,
@@ -323,7 +336,7 @@ export async function workerUploadVideo(
     // Upload thumbnail if available
     const thumbnailStream = await getThumbnailStream(
       task,
-      oAuthClient,
+      driveOAuthClient,
       dropboxToken,
       sessionId,
       sessionRefreshToken,
@@ -350,23 +363,24 @@ export async function workerUploadVideo(
       item.driveFileId &&
       videoId &&
       item.postUploadAction &&
-      item.postUploadAction !== "none"
+      item.postUploadAction !== "none" &&
+      driveOAuthClient
     ) {
       try {
         switch (item.postUploadAction.toLowerCase()) {
           case "rename":
             const fileMetadata = await getDriveFileMetadata(
               item.driveFileId,
-              oAuthClient,
+              driveOAuthClient,
             );
             const extension = fileMetadata.name.split(".").pop() || "mp4";
             const newName = `${videoId}.${extension}`;
-            await renameDriveFile(item.driveFileId, newName, oAuthClient);
+            await renameDriveFile(item.driveFileId, newName, driveOAuthClient);
             sendProgress(index, `Renamed to ${newName}`, videoId);
             break;
 
           case "delete":
-            await deleteDriveFile(item.driveFileId, oAuthClient);
+            await deleteDriveFile(item.driveFileId, driveOAuthClient);
             sendProgress(index, "Deleted from Drive", videoId);
             break;
 
@@ -375,7 +389,7 @@ export async function workerUploadVideo(
               await moveDriveFile(
                 item.driveFileId,
                 item.completedFolderId,
-                oAuthClient,
+                driveOAuthClient,
               );
               sendProgress(index, `Moved to folder`, videoId);
             } else {
@@ -519,6 +533,7 @@ export async function workerProcessBatch(
   sessionId: string | undefined,
   sessionRefreshToken: string | null | undefined,
   jobId: string,
+  driveOAuthClient?: OAuth2Client | null,
 ): Promise<void> {
   const usesDropbox = batch.some(
     (t) => t.item.dropboxFileId || t.item.dropboxThumbnailId,
@@ -548,6 +563,7 @@ export async function workerProcessBatch(
           dropboxToken,
           sessionId,
           sessionRefreshToken,
+          driveOAuthClient,
         );
         results.push({ status: "fulfilled", value });
       } catch (reason) {
@@ -565,6 +581,7 @@ export async function workerProcessBatch(
           dropboxToken,
           sessionId,
           sessionRefreshToken,
+          driveOAuthClient,
         ),
       ),
     );

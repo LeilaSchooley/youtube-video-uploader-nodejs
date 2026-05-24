@@ -1,24 +1,31 @@
 import { NextResponse } from "next/server";
-import { listManifestQueueRows } from "@/lib/manifest-queue-list";
-import { requireManifestQueueDropboxAuth } from "@/lib/manifest-queue-api-auth";
+import {
+  listManifestQueueRows,
+  listManifestQueueRowsDrive,
+} from "@/lib/manifest-queue-list";
+import { requireManifestQueueAuth } from "@/lib/manifest-queue-api-auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function GET() {
   try {
-    const auth = await requireManifestQueueDropboxAuth();
+    const auth = await requireManifestQueueAuth();
     if (!auth.ok) return auth.response;
 
-    const rows = await listManifestQueueRows(
-      auth.queueRoot,
-      auth.accessToken,
-      auth.sessionId,
-      auth.refresh,
-    );
+    const rows =
+      auth.sourceType === "drive_python_queue"
+        ? await listManifestQueueRowsDrive(auth.queueRoot, auth.driveClient)
+        : await listManifestQueueRows(
+            auth.queueRoot,
+            auth.accessToken,
+            auth.sessionId,
+            auth.refresh,
+          );
 
     return NextResponse.json({
       success: true,
+      sourceType: auth.sourceType,
       queueRoot: auth.queueRoot,
       rows,
     });

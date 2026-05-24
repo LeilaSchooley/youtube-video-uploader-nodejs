@@ -8,6 +8,8 @@ import {
 } from "./bulk-queue";
 import { loadSessions, getSession } from "./session";
 import { getOAuthClient, getDropboxToken } from "./auth";
+import { getDriveOAuthClientForSession } from "./auth-drive";
+import type { OAuth2Client } from "google-auth-library";
 import type { UploadTask } from "./worker-upload";
 import { workerProcessBatch } from "./worker-upload";
 
@@ -58,6 +60,22 @@ export async function runWorkerBulkJob(jobId: string, batchSize: number): Promis
     session.dropboxRefreshToken,
     job.sessionId,
   );
+
+  const jobNeedsDrive = job.items.some(
+    (it) => it.driveFileId?.trim() || it.driveThumbnailId?.trim(),
+  );
+  let driveOAuthClient: OAuth2Client | null = null;
+  if (jobNeedsDrive) {
+    driveOAuthClient = await getDriveOAuthClientForSession(job.sessionId);
+    if (!driveOAuthClient) {
+      markBulkAsFailed(
+        jobId,
+        "Google Drive not connected. Connect Google Drive in the dashboard.",
+      );
+      console.error(`[WORKER] Job ${jobId}: Google Drive not connected`);
+      return;
+    }
+  }
 
   // Determine which videos to upload TODAY (using UTC for consistency)
   const now = new Date();
@@ -358,6 +376,7 @@ export async function runWorkerBulkJob(jobId: string, batchSize: number): Promis
         job.sessionId,
         session.dropboxRefreshToken,
         jobId,
+        driveOAuthClient,
       );
     }
 

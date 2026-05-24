@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
-import { getOAuthClient } from "@/lib/auth";
+import { requireDriveOAuthClient } from "@/lib/drive-api-auth";
 import { cookies } from "next/headers";
 import { listDriveSheets } from "@/lib/drive";
 
@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
     }
 
     const session = getSession(sessionId);
-    if (!session || !session.authenticated || !session.tokens) {
+    if (!session?.authenticated) {
       return NextResponse.json(
         { error: "Not authenticated" },
         { status: 401 }
@@ -30,10 +30,12 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const folderId = searchParams.get("folderId") || null;
 
-    const oAuthClient = getOAuthClient();
-    oAuthClient.setCredentials(session.tokens);
+    const driveAuth = await requireDriveOAuthClient(sessionId);
+    if ("response" in driveAuth) {
+      return driveAuth.response;
+    }
 
-    const sheets = await listDriveSheets(folderId, oAuthClient);
+    const sheets = await listDriveSheets(folderId, driveAuth.client);
 
     return NextResponse.json({ sheets });
   } catch (error: any) {

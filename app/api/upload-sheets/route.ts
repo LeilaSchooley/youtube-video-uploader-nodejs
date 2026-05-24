@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession, setSession } from "@/lib/session";
 import { getOAuthClient, getDropboxToken } from "@/lib/auth";
+import { requireDriveOAuthClient } from "@/lib/drive-api-auth";
 import { google } from "googleapis";
 import { cookies } from "next/headers";
 import {
@@ -65,9 +66,15 @@ export async function POST(request: NextRequest) {
     }
 
     const session = getSession(sessionId);
-    if (!session || !session.authenticated || !session.tokens) {
+    if (!session?.authenticated || !session.tokens) {
       return jsonApiError("Not authenticated", 401, "UNAUTHORIZED");
     }
+
+    const driveAuth = await requireDriveOAuthClient(sessionId);
+    if ("response" in driveAuth) {
+      return driveAuth.response;
+    }
+    const driveOAuthClient = driveAuth.client;
 
     const body = await request.json();
     const {
@@ -96,13 +103,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const oAuthClient = getOAuthClient();
-    oAuthClient.setCredentials(session.tokens);
-
-    // Get spreadsheet metadata
     let metadata;
     try {
-      metadata = await getSpreadsheetMetadata(spreadsheetId, oAuthClient);
+      metadata = await getSpreadsheetMetadata(spreadsheetId, driveOAuthClient);
     } catch (error: any) {
       return NextResponse.json(
         {
@@ -127,7 +130,11 @@ export async function POST(request: NextRequest) {
     // Read sheet data
     let sheetData: SheetRow[];
     try {
-      sheetData = await readSheetData(spreadsheetId, sheetRange, oAuthClient);
+      sheetData = await readSheetData(
+        spreadsheetId,
+        sheetRange,
+        driveOAuthClient,
+      );
     } catch (error: any) {
       return NextResponse.json(
         {
@@ -205,9 +212,11 @@ export async function POST(request: NextRequest) {
     // Ensure userId is set on session
     let userId = session.userId;
     if (!userId) {
+      const youtubeOAuth = getOAuthClient();
+      youtubeOAuth.setCredentials(session.tokens!);
       const oauth2 = google.oauth2({
         version: "v2",
-        auth: oAuthClient,
+        auth: youtubeOAuth,
       });
       const userInfo = await oauth2.userinfo.get();
       userId = (userInfo.data.email || userInfo.data.id || undefined) as
@@ -229,7 +238,14 @@ export async function POST(request: NextRequest) {
     const driveFilesMap: Map<string, string> = new Map();
     if (driveFolderId) {
       try {
-        const driveVideos = await listDriveVideos(driveFolderId, oAuthClient);
+        const driveAuth = await requireDriveOAuthClient(sessionId);
+        if ("response" in driveAuth) {
+          return driveAuth.response;
+        }
+        const driveVideos = await listDriveVideos(
+          driveFolderId,
+          driveAuth.client,
+        );
 
         // Create a map of filename (without extension) -> file ID
         // Also create a map with full filename -> file ID for exact matches

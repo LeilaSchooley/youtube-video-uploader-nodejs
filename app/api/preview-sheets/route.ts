@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
-import { getOAuthClient } from "@/lib/auth";
+import { requireDriveOAuthClient } from "@/lib/drive-api-auth";
 import { cookies } from "next/headers";
 import { readSheetData, extractSpreadsheetId, getSpreadsheetMetadata } from "@/lib/sheets";
 
@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
     }
 
     const session = getSession(sessionId);
-    if (!session || !session.authenticated || !session.tokens) {
+    if (!session?.authenticated) {
       return NextResponse.json(
         { error: "Not authenticated" },
         { status: 401 }
@@ -77,13 +77,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const oAuthClient = getOAuthClient();
-    oAuthClient.setCredentials(session.tokens);
+    const driveAuth = await requireDriveOAuthClient(sessionId);
+    if ("response" in driveAuth) {
+      return driveAuth.response;
+    }
 
     // Get spreadsheet metadata
     let metadata;
     try {
-      metadata = await getSpreadsheetMetadata(spreadsheetId, oAuthClient);
+      metadata = await getSpreadsheetMetadata(
+        spreadsheetId,
+        driveAuth.client,
+      );
     } catch (error: any) {
       return NextResponse.json(
         { error: `Failed to access Google Sheet: ${error?.message || "Unknown error"}` },
@@ -106,7 +111,11 @@ export async function POST(request: NextRequest) {
     // Read sheet data
     let sheetData: SheetRow[];
     try {
-      sheetData = await readSheetData(spreadsheetId, sheetRange, oAuthClient);
+      sheetData = await readSheetData(
+        spreadsheetId,
+        sheetRange,
+        driveAuth.client,
+      );
     } catch (error: any) {
       return NextResponse.json(
         { error: `Failed to read sheet data: ${error?.message || "Unknown error"}` },

@@ -60,7 +60,11 @@ export function useQueueModeStripState(params: Params) {
       if (stRes.ok && !data.error) setStatus(data as StatusPayload);
       if (srcRes.ok) {
         const src = await srcRes.json();
-        const configured = src?.success === true && src?.sourceType === "dropbox_python_queue" && !!src?.rootPath;
+        const configured =
+          src?.success === true &&
+          (src?.sourceType === "dropbox_python_queue" ||
+            src?.sourceType === "drive_python_queue") &&
+          !!src?.rootPath;
         setDropboxPythonQueue(configured);
         setQueueRootPath(configured ? (src.rootPath as string) : null);
         if (configured) {
@@ -138,7 +142,12 @@ export function useQueueModeStripState(params: Params) {
         const srcRes = await fetch(`/api/queue-source?t=${Date.now()}`, { credentials: "include" });
         const src = await srcRes.json();
         if (cancelled) return;
-        if (src?.success && src?.sourceType === "dropbox_python_queue" && src?.rootPath) {
+        if (
+          src?.success &&
+          (src?.sourceType === "dropbox_python_queue" ||
+            src?.sourceType === "drive_python_queue") &&
+          src?.rootPath
+        ) {
           setDropboxPythonQueue(true);
           setQueueRootPath(src.rootPath as string);
           setNotFoundReason(null);

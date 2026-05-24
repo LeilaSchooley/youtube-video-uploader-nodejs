@@ -41,7 +41,7 @@ export default function UploadFormsBulkDropboxFolderSection(props: Props) {
                 <p className="text-gray-700 dark:text-gray-300 animate-pulse">Checking Dropbox connection…</p>
               ) : (
                 <p>
-                  Connect Dropbox from the <strong className="whitespace-nowrap">page header</strong> to use folders and Browse, or{" "}
+                  Connect <strong className="whitespace-nowrap">Dropbox</strong> in the header Cloud storage box (Google Drive is the other column), or{" "}
                   <button type="button" onClick={() => void props.connectDropbox()} className="font-semibold underline underline-offset-2 hover:opacity-90">connect here</button>.
                 </p>
               )}

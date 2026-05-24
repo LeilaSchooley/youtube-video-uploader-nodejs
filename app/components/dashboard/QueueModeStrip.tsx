@@ -4,6 +4,7 @@ import { useAppToast } from "@/app/app-toast-context";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
 import { useDropboxAuth } from "./DropboxAuthContext";
+import { useGoogleDriveAuth } from "./GoogleDriveAuthContext";
 import QueueModeStripQueueContent from "./QueueModeStripQueueContent";
 import { useQueueModeStripState } from "./useQueueModeStripState";
 
@@ -12,16 +13,24 @@ interface QueueModeStripProps {
   onOpenQueueTab?: () => void;
   /** Opens the Upload tab Dropbox folder picker for manual queue root selection. */
   onRequestManualDropboxQueue?: () => void;
+  /** Opens the Upload tab Google Drive folder picker for manual queue root selection. */
+  onRequestManualDriveQueue?: () => void;
 }
 
 export default function QueueModeStrip({
   fetchQueue,
   onOpenQueueTab,
   onRequestManualDropboxQueue,
+  onRequestManualDriveQueue,
 }: QueueModeStripProps) {
   const showAppToast = useAppToast();
   const { hasDropboxAuth, dropboxAuthLoading, connectDropbox } =
     useDropboxAuth();
+  const {
+    hasGoogleDriveAuth,
+    driveAuthLoading,
+    connectGoogleDrive,
+  } = useGoogleDriveAuth();
   const {
     mode,
     hydrated,
@@ -94,15 +103,16 @@ export default function QueueModeStrip({
         </div>
         {mode === "queue" && (
           <p className="text-xs text-gray-500 dark:text-gray-400 max-w-xl">
-            Dropbox manifest queue: auto-detect{" "}
+            Python bot queue on Dropbox or Google Drive (
             <code className="text-[11px]">manifests/</code>,{" "}
             <code className="text-[11px]">videos/</code>,{" "}
-            <code className="text-[11px]">thumbnails/</code>. Start/Stop only
-            pauses the worker; keep{" "}
+            <code className="text-[11px]">thumbnails/</code>). Auto-scan works
+            for Dropbox; pick a Drive folder under Upload Videos for Drive
+            queues. Start/Stop pauses the worker — keep{" "}
             <code className="text-[11px] bg-gray-100 dark:bg-gray-800 px-1 rounded">
               npm run worker
             </code>{" "}
-            running for uploads.
+            running.
           </p>
         )}
       </CardHeader>
@@ -112,6 +122,9 @@ export default function QueueModeStrip({
           dropboxAuthLoading={dropboxAuthLoading}
           hasDropboxAuth={hasDropboxAuth}
           connectDropbox={connectDropbox}
+          driveAuthLoading={driveAuthLoading}
+          hasGoogleDriveAuth={hasGoogleDriveAuth}
+          connectGoogleDrive={connectGoogleDrive}
           scanningDropbox={scanningDropbox}
           dropboxPythonQueue={dropboxPythonQueue}
           queueRootPath={queueRootPath}
@@ -131,6 +144,7 @@ export default function QueueModeStrip({
           onUseDetectedQueue={useDetectedQueue}
           onChangeFolder={handleChangeFolder}
           onManualFolderSelect={onRequestManualDropboxQueue}
+          onManualDriveFolderSelect={onRequestManualDriveQueue}
           onPostAction={postAction}
           onOpenQueueTab={onOpenQueueTab}
         />

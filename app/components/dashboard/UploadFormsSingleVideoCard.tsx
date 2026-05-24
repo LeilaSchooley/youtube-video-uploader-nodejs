@@ -1,12 +1,15 @@
 "use client";
 
 import type { FormEvent, RefObject } from "react";
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import AiAssistSnippetPanel from "@/app/components/dashboard/AiAssistSnippetPanel";
+import UploadFormsSingleVideoSourceSection, {
+  type SingleVideoSource,
+} from "@/app/components/dashboard/UploadFormsSingleVideoSourceSection";
+import { useDropboxAuth } from "./DropboxAuthContext";
+import { useGoogleDriveAuth } from "./GoogleDriveAuthContext";
 
 const ICON_CLAPPER = "\u{1F3AC}";
-const ICON_CHECK = "\u{2705}";
-const ICON_VIDEO = "\u{1F4F9}";
 
 export interface UploadFormsSingleVideoCardProps {
   showSingleUpload: boolean;
@@ -16,6 +19,17 @@ export interface UploadFormsSingleVideoCardProps {
   setSelectedVideoFile: (file: File | null) => void;
   fileInputRef: RefObject<HTMLInputElement | null>;
   uploading: boolean;
+  singleUploadClearKey?: number;
+  onBrowseDropboxVideo: () => void;
+  onBrowseDriveVideo: () => void;
+  dropboxVideoPath: string;
+  dropboxVideoName: string;
+  setDropboxVideoPath: (path: string) => void;
+  setDropboxVideoName: (name: string) => void;
+  driveVideoId: string;
+  driveVideoName: string;
+  setDriveVideoId: (id: string) => void;
+  setDriveVideoName: (name: string) => void;
 }
 
 export default function UploadFormsSingleVideoCard({
@@ -26,9 +40,55 @@ export default function UploadFormsSingleVideoCard({
   setSelectedVideoFile,
   fileInputRef,
   uploading,
+  singleUploadClearKey = 0,
+  onBrowseDropboxVideo,
+  onBrowseDriveVideo,
+  dropboxVideoPath,
+  dropboxVideoName,
+  setDropboxVideoPath,
+  setDropboxVideoName,
+  driveVideoId,
+  driveVideoName,
+  setDriveVideoId,
+  setDriveVideoName,
 }: UploadFormsSingleVideoCardProps) {
   const titleRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
+  const [videoSource, setVideoSource] = useState<SingleVideoSource>("local");
+  const { hasDropboxAuth, connectDropbox } = useDropboxAuth();
+  const { hasGoogleDriveAuth, connectGoogleDrive } = useGoogleDriveAuth();
+
+  useEffect(() => {
+    if (!singleUploadClearKey) return;
+    setVideoSource("local");
+    setDropboxVideoPath("");
+    setDropboxVideoName("");
+    setDriveVideoId("");
+    setDriveVideoName("");
+    setSelectedVideoFile(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }, [
+    singleUploadClearKey,
+    setDropboxVideoPath,
+    setDropboxVideoName,
+    setDriveVideoId,
+    setDriveVideoName,
+    setSelectedVideoFile,
+    fileInputRef,
+  ]);
+
+  const canSubmit =
+    videoSource === "local"
+      ? !!selectedVideoFile
+      : videoSource === "dropbox"
+        ? !!dropboxVideoPath
+        : !!driveVideoId;
+
+  const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!canSubmit) return;
+    await handleSingleUpload(e);
+  };
 
   return (
     <div className="card animate-fade-in">
@@ -46,39 +106,43 @@ export default function UploadFormsSingleVideoCard({
         </button>
       </div>
       {showSingleUpload && (
-        <form onSubmit={handleSingleUpload} className="flex flex-col gap-5">
-          <label htmlFor="title" className="label">
-            Title
-          </label>
-          <input
-            ref={titleRef}
-            type="text"
-            id="title"
-            name="title"
-            placeholder="Enter video title"
-            required
-            maxLength={100}
-            className="input-field"
-          />
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            Max 100 characters (YouTube limit)
-          </p>
+        <form onSubmit={onSubmit} className="flex flex-col gap-5">
+          <div>
+            <label htmlFor="title" className="label">
+              Title
+            </label>
+            <input
+              ref={titleRef}
+              type="text"
+              id="title"
+              name="title"
+              placeholder="Enter video title"
+              required
+              maxLength={100}
+              className="input-field"
+            />
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Max 100 characters (YouTube limit)
+            </p>
+          </div>
 
-          <label htmlFor="description" className="label">
-            Description
-          </label>
-          <textarea
-            ref={descriptionRef}
-            id="description"
-            name="description"
-            placeholder="Enter video description"
-            required
-            maxLength={5000}
-            className="input-field min-h-[100px] resize-y"
-          />
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            Max 5000 characters (YouTube limit)
-          </p>
+          <div>
+            <label htmlFor="description" className="label">
+              Description
+            </label>
+            <textarea
+              ref={descriptionRef}
+              id="description"
+              name="description"
+              placeholder="Enter video description"
+              required
+              maxLength={5000}
+              className="input-field min-h-[100px] resize-y"
+            />
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Max 5000 characters (YouTube limit)
+            </p>
+          </div>
 
           <AiAssistSnippetPanel
             variant="single"
@@ -87,70 +151,27 @@ export default function UploadFormsSingleVideoCard({
             heading="AI & marketing (optional)"
           />
 
-          <label htmlFor="video" className="label">
-            Choose File
-          </label>
-          <div
-            className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-all ${
-              selectedVideoFile
-                ? "border-green-500 bg-green-50 dark:bg-green-900/20"
-                : "border-gray-300 hover:border-red-500"
-            }`}
-            onClick={() => fileInputRef.current?.click()}
-            onDrop={(e) => {
-              e.preventDefault();
-              const file = e.dataTransfer.files[0];
-              if (file && file.type.startsWith("video/")) {
-                setSelectedVideoFile(file);
-                if (fileInputRef.current) {
-                  const dataTransfer = new DataTransfer();
-                  dataTransfer.items.add(file);
-                  fileInputRef.current.files = dataTransfer.files;
-                }
-              }
+          <UploadFormsSingleVideoSourceSection
+            videoSource={videoSource}
+            setVideoSource={setVideoSource}
+            selectedVideoFile={selectedVideoFile}
+            setSelectedVideoFile={setSelectedVideoFile}
+            fileInputRef={fileInputRef}
+            dropboxVideoPath={dropboxVideoPath}
+            dropboxVideoName={dropboxVideoName}
+            driveVideoId={driveVideoId}
+            driveVideoName={driveVideoName}
+            hasDropboxAuth={hasDropboxAuth}
+            hasGoogleDriveAuth={hasGoogleDriveAuth}
+            onBrowseDropbox={onBrowseDropboxVideo}
+            onBrowseDrive={onBrowseDriveVideo}
+            onSelectDriveVideo={(id, name) => {
+              setDriveVideoId(id);
+              setDriveVideoName(name);
             }}
-            onDragOver={(e) => e.preventDefault()}
-          >
-            <input
-              ref={fileInputRef}
-              type="file"
-              id="video"
-              name="video"
-              accept="video/*"
-              required
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) {
-                  setSelectedVideoFile(file);
-                }
-              }}
-            />
-            {selectedVideoFile ? (
-              <div>
-                <div className="text-4xl mb-2">{ICON_CHECK}</div>
-                <p className="text-green-700 dark:text-green-300 font-semibold mb-1">
-                  {selectedVideoFile.name}
-                </p>
-                <p className="text-sm text-gray-600 dark:text-gray-400">
-                  {(selectedVideoFile.size / (1024 * 1024)).toFixed(2)} MB
-                </p>
-                <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
-                  Click to change file
-                </p>
-              </div>
-            ) : (
-              <>
-                <div className="text-4xl mb-2">{ICON_VIDEO}</div>
-                <p className="text-gray-600 dark:text-gray-400 mb-1">
-                  Click to upload or drag and drop
-                </p>
-                <p className="text-sm text-gray-500 dark:text-gray-500">
-                  Video files only
-                </p>
-              </>
-            )}
-          </div>
+            onConnectDropbox={connectDropbox}
+            onConnectGoogleDrive={connectGoogleDrive}
+          />
 
           <div className="flex gap-2">
             <div className="flex-1">
@@ -166,26 +187,28 @@ export default function UploadFormsSingleVideoCard({
             </div>
           </div>
 
-          <label htmlFor="privacyStatus" className="label">
-            Privacy Status
-          </label>
-          <select
-            id="privacyStatus"
-            name="privacyStatus"
-            defaultValue="public"
-            required
-            className="input-field mb-5"
-          >
-            <option value="public">Public</option>
-            <option value="private">Private</option>
-            <option value="unlisted">Unlisted</option>
-          </select>
+          <div>
+            <label htmlFor="privacyStatus" className="label">
+              Privacy Status
+            </label>
+            <select
+              id="privacyStatus"
+              name="privacyStatus"
+              defaultValue="public"
+              required
+              className="input-field"
+            >
+              <option value="public">Public</option>
+              <option value="private">Private</option>
+              <option value="unlisted">Unlisted</option>
+            </select>
+          </div>
 
           <button
             type="submit"
-            disabled={uploading}
+            disabled={uploading || !canSubmit}
             className={`btn-primary ${
-              uploading ? "opacity-50 cursor-not-allowed" : ""
+              uploading || !canSubmit ? "opacity-50 cursor-not-allowed" : ""
             }`}
           >
             {uploading ? "Uploading..." : "Upload Video"}

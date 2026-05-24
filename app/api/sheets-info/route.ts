@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
-import { getOAuthClient } from "@/lib/auth";
+import { requireDriveOAuthClient } from "@/lib/drive-api-auth";
 import { cookies } from "next/headers";
 import { extractSpreadsheetId, getSpreadsheetMetadata } from "@/lib/sheets";
 
@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
     }
 
     const session = getSession(sessionId);
-    if (!session || !session.authenticated || !session.tokens) {
+    if (!session?.authenticated) {
       return NextResponse.json(
         { error: "Not authenticated" },
         { status: 401 }
@@ -53,12 +53,16 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const oAuthClient = getOAuthClient();
-    oAuthClient.setCredentials(session.tokens);
+    const driveAuth = await requireDriveOAuthClient(sessionId);
+    if ("response" in driveAuth) {
+      return driveAuth.response;
+    }
 
-    // Get spreadsheet metadata
     try {
-      const metadata = await getSpreadsheetMetadata(spreadsheetId, oAuthClient);
+      const metadata = await getSpreadsheetMetadata(
+        spreadsheetId,
+        driveAuth.client,
+      );
       return NextResponse.json({
         success: true,
         spreadsheetId,

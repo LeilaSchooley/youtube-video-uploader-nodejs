@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
-import { getOAuthClient } from "@/lib/auth";
+import { requireDriveOAuthClient } from "@/lib/drive-api-auth";
+import { driveTokenHasMetadataScope } from "@/lib/auth-drive";
 import { listDriveItems } from "@/lib/drive";
 import { cookies } from "next/headers";
 
@@ -27,7 +28,7 @@ export async function GET(request: NextRequest) {
     }
 
     const session = getSession(sessionId);
-    if (!session || !session.authenticated || !session.tokens) {
+    if (!session?.authenticated) {
       return NextResponse.json(
         { error: "Not authenticated" },
         { status: 401 }
@@ -40,13 +41,19 @@ export async function GET(request: NextRequest) {
     // Convert 'root' string to null for root folder
     const targetFolderId = folderId === 'root' || folderId === null ? null : folderId;
 
-    const oAuthClient = getOAuthClient();
-    oAuthClient.setCredentials(session.tokens);
+    const driveAuth = await requireDriveOAuthClient(sessionId);
+    if ("response" in driveAuth) {
+      return driveAuth.response;
+    }
 
-    const result = await listDriveItems(targetFolderId, oAuthClient);
+    const result = await listDriveItems(targetFolderId, driveAuth.client);
+    const hasMetadataScope = driveTokenHasMetadataScope(
+      session.driveTokens?.scope,
+    );
 
     return NextResponse.json({
       success: true,
+      hasMetadataScope,
       ...result,
     });
   } catch (error: any) {

@@ -124,11 +124,17 @@ export interface PythonQueueData {
   /** Video type breakdown (short, review, etc.) for today's uploads */
   videoTypeBreakdownTodayUtc?: Record<string, number>;
   /** Where pending manifests are read from for this session */
-  source?: "filesystem" | "dropbox" | "both";
+  source?: "filesystem" | "dropbox" | "drive" | "both";
+  /** Session has persisted Dropbox or Drive python-queue root */
+  manifestQueueConfigured?: boolean;
   /** Session has persisted Dropbox python-queue root */
   dropboxConfigured?: boolean;
+  /** Session has persisted Drive python-queue root */
+  driveConfigured?: boolean;
   /** Resolved Dropbox queue root (same user only) */
   dropboxRootPath?: string;
+  /** Resolved Drive queue root folder ID */
+  driveRootFolderId?: string;
   /** UTC daily cap for Python manifest uploads when dashboard scheduling is enabled */
   manifestDailyLimit?: {
     enabled: boolean;

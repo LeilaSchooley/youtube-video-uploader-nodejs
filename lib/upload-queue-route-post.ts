@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { getSession, setSession } from "@/lib/session";
 import { cookies } from "next/headers";
 import { getOAuthClient, getDropboxToken } from "@/lib/auth";
+import { getDriveOAuthClientForSession } from "@/lib/auth-drive";
 import { google } from "googleapis";
 import fs from "fs";
 import path from "path";
@@ -359,6 +360,22 @@ export async function handleUploadQueuePost(request: NextRequest) {
 
   const totalBatches = batches.length;
 
+  const needsDrive = validTasks.some(
+    (t) => t.driveFileId || t.driveThumbnailId,
+  );
+  const driveOAuthClient = needsDrive
+    ? await getDriveOAuthClientForSession(sessionId)
+    : null;
+  if (needsDrive && !driveOAuthClient) {
+    return new Response(
+      JSON.stringify({
+        error:
+          "Google Drive not connected. Connect Google Drive in the dashboard header.",
+      }),
+      { status: 401, headers: { "Content-Type": "application/json" } },
+    );
+  }
+
   // Return streaming response with progress updates
   const stream = createProgressStream(async (send) => {
     send({
@@ -381,6 +398,7 @@ export async function handleUploadQueuePost(request: NextRequest) {
         totalBatches,
         send,
         oAuthClient,
+        driveOAuthClient,
       );
 
       totalCompleted += batchProgress.completed;

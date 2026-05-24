@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  deleteDropboxManifest,
-  downloadAndParseManifest,
-  listManifestJsonPathsSortedDropbox,
-  mergeManifestJsonOnDropbox,
-  moveDropboxManifestToFailed,
-  moveDropboxManifestToManifests,
-} from "@/lib/python-queue-dropbox";
 import { isManifestPathUnderQueueRoot } from "@/lib/manifest-job-state";
-import { requireManifestQueueDropboxAuth } from "@/lib/manifest-queue-api-auth";
+import { requireManifestQueueAuth } from "@/lib/manifest-queue-api-auth";
+import {
+  deleteManifestForAuth,
+  downloadManifestForAuth,
+  listManifestPathsSorted,
+  mergeManifestPatchForAuth,
+  moveManifestToFailedForAuth,
+  moveManifestToManifestsForAuth,
+} from "@/lib/manifest-queue-helpers";
 import { jsonApiError } from "@/lib/api-response";
 import { isTerminalManifestJob, buildManualRetryPatch } from "@/lib/manifest-job-state";
 import {
@@ -23,23 +23,43 @@ export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
   try {
-    const auth = await requireManifestQueueDropboxAuth();
+    const auth = await requireManifestQueueAuth();
     if (!auth.ok) return auth.response;
 
     let body: { action?: string; manifestId?: string; manifestPath?: string };
     try {
-      body = (await request.json()) as { action?: string; manifestId?: string; manifestPath?: string };
+      body = (await request.json()) as {
+        action?: string;
+        manifestId?: string;
+        manifestPath?: string;
+      };
     } catch {
       return jsonApiError("Invalid JSON body", 400, "BAD_REQUEST");
     }
 
     const action = body.action?.trim();
     if (!action) {
-      return jsonApiError("action is required (delete, retry, delete-all, delete-pending, or undo-clear-pending)", 400, "BAD_REQUEST");
+      return jsonApiError(
+        "action is required (delete, retry, delete-all, delete-pending, or undo-clear-pending)",
+        400,
+        "BAD_REQUEST",
+      );
     }
 
-    if (!["delete", "retry", "delete-all", "delete-pending", "undo-clear-pending"].includes(action)) {
-      return jsonApiError("action must be delete, retry, delete-all, delete-pending, or undo-clear-pending", 400, "BAD_REQUEST");
+    if (
+      ![
+        "delete",
+        "retry",
+        "delete-all",
+        "delete-pending",
+        "undo-clear-pending",
+      ].includes(action)
+    ) {
+      return jsonApiError(
+        "action must be delete, retry, delete-all, delete-pending, or undo-clear-pending",
+        400,
+        "BAD_REQUEST",
+      );
     }
 
     if (action === "undo-clear-pending") {
@@ -54,23 +74,12 @@ export async function POST(request: NextRequest) {
 
       let restored = 0;
       const errors: string[] = [];
+      const patch = buildManualRetryPatch() as Record<string, unknown>;
 
       for (const record of records) {
         try {
-          await moveDropboxManifestToManifests(
-            record.toPath,
-            auth.queueRoot,
-            auth.accessToken,
-            auth.sessionId,
-            auth.refresh,
-          );
-          await mergeManifestJsonOnDropbox(
-            record.fromPath,
-            buildManualRetryPatch(),
-            auth.accessToken,
-            auth.sessionId,
-            auth.refresh,
-          );
+          await moveManifestToManifestsForAuth(auth, record.toPath);
+          await mergeManifestPatchForAuth(auth, record.fromPath, patch);
           restored++;
         } catch (error: unknown) {
           const msg = error instanceof Error ? error.message : String(error);
@@ -81,7 +90,9 @@ export async function POST(request: NextRequest) {
       clearLastClearedPending(auth.queueRoot);
 
       if (errors.length > 0) {
-        console.warn(`[MANIFEST-QUEUE-ACTION] Errors during undo clear pending: ${errors.join("; ")}`);
+        console.warn(
+          `[MANIFEST-QUEUE-ACTION] Errors during undo clear pending: ${errors.join("; ")}`,
+        );
       }
 
       return NextResponse.json({
@@ -92,57 +103,44 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Single operations: delete one, retry one
     if (action === "delete" || action === "retry") {
       const manifestPath = (body.manifestPath ?? body.manifestId)?.trim();
       if (!manifestPath) {
-        return jsonApiError("manifestPath (or manifestId) is required for single operations", 400, "BAD_REQUEST");
+        return jsonApiError(
+          "manifestPath (or manifestId) is required for single operations",
+          400,
+          "BAD_REQUEST",
+        );
       }
 
       if (!isManifestPathUnderQueueRoot(manifestPath, auth.queueRoot)) {
         return jsonApiError(
-          "manifestPath must be under this session's queue manifests folder",
+          "manifestPath must belong to this session's queue",
           400,
           "INVALID_MANIFEST_PATH",
         );
       }
 
       if (action === "delete") {
-        await deleteDropboxManifest(manifestPath, auth.accessToken, auth.sessionId, auth.refresh);
+        await deleteManifestForAuth(auth, manifestPath);
         return NextResponse.json({ success: true, action: "delete", deleted: 1 });
       }
 
-      if (action === "retry") {
-        const manifest = await downloadAndParseManifest(
-          manifestPath,
-          auth.accessToken,
-          auth.sessionId,
-          auth.refresh,
-        );
-        if (!manifest) {
-          return jsonApiError("Manifest not found", 404, "NOT_FOUND");
-        }
-
-        const patch = buildManualRetryPatch();
-        await mergeManifestJsonOnDropbox(
-          manifestPath,
-          patch,
-          auth.accessToken,
-          auth.sessionId,
-          auth.refresh,
-        );
-        return NextResponse.json({ success: true, action: "retry" });
+      const manifest = await downloadManifestForAuth(auth, manifestPath);
+      if (!manifest) {
+        return jsonApiError("Manifest not found", 404, "NOT_FOUND");
       }
+
+      await mergeManifestPatchForAuth(
+        auth,
+        manifestPath,
+        buildManualRetryPatch() as Record<string, unknown>,
+      );
+      return NextResponse.json({ success: true, action: "retry" });
     }
 
-    // Batch operations: delete all terminal or clear pending
     if (action === "delete-all" || action === "delete-pending") {
-      const paths = await listManifestJsonPathsSortedDropbox(
-        auth.queueRoot,
-        auth.accessToken,
-        auth.sessionId,
-        auth.refresh,
-      );
+      const paths = await listManifestPathsSorted(auth);
 
       let deleted = 0;
       const clearedPendingRecords: ClearedManifestRecord[] = [];
@@ -150,13 +148,7 @@ export async function POST(request: NextRequest) {
 
       for (const manifestPath of paths) {
         try {
-          const manifest = await downloadAndParseManifest(
-            manifestPath,
-            auth.accessToken,
-            auth.sessionId,
-            auth.refresh,
-          );
-
+          const manifest = await downloadManifestForAuth(auth, manifestPath);
           if (!manifest) continue;
 
           const isTerminal = isTerminalManifestJob(manifest);
@@ -164,29 +156,15 @@ export async function POST(request: NextRequest) {
           const isPending = !isTerminal && status !== "done";
 
           if (action === "delete-all" && isTerminal) {
-            await deleteDropboxManifest(
-              manifestPath,
-              auth.accessToken,
-              auth.sessionId,
-              auth.refresh,
-            );
+            await deleteManifestForAuth(auth, manifestPath);
             deleted++;
           }
 
           if (action === "delete-pending" && isPending) {
-            const fileName = manifestPath.split("/").pop() || "";
-            const failedPath = `${auth.queueRoot.replace(/\/+$/, "")}/failed/${fileName}`;
-
-            await moveDropboxManifestToFailed(
-              manifestPath,
-              auth.queueRoot,
-              auth.accessToken,
-              auth.sessionId,
-              auth.refresh,
-            );
+            await moveManifestToFailedForAuth(auth, manifestPath);
             clearedPendingRecords.push({
               fromPath: manifestPath,
-              toPath: failedPath,
+              toPath: manifestPath,
             });
             deleted++;
           }
@@ -201,7 +179,9 @@ export async function POST(request: NextRequest) {
       }
 
       if (errors.length > 0) {
-        console.warn(`[MANIFEST-QUEUE-ACTION] Errors during bulk delete: ${errors.join("; ")}`);
+        console.warn(
+          `[MANIFEST-QUEUE-ACTION] Errors during bulk delete: ${errors.join("; ")}`,
+        );
       }
 
       return NextResponse.json({

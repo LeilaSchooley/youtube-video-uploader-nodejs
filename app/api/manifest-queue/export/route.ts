@@ -1,26 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  listManifestQueueRows,
   manifestRowsToCsv,
   filterFailedRows,
 } from "@/lib/manifest-queue-list";
-import { requireManifestQueueDropboxAuth } from "@/lib/manifest-queue-api-auth";
+import { requireManifestQueueAuth } from "@/lib/manifest-queue-api-auth";
+import { listManifestRowsForAuth } from "@/lib/manifest-queue-helpers";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function GET(request: NextRequest) {
   try {
-    const auth = await requireManifestQueueDropboxAuth();
+    const auth = await requireManifestQueueAuth();
     if (!auth.ok) return auth.response;
 
     const status = request.nextUrl.searchParams.get("status")?.trim();
-    const rows = await listManifestQueueRows(
-      auth.queueRoot,
-      auth.accessToken,
-      auth.sessionId,
-      auth.refresh,
-    );
+    const rows = await listManifestRowsForAuth(auth);
     const filtered =
       status === "failed" || status === "failed_only"
         ? filterFailedRows(rows)

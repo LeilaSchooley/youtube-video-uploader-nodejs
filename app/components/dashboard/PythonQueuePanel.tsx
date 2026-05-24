@@ -89,9 +89,11 @@ export default function PythonQueuePanel({
   }
 
   if (!data.enabled) {
-    const msg = data.dropboxConfigured
-      ? `Dropbox folder saved (${data.dropboxRootPath ?? "—"}) — connect Dropbox to activate.`
-      : "Not configured. Set PYTHON_QUEUE_ROOT or pick a Dropbox bot folder in Upload Videos.";
+    const msg = data.driveConfigured
+      ? `Drive folder saved (${data.driveRootFolderId ?? "—"}) — connect Google Drive to activate.`
+      : data.dropboxConfigured
+        ? `Dropbox folder saved (${data.dropboxRootPath ?? "—"}) — connect Dropbox to activate.`
+        : "Not configured. Set PYTHON_QUEUE_ROOT or pick a bot queue folder (Dropbox or Drive) in Upload Videos.";
     return (
       <div className="mb-4 flex items-center gap-3 rounded-2xl border border-dashed border-gray-300 dark:border-gray-600 bg-gray-50/90 dark:bg-gray-900/50 px-4 py-3.5 text-sm text-gray-600 dark:text-gray-400 shadow-sm">
         <span className="text-lg shrink-0" aria-hidden>🐍</span>

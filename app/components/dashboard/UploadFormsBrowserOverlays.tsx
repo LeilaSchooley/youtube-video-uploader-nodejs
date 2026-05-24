@@ -13,12 +13,26 @@ type SheetPreviewData = ComponentProps<typeof SheetPreview>["previewData"];
 export interface UploadFormsBrowserOverlaysProps {
   showDriveBrowser: boolean;
   setShowDriveBrowser: (open: boolean) => void;
-  driveBrowserContext: "drive" | "sheets";
+  driveBrowserContext:
+    | "drive"
+    | "sheets"
+    | "metadata-csv"
+    | "thumbnails"
+    | "single-video";
+  driveBrowserMode: "folder" | "file";
   handleSheetsDriveFolderSelect: (
     folderId: string,
     folderName: string,
   ) => void;
   handleDriveFolderSelect: (folderId: string, folderName: string) => void;
+  setSelectedDriveCsvFileId: (id: string) => void;
+  setSelectedDriveCsvFileName: (name: string) => void;
+  setDriveThumbnailsFolderId: (id: string) => void;
+  setDriveThumbnailsFolderName: (name: string) => void;
+  setSingleDropboxVideoPath: (path: string) => void;
+  setSingleDropboxVideoName: (name: string) => void;
+  setSingleDriveVideoId: (id: string) => void;
+  setSingleDriveVideoName: (name: string) => void;
 
   showDropboxBrowser: boolean;
   setShowDropboxBrowser: (open: boolean) => void;
@@ -27,7 +41,8 @@ export interface UploadFormsBrowserOverlaysProps {
     | "bulk"
     | "sheets-folder"
     | "sheets-file"
-    | "thumbnails-folder";
+    | "thumbnails-folder"
+    | "single-video";
   handleBulkDropboxFolderSelected: (
     folderPath: string,
     folderName: string,
@@ -54,8 +69,17 @@ export default function UploadFormsBrowserOverlays({
   showDriveBrowser,
   setShowDriveBrowser,
   driveBrowserContext,
+  driveBrowserMode,
   handleSheetsDriveFolderSelect,
   handleDriveFolderSelect,
+  setSelectedDriveCsvFileId,
+  setSelectedDriveCsvFileName,
+  setDriveThumbnailsFolderId,
+  setDriveThumbnailsFolderName,
+  setSingleDropboxVideoPath,
+  setSingleDropboxVideoName,
+  setSingleDriveVideoId,
+  setSingleDriveVideoName,
   showDropboxBrowser,
   setShowDropboxBrowser,
   dropboxBrowserMode,
@@ -78,13 +102,61 @@ export default function UploadFormsBrowserOverlays({
     <>
       {showDriveBrowser && (
         <DriveBrowser
+          mode={driveBrowserMode}
+          fileFilter={
+            driveBrowserContext === "metadata-csv" ? "spreadsheet" : "video"
+          }
           onSelectFolder={(folderId, folderName) => {
             if (driveBrowserContext === "sheets") {
               handleSheetsDriveFolderSelect(folderId, folderName);
+            } else if (driveBrowserContext === "thumbnails") {
+              setDriveThumbnailsFolderId(folderId);
+              setDriveThumbnailsFolderName(folderName);
+              if (typeof window !== "undefined") {
+                localStorage.setItem(
+                  DASHBOARD_STORAGE.driveThumbnailsFolderId,
+                  folderId,
+                );
+              }
+              showAppToast({
+                message: `Thumbnails folder: ${folderName}`,
+                type: "success",
+              });
             } else {
               handleDriveFolderSelect(folderId, folderName);
             }
             setShowDriveBrowser(false);
+          }}
+          onSelectFile={(fileId, fileName) => {
+            if (driveBrowserContext === "metadata-csv") {
+              setSelectedDriveCsvFileId(fileId);
+              setSelectedDriveCsvFileName(fileName);
+              if (typeof window !== "undefined") {
+                localStorage.setItem(
+                  DASHBOARD_STORAGE.selectedDriveCsvFileId,
+                  fileId,
+                );
+                localStorage.setItem(
+                  DASHBOARD_STORAGE.selectedDriveCsvFileName,
+                  fileName,
+                );
+              }
+              showAppToast({
+                message: `Metadata file: ${fileName}`,
+                type: "success",
+              });
+              setShowDriveBrowser(false);
+              return;
+            }
+            if (driveBrowserContext === "single-video") {
+              setSingleDriveVideoId(fileId);
+              setSingleDriveVideoName(fileName);
+              showAppToast({
+                message: `Video: ${fileName}`,
+                type: "success",
+              });
+              setShowDriveBrowser(false);
+            }
           }}
           onClose={() => setShowDriveBrowser(false)}
         />
@@ -93,7 +165,12 @@ export default function UploadFormsBrowserOverlays({
       {showDropboxBrowser && (
         <DropboxBrowser
           mode={dropboxBrowserMode}
-          fileFilter={dropboxBrowserMode === "file" ? "spreadsheet" : "video"}
+          fileFilter={
+            dropboxBrowserMode === "file" &&
+            dropboxBrowserContext === "sheets-file"
+              ? "spreadsheet"
+              : "video"
+          }
           onSelectFolder={(folderPath, folderName) => {
             if (dropboxBrowserContext === "sheets-folder") {
               setSelectedDropboxFolderPath(folderPath);
@@ -151,6 +228,9 @@ export default function UploadFormsBrowserOverlays({
                   filePath,
                 );
               }
+            } else if (dropboxBrowserContext === "single-video") {
+              setSingleDropboxVideoPath(filePath);
+              setSingleDropboxVideoName(fileName);
             } else {
               setSelectedDropboxFile(filePath);
               if (typeof window !== "undefined") {

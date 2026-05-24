@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useDropboxAuth } from "@/app/components/dashboard/DropboxAuthContext";
+import { useGoogleDriveAuth } from "@/app/components/dashboard/GoogleDriveAuthContext";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -43,6 +44,12 @@ export default function Header({
 }: HeaderProps) {
   const { hasDropboxAuth, dropboxAuthLoading, connectDropbox, disconnectDropbox } =
     useDropboxAuth();
+  const {
+    hasGoogleDriveAuth,
+    driveAuthLoading,
+    connectGoogleDrive,
+    disconnectGoogleDrive,
+  } = useGoogleDriveAuth();
   const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
   const displayName = user?.name?.trim() || "Account";
   const pictureUrl = user?.picture?.trim() || "";
@@ -105,47 +112,99 @@ export default function Header({
             </div>
           </div>
         )}
-        <div className="flex flex-col gap-1 rounded-xl border-2 border-blue-100 dark:border-blue-800/60 px-3 py-2 bg-blue-50/90 dark:bg-blue-950/40 shadow-sm">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-blue-900 dark:text-blue-100 whitespace-nowrap">
-              Dropbox
-            </span>
-            {dropboxAuthLoading ? (
-              <span className="text-xs text-muted-foreground">Checking…</span>
-            ) : hasDropboxAuth === true ? (
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs text-emerald-700 dark:text-emerald-300 flex items-center gap-1 font-medium">
-                  <span aria-hidden>✓</span>
-                  Connected
+        <div className="flex flex-col gap-2 rounded-xl border-2 border-slate-200 dark:border-slate-700 px-3 py-2.5 bg-slate-50/90 dark:bg-slate-900/50 shadow-sm max-w-md">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+            Cloud storage
+          </p>
+          <p className="text-[10px] leading-snug text-slate-600 dark:text-slate-400">
+            Connect one or both — bulk upload, Python bot queues, and Google
+            Sheets metadata. Tokens stay on this server with your Google sign-in
+            (survives logout).
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <div className="flex flex-col gap-1.5 rounded-lg border border-blue-200/80 dark:border-blue-800/60 px-2.5 py-2 bg-blue-50/80 dark:bg-blue-950/30">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <span className="text-xs font-semibold text-blue-900 dark:text-blue-100">
+                  📦 Dropbox
                 </span>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-8 rounded-lg text-xs px-3 border-red-200 text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950/50"
-                  onClick={() => void disconnectDropbox()}
-                >
-                  Disconnect
-                </Button>
+                {dropboxAuthLoading ? (
+                  <span className="text-xs text-muted-foreground">Checking…</span>
+                ) : hasDropboxAuth === true ? (
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">
+                      ✓ Connected
+                    </span>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 rounded-md text-[11px] px-2"
+                      onClick={() => void disconnectDropbox()}
+                    >
+                      Disconnect
+                    </Button>
+                  </div>
+                ) : (
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-7 rounded-md bg-blue-600 text-white hover:bg-blue-700 text-[11px] px-2.5"
+                    onClick={() => void connectDropbox()}
+                  >
+                    Connect
+                  </Button>
+                )}
               </div>
-            ) : (
-              <Button
-                type="button"
-                size="sm"
-                className="h-8 rounded-lg bg-blue-600 text-white hover:bg-blue-700 text-xs px-3"
-                onClick={() => void connectDropbox()}
-              >
-                Connect Dropbox
-              </Button>
-            )}
+            </div>
+            <div className="flex flex-col gap-1.5 rounded-lg border border-emerald-200/80 dark:border-emerald-800/60 px-2.5 py-2 bg-emerald-50/80 dark:bg-emerald-950/30">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <span className="text-xs font-semibold text-emerald-900 dark:text-emerald-100">
+                  📁 Google Drive
+                </span>
+                {driveAuthLoading ? (
+                  <span className="text-xs text-muted-foreground">Checking…</span>
+                ) : hasGoogleDriveAuth === true ? (
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">
+                      ✓ Connected
+                    </span>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 rounded-md text-[11px] px-2"
+                      onClick={() => void disconnectGoogleDrive()}
+                    >
+                      Disconnect
+                    </Button>
+                  </div>
+                ) : (
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-7 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 text-[11px] px-2.5"
+                    onClick={() => void connectGoogleDrive()}
+                  >
+                    Connect
+                  </Button>
+                )}
+              </div>
+              {!driveAuthLoading && hasGoogleDriveAuth !== true && (
+                <p className="text-[10px] leading-snug text-emerald-900/70 dark:text-emerald-100/70">
+                  Separate OAuth project from YouTube (Drive + Sheets scopes).
+                </p>
+              )}
+            </div>
           </div>
-          {!dropboxAuthLoading && hasDropboxAuth !== true && (
-            <p className="text-[10px] leading-snug text-blue-900/70 dark:text-blue-100/70 max-w-[240px]">
-              Connect while signed in with Google — saved on this app server for
-              your account (survives logout). New device: same server + same
-              Google account restores automatically when keys match.
-            </p>
-          )}
+          {!dropboxAuthLoading &&
+            !driveAuthLoading &&
+            hasDropboxAuth !== true &&
+            hasGoogleDriveAuth !== true && (
+              <p className="text-[10px] leading-snug text-amber-800 dark:text-amber-200/90 border-t border-slate-200 dark:border-slate-700 pt-2">
+                Pick at least one provider above. Use Dropbox for legacy paths;
+                Drive for Sheets and the second OAuth app.
+              </p>
+            )}
         </div>
         {/* Channel Selector */}
         {availableChannels.length > 1 && (

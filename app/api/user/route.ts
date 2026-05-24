@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getOAuthClient, getDropboxToken } from "@/lib/auth";
+import { sessionHasDriveTokens } from "@/lib/auth-drive";
 import { getSession } from "@/lib/session";
 import { google } from "googleapis";
 import { cookies } from "next/headers";
@@ -77,6 +78,7 @@ export async function GET() {
       name: name ?? session.userId ?? "Account",
       picture: picture ?? "",
       hasDropbox: !!dropboxToken,
+      hasGoogleDrive: sessionHasDriveTokens(sessionId),
     });
   } catch (error: any) {
     console.error("User info error:", error);

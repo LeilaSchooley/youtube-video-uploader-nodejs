@@ -3,6 +3,8 @@
  */
 
 import type { PythonQueueData } from "@/app/components/dashboard/types";
+import type { OAuth2Client } from "google-auth-library";
+import { getDriveOAuthClientForSession } from "@/lib/auth-drive";
 import {
   getQueueSourceForSession,
   normalizeDropboxPath,
@@ -19,6 +21,12 @@ import {
   downloadAndParseManifest,
   dropboxVideoExists,
 } from "@/lib/python-queue-dropbox";
+import {
+  downloadAndParseManifestDrive,
+  driveVideoExists,
+  listManifestJsonFileIdsSortedDrive,
+} from "@/lib/python-queue-drive";
+import { listDriveItems } from "@/lib/drive";
 
 const MAX_UI_MANIFEST_FILES = 50;
 
@@ -72,7 +80,25 @@ export async function getPythonQueueDataForSession(
   const fsSummary = getPythonQueueUiSummary();
   const src = getQueueSourceForSession(sessionId);
 
-  if (!src || src.sourceType !== "dropbox_python_queue") {
+  if (!src) {
+    return {
+      ...fsSummary,
+      uploadsTodayUtc: 0,
+      source: fsSummary.enabled ? "filesystem" : undefined,
+    };
+  }
+
+  if (src.sourceType === "drive_python_queue") {
+    const driveClient = await getDriveOAuthClientForSession(sessionId);
+    return buildDrivePythonQueueData(
+      sessionId,
+      src.rootPath,
+      driveClient,
+      fsSummary,
+    );
+  }
+
+  if (src.sourceType !== "dropbox_python_queue") {
     return {
       ...fsSummary,
       uploadsTodayUtc: 0,
@@ -88,6 +114,7 @@ export async function getPythonQueueDataForSession(
       uploadsTodayUtc: 0,
       enabled: false,
       dropboxConfigured: true,
+      manifestQueueConfigured: true,
       source: "dropbox",
       queueRootLabel: root.split("/").filter(Boolean).pop() || root,
     };
@@ -196,6 +223,128 @@ export async function getPythonQueueDataForSession(
     uploadsTodayUtc: 0,
     source: fsSummary.enabled ? "both" : "dropbox",
     dropboxConfigured: true,
+    manifestQueueConfigured: true,
     dropboxRootPath: root,
+  };
+}
+
+async function countJsonInDriveFolder(
+  folderId: string,
+  auth: OAuth2Client,
+  max: number,
+): Promise<number> {
+  try {
+    const { files } = await listDriveItems(folderId, auth);
+    let n = 0;
+    for (const f of files) {
+      if (f.name.toLowerCase().endsWith(".json")) {
+        n++;
+        if (n >= max) return max;
+      }
+    }
+    return n;
+  } catch {
+    return 0;
+  }
+}
+
+async function buildDrivePythonQueueData(
+  sessionId: string,
+  rootFolderId: string,
+  driveClient: OAuth2Client | null,
+  fsSummary: ReturnType<typeof getPythonQueueUiSummary>,
+): Promise<PythonQueueData> {
+  if (!driveClient) {
+    return {
+      ...emptySummary(),
+      uploadsTodayUtc: 0,
+      enabled: false,
+      driveConfigured: true,
+      manifestQueueConfigured: true,
+      source: "drive",
+      queueRootLabel: rootFolderId.slice(0, 12),
+      driveRootFolderId: rootFolderId,
+    };
+  }
+
+  const manifestIds = await listManifestJsonFileIdsSortedDrive(
+    rootFolderId,
+    driveClient,
+  );
+  const pending: PythonQueueUiItem[] = [];
+
+  for (const manifestPath of manifestIds.slice(0, MAX_UI_MANIFEST_FILES)) {
+    const manifest = await downloadAndParseManifestDrive(
+      manifestPath,
+      driveClient,
+    );
+    if (!manifest) continue;
+    const id = manifestId(manifest, manifestPath);
+    const videoReady = await driveVideoExists(
+      rootFolderId,
+      manifest.videoPath,
+      driveClient,
+    );
+    const norm = normalizeManifest(manifest);
+    pending.push({
+      id,
+      title: manifest.title,
+      priority:
+        typeof manifest.priority === "number" && !Number.isNaN(manifest.priority)
+          ? manifest.priority
+          : 0,
+      locked: false,
+      videoReady,
+      fileName: manifestPath.slice(0, 8),
+      videoType: norm.videoType,
+      isShort: norm.isShort,
+    });
+  }
+
+  let failedCount = 0;
+  let processedCount = 0;
+  try {
+    const { folders } = await listDriveItems(rootFolderId, driveClient);
+    const failedFolder = folders.find((f) => f.name.toLowerCase() === "failed");
+    const processedFolder = folders.find(
+      (f) => f.name.toLowerCase() === "processed",
+    );
+    if (failedFolder) {
+      failedCount = await countJsonInDriveFolder(
+        failedFolder.id,
+        driveClient,
+        500,
+      );
+    }
+    if (processedFolder) {
+      processedCount = await countJsonInDriveFolder(
+        processedFolder.id,
+        driveClient,
+        500,
+      );
+    }
+  } catch {
+    /* ignore */
+  }
+
+  return {
+    enabled: true,
+    queueRootLabel: rootFolderId.slice(0, 12),
+    maxPerTick: fsSummary.maxPerTick,
+    skipDuplicateTitles: fsSummary.skipDuplicateTitles,
+    sessionIdEnvConfigured: fsSummary.sessionIdEnvConfigured,
+    pending: fsSummary.enabled
+      ? [
+          ...fsSummary.pending.map((p) => ({ ...p, id: `fs:${p.id}` })),
+          ...pending.map((p) => ({ ...p, id: `drv:${p.id}` })),
+        ]
+      : pending.map((p) => ({ ...p, id: `drv:${p.id}` })),
+    failedCount: fsSummary.failedCount + failedCount,
+    processedCount: fsSummary.processedCount + processedCount,
+    uploadsTodayUtc: 0,
+    source: fsSummary.enabled ? "both" : "drive",
+    driveConfigured: true,
+    manifestQueueConfigured: true,
+    driveRootFolderId: rootFolderId,
   };
 }

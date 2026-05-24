@@ -25,6 +25,7 @@ import DashboardErrorBoundary from "@/app/components/dashboard/DashboardErrorBou
 import DashboardTabs from "@/app/components/dashboard/DashboardTabs";
 import DuplicateTitlesDialog from "@/app/components/dashboard/DuplicateTitlesDialog";
 import { DropboxAuthProvider } from "@/app/components/dashboard/DropboxAuthContext";
+import { GoogleDriveAuthProvider } from "@/app/components/dashboard/GoogleDriveAuthContext";
 import Statistics from "@/app/components/dashboard/Statistics";
 import UploadForms from "@/app/components/dashboard/UploadForms";
 import QueueManagement from "@/app/components/dashboard/QueueManagement";
@@ -181,6 +182,8 @@ export default function Dashboard() {
     }
   }, [activeTab]);
   const [dropboxQueuePickerNonce, setDropboxQueuePickerNonce] = useState(0);
+  const [driveQueuePickerNonce, setDriveQueuePickerNonce] = useState(0);
+  const [singleUploadClearKey, setSingleUploadClearKey] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const csvFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -483,7 +486,6 @@ export default function Dashboard() {
     e.preventDefault();
     setUploading(true);
     setMessage({ type: null, text: null });
-    setSelectedVideoFile(null); // Reset file selection after upload starts
 
     // Store form reference before async operation
     const form = e.currentTarget;
@@ -503,10 +505,10 @@ export default function Dashboard() {
           type: "success",
         });
         setMessage({ type: null, text: null });
-        // Reset form using stored reference
         if (form) {
           form.reset();
         }
+        setSingleUploadClearKey((k) => k + 1);
       } else {
         console.error("=== UPLOAD ERROR (Client) ===");
         console.error("Error:", data.error);
@@ -533,11 +535,6 @@ export default function Dashboard() {
       setMessage({ type: "error", text: errorMsg });
     } finally {
       setUploading(false);
-      // Reset file input after upload completes
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-        setSelectedVideoFile(null);
-      }
     }
   };
 
@@ -808,6 +805,7 @@ export default function Dashboard() {
 
   return (
     <DropboxAuthProvider onToast={showAppToast}>
+      <GoogleDriveAuthProvider onToast={showAppToast}>
       <div className="min-h-screen bg-background">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-10">
         {/* Header - Extracted to components/dashboard/Header.tsx */}
@@ -978,6 +976,11 @@ export default function Dashboard() {
                   setShowBulkUpload(true);
                   setDropboxQueuePickerNonce((n) => n + 1);
                 }}
+                onRequestManualDriveQueue={() => {
+                  setActiveTab("upload");
+                  setShowBulkUpload(true);
+                  setDriveQueuePickerNonce((n) => n + 1);
+                }}
               />
               <UploadScheduleSettings
                 enabled={uploadScheduleEnabled}
@@ -1002,6 +1005,7 @@ export default function Dashboard() {
                 setSelectedVideoFile={setSelectedVideoFile}
                 fileInputRef={fileInputRef}
                 uploading={uploading}
+                singleUploadClearKey={singleUploadClearKey}
                 handleCsvUpload={handleCsvUpload}
                 selectedCsvFile={selectedCsvFile}
                 setSelectedCsvFile={setSelectedCsvFile}
@@ -1033,6 +1037,7 @@ export default function Dashboard() {
                 schedulingEnabled={uploadScheduleEnabled}
                 globalVideosPerDay={uploadScheduleVpd}
                 openDropboxQueuePickerNonce={dropboxQueuePickerNonce}
+                openDriveQueuePickerNonce={driveQueuePickerNonce}
               />
             </>
           }
@@ -1106,6 +1111,7 @@ export default function Dashboard() {
         </footer>
       </div>
     </div>
+      </GoogleDriveAuthProvider>
     </DropboxAuthProvider>
   );
 }

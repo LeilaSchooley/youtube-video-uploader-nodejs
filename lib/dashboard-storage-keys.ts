@@ -27,6 +27,11 @@ export const DASHBOARD_STORAGE = {
   selectedDropboxSheetName: "selectedDropboxSheetName",
   dropboxSkipDuplicateTitles: "dropboxSkipDuplicateTitles",
   hasDropboxAuth: "hasDropboxAuth",
+  hasGoogleDriveAuth: "hasGoogleDriveAuth",
+  selectedDriveCsvFileId: "selectedDriveCsvFileId",
+  selectedDriveCsvFileName: "selectedDriveCsvFileName",
+  driveThumbnailsFolderId: "driveThumbnailsFolderId",
+  driveMetadataSheetName: "driveMetadataSheetName",
   /** Queue tab strip: manual vs queue-driven worker mode */
   uploadQueueWorkerMode: "dashboardUploadSourceMode",
   /** Last Dropbox path that passed Queue Mode auto-detect (try first next time) */

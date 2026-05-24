@@ -46,6 +46,8 @@ export async function GET() {
               hasGoogleClientId: !!process.env.GOOGLE_CLIENT_ID,
               hasGoogleClientSecret: !!process.env.GOOGLE_CLIENT_SECRET,
               hasRedirectUri: !!process.env.GOOGLE_REDIRECT_URI,
+              hasGoogleDriveClientId: !!process.env.GOOGLE_DRIVE_CLIENT_ID,
+              hasGoogleDriveRedirectUri: !!process.env.GOOGLE_DRIVE_REDIRECT_URI,
             },
     };
 

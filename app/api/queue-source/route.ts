@@ -5,6 +5,7 @@ import {
   getQueueSourceForSession,
   setQueueSourceForSession,
   normalizeDropboxPath,
+  normalizeDriveFolderId,
   type QueueSourceType,
 } from "@/lib/queue-source";
 import { jsonApiError } from "@/lib/api-response";
@@ -52,7 +53,11 @@ export async function POST(request: NextRequest) {
     };
 
     const sourceType = body.sourceType ?? "none";
-    if (sourceType !== "none" && sourceType !== "dropbox_python_queue") {
+    if (
+      sourceType !== "none" &&
+      sourceType !== "dropbox_python_queue" &&
+      sourceType !== "drive_python_queue"
+    ) {
       return jsonApiError("Invalid sourceType", 400, "BAD_REQUEST");
     }
 
@@ -64,6 +69,16 @@ export async function POST(request: NextRequest) {
       setQueueSourceForSession(sessionId, {
         sourceType: "dropbox_python_queue",
         rootPath: normalizeDropboxPath(root),
+        updatedAt: new Date().toISOString(),
+      });
+    } else if (sourceType === "drive_python_queue") {
+      const root = body.rootPath?.trim();
+      if (!root) {
+        return jsonApiError("rootPath required for drive_python_queue", 400, "BAD_REQUEST");
+      }
+      setQueueSourceForSession(sessionId, {
+        sourceType: "drive_python_queue",
+        rootPath: normalizeDriveFolderId(root),
         updatedAt: new Date().toISOString(),
       });
     } else {

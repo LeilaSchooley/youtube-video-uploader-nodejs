@@ -9,6 +9,12 @@ import {
   downloadAndParseManifest,
   dropboxVideoExists,
 } from "@/lib/python-queue-dropbox";
+import {
+  listManifestJsonFileIdsSortedDrive,
+  downloadAndParseManifestDrive,
+  driveVideoExists,
+} from "@/lib/python-queue-drive";
+import type { OAuth2Client } from "google-auth-library";
 import { isTerminalManifestJob } from "@/lib/manifest-job-state";
 
 export interface ManifestQueueRow {
@@ -117,6 +123,44 @@ export async function listManifestQueueRows(
   // Auto-prune completed entries from Activity view.
   // A manifest with upload_status="done" should normally be moved to processed/ and
   // not remain in queue/manifests. If it lingers (e.g., Dropbox move conflict), hide it.
+  return nonNullRows.filter((row) => row.upload_status !== "done");
+}
+
+export async function listManifestQueueRowsDrive(
+  queueRootFolderId: string,
+  driveClient: OAuth2Client,
+): Promise<ManifestQueueRow[]> {
+  const MANIFEST_ROW_CONCURRENCY = 2;
+  const paths = await listManifestJsonFileIdsSortedDrive(
+    queueRootFolderId,
+    driveClient,
+  );
+
+  const rows = await mapWithConcurrency(
+    paths,
+    MANIFEST_ROW_CONCURRENCY,
+    async (manifestPath): Promise<ManifestQueueRow | null> => {
+      const manifest = await downloadAndParseManifestDrive(
+        manifestPath,
+        driveClient,
+      );
+      if (!manifest) return null;
+
+      const status = manifest.upload_status ?? "queued";
+      const videoReady =
+        status === "done"
+          ? true
+          : await driveVideoExists(
+              queueRootFolderId,
+              manifest.videoPath,
+              driveClient,
+            );
+
+      return rowFromManifest(manifestPath, manifest, videoReady);
+    },
+  );
+
+  const nonNullRows = rows.filter((row): row is ManifestQueueRow => row !== null);
   return nonNullRows.filter((row) => row.upload_status !== "done");
 }
 

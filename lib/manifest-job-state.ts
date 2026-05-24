@@ -5,7 +5,10 @@
 import fs from "fs";
 import type { PythonManifest } from "@/lib/python-queue";
 import { MANIFEST_MAX_AUTO_RETRIES } from "@/lib/manifest-upload-constants";
+import type { OAuth2Client } from "google-auth-library";
 import { mergeManifestJsonOnDropbox } from "@/lib/python-queue-dropbox";
+import { mergeManifestJsonOnDrive } from "@/lib/python-queue-drive";
+import { isDriveFileId } from "@/lib/drive";
 import { normalizeDropboxPath } from "@/lib/queue-source";
 
 export function mergeManifestJsonRecords(
@@ -78,6 +81,16 @@ export async function recordManifestUploadFailureOnDropbox(
   );
 }
 
+export async function recordManifestUploadFailureOnDrive(
+  manifestFileId: string,
+  manifest: PythonManifest,
+  error: string,
+  driveClient: OAuth2Client,
+): Promise<void> {
+  const patch = buildUploadFailurePatch(manifest, error);
+  await mergeManifestJsonOnDrive(manifestFileId, patch, driveClient);
+}
+
 export function recordManifestUploadFailureOnFs(
   manifestPath: string,
   manifest: PythonManifest,
@@ -94,6 +107,9 @@ export function isManifestPathUnderQueueRoot(
   manifestPath: string,
   queueRoot: string,
 ): boolean {
+  if (isDriveFileId(manifestPath.trim())) {
+    return isDriveFileId(queueRoot.trim()) && manifestPath.trim() !== queueRoot.trim();
+  }
   const m = normalizeDropboxPath(manifestPath);
   const r = normalizeDropboxPath(queueRoot);
   const prefix = `${r}/manifests/`.replace(/\/+/g, "/");

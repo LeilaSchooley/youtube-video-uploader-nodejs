@@ -7,6 +7,9 @@ type Props = {
   dropboxAuthLoading: boolean;
   hasDropboxAuth: boolean | null;
   connectDropbox: () => Promise<void>;
+  driveAuthLoading: boolean;
+  hasGoogleDriveAuth: boolean | null;
+  connectGoogleDrive: () => Promise<void>;
   scanningDropbox: boolean;
   dropboxPythonQueue: boolean;
   queueRootPath: string | null;
@@ -26,6 +29,7 @@ type Props = {
   onUseDetectedQueue: () => Promise<void> | void;
   onChangeFolder: () => Promise<void>;
   onManualFolderSelect?: () => void;
+  onManualDriveFolderSelect?: () => void;
   onPostAction: (path: "start" | "stop") => Promise<void>;
   onOpenQueueTab?: () => void;
 };
@@ -33,12 +37,46 @@ type Props = {
 export default function QueueModeStripQueueContent(props: Props) {
   return (
     <CardContent className="space-y-4 p-4">
-      {props.dropboxAuthLoading ? (
-        <p className="text-sm text-muted-foreground" role="status">Checking Dropbox connection…</p>
-      ) : props.hasDropboxAuth !== true ? (
+      {props.dropboxAuthLoading || props.driveAuthLoading ? (
+        <p className="text-sm text-muted-foreground" role="status">
+          Checking cloud storage connections…
+        </p>
+      ) : props.hasDropboxAuth !== true && props.hasGoogleDriveAuth !== true ? (
         <div className="rounded-2xl border border-amber-200/90 bg-gradient-to-br from-amber-50 to-orange-50/50 px-4 py-3.5 text-sm text-amber-950 shadow-md shadow-amber-900/5 dark:border-amber-800/80 dark:from-amber-950/40 dark:to-orange-950/20 dark:text-amber-100">
-          <p className="mb-2 font-medium">Connect Dropbox to use Queue mode.</p>
-          <Button type="button" size="sm" onClick={() => void props.connectDropbox()}>Connect Dropbox</Button>
+          <p className="mb-2 font-medium">
+            Connect Dropbox or Google Drive to use Queue mode.
+          </p>
+          <p className="mb-3 text-xs opacity-90">
+            Dropbox: auto-detect bot folders here. Drive: connect in the header,
+            then pick a queue folder under Upload Videos.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" size="sm" onClick={() => void props.connectDropbox()}>
+              Connect Dropbox
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={() => void props.connectGoogleDrive()}
+            >
+              Connect Google Drive
+            </Button>
+          </div>
+        </div>
+      ) : props.hasDropboxAuth !== true && props.hasGoogleDriveAuth === true ? (
+        <div className="rounded-2xl border border-emerald-200/90 bg-emerald-50/80 dark:bg-emerald-950/30 px-4 py-3 text-sm text-emerald-950 dark:text-emerald-100">
+          <p className="mb-2">
+            <strong>Google Drive connected.</strong> Configure a Python bot queue
+            under <strong>Upload Videos</strong> → Google Drive → browse your{" "}
+            <code className="text-xs">manifests/</code> folder. Dropbox
+            auto-scan below is optional.
+          </p>
+          {props.onManualDriveFolderSelect && (
+            <Button type="button" size="sm" variant="secondary" onClick={props.onManualDriveFolderSelect}>
+              Open Drive folder picker
+            </Button>
+          )}
         </div>
       ) : (
         <>

@@ -37,14 +37,19 @@ export function createSheetsDriveFolderSelectHandler(opts: {
 export function createSheetSelectHandler(opts: {
   fetchSheets: (spreadsheetId: string) => Promise<void>;
   showToast: (msg: string) => void;
+  setDriveSpreadsheetUrl?: (url: string) => void;
 }) {
   return async (spreadsheetId: string, spreadsheetName: string) => {
-    const input = document.getElementById("spreadsheetUrl") as HTMLInputElement;
-    if (input) {
-      input.value = spreadsheetId;
-      if (typeof window !== "undefined") localStorage.setItem(DASHBOARD_STORAGE.sheetsSpreadsheetUrl, spreadsheetId);
-      await opts.fetchSheets(spreadsheetId);
+    const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`;
+    opts.setDriveSpreadsheetUrl?.(url);
+    const input =
+      (document.getElementById("driveSpreadsheetUrl") as HTMLInputElement) ||
+      (document.getElementById("spreadsheetUrl") as HTMLInputElement);
+    if (input) input.value = url;
+    if (typeof window !== "undefined") {
+      localStorage.setItem(DASHBOARD_STORAGE.sheetsSpreadsheetUrl, url);
     }
+    await opts.fetchSheets(url);
     opts.showToast(`Selected sheet: ${spreadsheetName}`);
   };
 }

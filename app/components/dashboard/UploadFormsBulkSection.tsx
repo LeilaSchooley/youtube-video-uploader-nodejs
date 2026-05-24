@@ -28,6 +28,7 @@ export default function UploadFormsBulkSection(
     setDriveUploadFolderId,
     setDriveUploadFolderName,
     setDriveBrowserContext,
+    setDriveBrowserMode,
     setShowDriveBrowser,
     setShowSheetsBrowser,
     dropboxPythonQueueMode,
@@ -38,6 +39,9 @@ export default function UploadFormsBulkSection(
     setDropboxBrowserContext,
     setShowDropboxBrowser,
     clearDropboxPythonQueueMode,
+    drivePythonQueueMode,
+    drivePythonQueueDetectInfo,
+    clearDrivePythonQueueMode,
     skipDuplicateTitles,
     setSkipDuplicateTitles,
     dropboxThumbnailsFolderPath,
@@ -69,6 +73,23 @@ export default function UploadFormsBulkSection(
     loadingSheets,
     spreadsheetTitle,
     setSpreadsheetTitle,
+    driveUploading,
+    setDriveUploading,
+    selectedDriveCsvFileId,
+    selectedDriveCsvFileName,
+    setSelectedDriveCsvFileId,
+    setSelectedDriveCsvFileName,
+    driveThumbnailsFolderId,
+    setDriveThumbnailsFolderId,
+    driveThumbnailsFolderName,
+    setDriveThumbnailsFolderName,
+    driveSheetNames,
+    loadingDriveSheets,
+    selectedDriveMetadataSheetName,
+    setSelectedDriveMetadataSheetName,
+    driveSpreadsheetUrl,
+    setDriveSpreadsheetUrl,
+    selectedDriveFolderId,
   } = props;
 
   const showDriveBulkColumn =
@@ -184,6 +205,7 @@ export default function UploadFormsBulkSection(
                       setDriveUploadFolderId={setDriveUploadFolderId}
                       setDriveUploadFolderName={setDriveUploadFolderName}
                       setDriveBrowserContext={setDriveBrowserContext}
+                      setDriveBrowserMode={setDriveBrowserMode}
                       setShowDriveBrowser={setShowDriveBrowser}
                       setShowSheetsBrowser={setShowSheetsBrowser}
                       debounceTimerRef={debounceTimerRef}
@@ -193,6 +215,36 @@ export default function UploadFormsBulkSection(
                       loadingSheets={loadingSheets}
                       spreadsheetTitle={spreadsheetTitle}
                       setSpreadsheetTitle={setSpreadsheetTitle}
+                      skipDuplicateTitles={skipDuplicateTitles}
+                      driveUploading={driveUploading}
+                      setDriveUploading={setDriveUploading}
+                      schedulingEnabled={schedulingEnabled}
+                      globalVideosPerDay={globalVideosPerDay}
+                      setSelectedJobId={setSelectedJobId}
+                      fetchJobStatus={fetchJobStatus}
+                      fetchQueue={fetchQueue}
+                      selectedDriveFolderId={selectedDriveFolderId}
+                      selectedDriveCsvFileId={selectedDriveCsvFileId}
+                      selectedDriveCsvFileName={selectedDriveCsvFileName}
+                      setSelectedDriveCsvFileId={setSelectedDriveCsvFileId}
+                      setSelectedDriveCsvFileName={setSelectedDriveCsvFileName}
+                      driveThumbnailsFolderId={driveThumbnailsFolderId}
+                      setDriveThumbnailsFolderId={setDriveThumbnailsFolderId}
+                      driveThumbnailsFolderName={driveThumbnailsFolderName}
+                      setDriveThumbnailsFolderName={setDriveThumbnailsFolderName}
+                      driveSheetNames={driveSheetNames}
+                      loadingDriveSheets={loadingDriveSheets}
+                      selectedDriveMetadataSheetName={
+                        selectedDriveMetadataSheetName
+                      }
+                      setSelectedDriveMetadataSheetName={
+                        setSelectedDriveMetadataSheetName
+                      }
+                      driveSpreadsheetUrl={driveSpreadsheetUrl}
+                      setDriveSpreadsheetUrl={setDriveSpreadsheetUrl}
+                      drivePythonQueueMode={drivePythonQueueMode}
+                      drivePythonQueueDetectInfo={drivePythonQueueDetectInfo}
+                      clearDrivePythonQueueMode={clearDrivePythonQueueMode}
                     />
                   </div>
                 )}

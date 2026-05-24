@@ -93,7 +93,7 @@ export default function UploadFormsBulkDropboxMetadataSection(props: Props) {
                 </div>
               )}
             </div>
-            {props.hasDropboxAuth !== true && <p className="mt-2 text-xs text-orange-800 dark:text-orange-200">{props.dropboxAuthLoading || props.hasDropboxAuth === null ? "Checking Dropbox…" : "Connect Dropbox in the header to enable Browse for this section."}</p>}
+            {props.hasDropboxAuth !== true && <p className="mt-2 text-xs text-orange-800 dark:text-orange-200">{props.dropboxAuthLoading || props.hasDropboxAuth === null ? "Checking Dropbox…" : "Connect Dropbox in the header (Cloud storage) to enable Browse here."}</p>}
           </div>
         </div>
       </div>

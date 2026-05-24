@@ -8,11 +8,13 @@ import { DASHBOARD_STORAGE } from "@/lib/dashboard-storage-keys";
 import { HIDE_GOOGLE_DRIVE_SHEETS } from "./upload-forms-constants";
 import { useAppToast } from "@/app/app-toast-context";
 import { useDropboxAuth } from "./DropboxAuthContext";
+import { useGoogleDriveAuth } from "./GoogleDriveAuthContext";
 import { useDropboxQueueSource } from "@/app/dashboard/hooks/useDropboxQueueSource";
+import { useDriveQueueSource } from "@/app/dashboard/hooks/useDriveQueueSource";
 import { useSheetsMetadata } from "@/app/dashboard/hooks/useSheetsMetadata";
 import { useDropboxSheetNames } from "./useDropboxSheetNames";
+import { useDriveSheetNames } from "./useDriveSheetNames";
 import {
-  createDriveFolderSelectHandler,
   createSheetSelectHandler,
   createSheetsDriveFolderSelectHandler,
 } from "./upload-forms-handlers";
@@ -42,12 +44,20 @@ export default function UploadForms(props: UploadFormsProps) {
     schedulingEnabled = false,
     globalVideosPerDay = "",
     openDropboxQueuePickerNonce = 0,
+    openDriveQueuePickerNonce = 0,
+    singleUploadClearKey = 0,
   } = props;
   const showAppToast = useAppToast();
   const [showDriveBrowser, setShowDriveBrowser] = useState(false);
   const [showDropboxBrowser, setShowDropboxBrowser] = useState(false);
   const [dropboxBrowserMode, setDropboxBrowserMode] = useState<"folder" | "file">("folder");
-  const [dropboxBrowserContext, setDropboxBrowserContext] = useState<"bulk" | "sheets-folder" | "sheets-file" | "thumbnails-folder">("bulk");
+  const [dropboxBrowserContext, setDropboxBrowserContext] = useState<
+    "bulk" | "sheets-folder" | "sheets-file" | "thumbnails-folder" | "single-video"
+  >("bulk");
+  const [singleDropboxVideoPath, setSingleDropboxVideoPath] = useState("");
+  const [singleDropboxVideoName, setSingleDropboxVideoName] = useState("");
+  const [singleDriveVideoId, setSingleDriveVideoId] = useState("");
+  const [singleDriveVideoName, setSingleDriveVideoName] = useState("");
   const [dropboxThumbnailsFolderPath, setDropboxThumbnailsFolderPath] = useState<string>("");
   const [showSheetsBrowser, setShowSheetsBrowser] = useState(false);
   const [, setSelectedDropboxFile] = useState<string>("");
@@ -65,7 +75,25 @@ export default function UploadForms(props: UploadFormsProps) {
   const [dropboxUploadFolderPath, setDropboxUploadFolderPath] = useState<string>("");
   const [driveUploadFolderId, setDriveUploadFolderId] = useState<string>("");
   const [driveUploadFolderName, setDriveUploadFolderName] = useState<string>("");
-  const [driveBrowserContext, setDriveBrowserContext] = useState<"drive" | "sheets">("drive");
+  const [driveBrowserContext, setDriveBrowserContext] = useState<
+    "drive" | "sheets" | "metadata-csv" | "thumbnails" | "single-video"
+  >("drive");
+  const [driveBrowserMode, setDriveBrowserMode] = useState<"folder" | "file">(
+    "folder",
+  );
+  const [selectedDriveCsvFileId, setSelectedDriveCsvFileId] = useState("");
+  const [selectedDriveCsvFileName, setSelectedDriveCsvFileName] = useState("");
+  const [driveThumbnailsFolderId, setDriveThumbnailsFolderId] = useState("");
+  const [driveThumbnailsFolderName, setDriveThumbnailsFolderName] =
+    useState("");
+  const [driveSheetNames, setDriveSheetNames] = useState<
+    Array<{ title: string; sheetId: number }>
+  >([]);
+  const [loadingDriveSheets, setLoadingDriveSheets] = useState(false);
+  const [selectedDriveMetadataSheetName, setSelectedDriveMetadataSheetName] =
+    useState("");
+  const [driveSpreadsheetUrl, setDriveSpreadsheetUrl] = useState("");
+  const [driveUploading, setDriveUploading] = useState(false);
   const [dropboxUploading, setDropboxUploading] = useState<boolean>(false);
   const [skipDuplicateTitles, setSkipDuplicateTitles] = useState<boolean>(true);
 
@@ -90,6 +118,19 @@ export default function UploadForms(props: UploadFormsProps) {
     hasDropboxAuth,
   });
 
+  const { hasGoogleDriveAuth } = useGoogleDriveAuth();
+  const {
+    drivePythonQueueMode,
+    pythonQueueDetectInfo: drivePythonQueueDetectInfo,
+    handleBulkDriveFolderSelected,
+    clearDrivePythonQueueMode,
+  } = useDriveQueueSource({
+    setDriveUploadFolderId,
+    setDriveUploadFolderName,
+    setShowDriveBrowser,
+    hasGoogleDriveAuth,
+  });
+
   useEffect(() => {
     if (!openDropboxQueuePickerNonce) return;
     setDropboxBrowserMode("folder");
@@ -99,11 +140,15 @@ export default function UploadForms(props: UploadFormsProps) {
     setShowDropboxBrowser(true);
   }, [openDropboxQueuePickerNonce, setShowBulkUpload]);
 
-  const handleDriveFolderSelect = createDriveFolderSelectHandler({
-    setDriveUploadFolderId,
-    setDriveUploadFolderName,
-    showToast: (message) => showAppToast({ message, type: "success" }),
-  });
+  useEffect(() => {
+    if (!openDriveQueuePickerNonce) return;
+    setDriveBrowserMode("folder");
+    setDriveBrowserContext("drive");
+    setUploadSource("drive");
+    setShowBulkUpload(true);
+    setShowDriveBrowser(true);
+  }, [openDriveQueuePickerNonce, setShowBulkUpload]);
+
   const handleSheetsDriveFolderSelect = createSheetsDriveFolderSelectHandler({
     setSelectedDriveFolderId,
     setSelectedDriveFolderName,
@@ -122,6 +167,11 @@ export default function UploadForms(props: UploadFormsProps) {
     const savedDropboxSheet = localStorage.getItem(DASHBOARD_STORAGE.selectedDropboxSheetName);
     const savedFolderSource = localStorage.getItem(DASHBOARD_STORAGE.folderSource);
     const savedSkipDuplicateTitles = localStorage.getItem(DASHBOARD_STORAGE.dropboxSkipDuplicateTitles);
+    const savedDriveCsvId = localStorage.getItem(DASHBOARD_STORAGE.selectedDriveCsvFileId);
+    const savedDriveCsvName = localStorage.getItem(DASHBOARD_STORAGE.selectedDriveCsvFileName);
+    const savedDriveThumbsId = localStorage.getItem(DASHBOARD_STORAGE.driveThumbnailsFolderId);
+    const savedDriveMetaSheet = localStorage.getItem(DASHBOARD_STORAGE.driveMetadataSheetName);
+    const savedSheetsUrl = localStorage.getItem(DASHBOARD_STORAGE.sheetsSpreadsheetUrl);
     if (savedDriveUploadFolderId) setDriveUploadFolderId(savedDriveUploadFolderId);
     if (savedDriveUploadFolderName) setDriveUploadFolderName(savedDriveUploadFolderName);
     if (savedSheetsDriveFolderId) setSelectedDriveFolderId(savedSheetsDriveFolderId);
@@ -130,6 +180,11 @@ export default function UploadForms(props: UploadFormsProps) {
     if (savedDropboxThumbnailsFolderPath) setDropboxThumbnailsFolderPath(savedDropboxThumbnailsFolderPath);
     if (savedDropboxCsvFile) setSelectedDropboxCsvFile(savedDropboxCsvFile);
     if (savedDropboxSheet) setSelectedDropboxSheetName(savedDropboxSheet);
+    if (savedDriveCsvId) setSelectedDriveCsvFileId(savedDriveCsvId);
+    if (savedDriveCsvName) setSelectedDriveCsvFileName(savedDriveCsvName);
+    if (savedDriveThumbsId) setDriveThumbnailsFolderId(savedDriveThumbsId);
+    if (savedDriveMetaSheet) setSelectedDriveMetadataSheetName(savedDriveMetaSheet);
+    if (savedSheetsUrl) setDriveSpreadsheetUrl(savedSheetsUrl);
     if (!HIDE_GOOGLE_DRIVE_SHEETS && (savedFolderSource === "drive" || savedFolderSource === "dropbox")) setUploadSource(savedFolderSource);
     if (savedSkipDuplicateTitles !== null) setSkipDuplicateTitles(savedSkipDuplicateTitles === "true");
   }, []);
@@ -139,6 +194,13 @@ export default function UploadForms(props: UploadFormsProps) {
     setDropboxSheetNames,
     setSelectedDropboxSheetName,
     setLoadingDropboxSheets,
+  });
+
+  useDriveSheetNames({
+    selectedDriveCsvFileId,
+    setDriveSheetNames,
+    setSelectedDriveSheetName: setSelectedDriveMetadataSheetName,
+    setLoadingDriveSheets,
   });
 
   useEffect(() => {
@@ -161,6 +223,7 @@ export default function UploadForms(props: UploadFormsProps) {
 
   const handleSheetSelect = createSheetSelectHandler({
     fetchSheets,
+    setDriveSpreadsheetUrl,
     showToast: (message) => showAppToast({ message, type: "success" }),
   });
 
@@ -170,8 +233,17 @@ export default function UploadForms(props: UploadFormsProps) {
         showDriveBrowser={showDriveBrowser}
         setShowDriveBrowser={setShowDriveBrowser}
         driveBrowserContext={driveBrowserContext}
+        driveBrowserMode={driveBrowserMode}
         handleSheetsDriveFolderSelect={handleSheetsDriveFolderSelect}
-        handleDriveFolderSelect={handleDriveFolderSelect}
+        handleDriveFolderSelect={handleBulkDriveFolderSelected}
+        setSelectedDriveCsvFileId={setSelectedDriveCsvFileId}
+        setSelectedDriveCsvFileName={setSelectedDriveCsvFileName}
+        setDriveThumbnailsFolderId={setDriveThumbnailsFolderId}
+        setDriveThumbnailsFolderName={setDriveThumbnailsFolderName}
+        setSingleDropboxVideoPath={setSingleDropboxVideoPath}
+        setSingleDropboxVideoName={setSingleDropboxVideoName}
+        setSingleDriveVideoId={setSingleDriveVideoId}
+        setSingleDriveVideoName={setSingleDriveVideoName}
         showDropboxBrowser={showDropboxBrowser}
         setShowDropboxBrowser={setShowDropboxBrowser}
         dropboxBrowserMode={dropboxBrowserMode}
@@ -200,6 +272,25 @@ export default function UploadForms(props: UploadFormsProps) {
         setSelectedVideoFile={setSelectedVideoFile}
         fileInputRef={fileInputRef}
         uploading={uploading}
+        singleUploadClearKey={singleUploadClearKey}
+        onBrowseDropboxVideo={() => {
+          setDropboxBrowserMode("file");
+          setDropboxBrowserContext("single-video");
+          setShowDropboxBrowser(true);
+        }}
+        onBrowseDriveVideo={() => {
+          setDriveBrowserMode("file");
+          setDriveBrowserContext("single-video");
+          setShowDriveBrowser(true);
+        }}
+        dropboxVideoPath={singleDropboxVideoPath}
+        dropboxVideoName={singleDropboxVideoName}
+        setDropboxVideoPath={setSingleDropboxVideoPath}
+        setDropboxVideoName={setSingleDropboxVideoName}
+        driveVideoId={singleDriveVideoId}
+        driveVideoName={singleDriveVideoName}
+        setDriveVideoId={setSingleDriveVideoId}
+        setDriveVideoName={setSingleDriveVideoName}
       />
       <UploadFormsBulkSection
         showBulkUpload={showBulkUpload}
@@ -211,6 +302,7 @@ export default function UploadForms(props: UploadFormsProps) {
         setDriveUploadFolderId={setDriveUploadFolderId}
         setDriveUploadFolderName={setDriveUploadFolderName}
         setDriveBrowserContext={setDriveBrowserContext}
+        setDriveBrowserMode={setDriveBrowserMode}
         setShowDriveBrowser={setShowDriveBrowser}
         setShowSheetsBrowser={setShowSheetsBrowser}
         dropboxPythonQueueMode={dropboxPythonQueueMode}
@@ -221,6 +313,9 @@ export default function UploadForms(props: UploadFormsProps) {
         setDropboxBrowserContext={setDropboxBrowserContext}
         setShowDropboxBrowser={setShowDropboxBrowser}
         clearDropboxPythonQueueMode={clearDropboxPythonQueueMode}
+        drivePythonQueueMode={drivePythonQueueMode}
+        drivePythonQueueDetectInfo={drivePythonQueueDetectInfo}
+        clearDrivePythonQueueMode={clearDrivePythonQueueMode}
         skipDuplicateTitles={skipDuplicateTitles}
         setSkipDuplicateTitles={setSkipDuplicateTitles}
         dropboxThumbnailsFolderPath={dropboxThumbnailsFolderPath}
@@ -234,6 +329,23 @@ export default function UploadForms(props: UploadFormsProps) {
         setSelectedDropboxSheetName={setSelectedDropboxSheetName}
         dropboxUploading={dropboxUploading}
         setDropboxUploading={setDropboxUploading}
+        driveUploading={driveUploading}
+        setDriveUploading={setDriveUploading}
+        selectedDriveCsvFileId={selectedDriveCsvFileId}
+        selectedDriveCsvFileName={selectedDriveCsvFileName}
+        setSelectedDriveCsvFileId={setSelectedDriveCsvFileId}
+        setSelectedDriveCsvFileName={setSelectedDriveCsvFileName}
+        driveThumbnailsFolderId={driveThumbnailsFolderId}
+        setDriveThumbnailsFolderId={setDriveThumbnailsFolderId}
+        driveThumbnailsFolderName={driveThumbnailsFolderName}
+        setDriveThumbnailsFolderName={setDriveThumbnailsFolderName}
+        driveSheetNames={driveSheetNames}
+        loadingDriveSheets={loadingDriveSheets}
+        selectedDriveMetadataSheetName={selectedDriveMetadataSheetName}
+        setSelectedDriveMetadataSheetName={setSelectedDriveMetadataSheetName}
+        driveSpreadsheetUrl={driveSpreadsheetUrl}
+        setDriveSpreadsheetUrl={setDriveSpreadsheetUrl}
+        selectedDriveFolderId={selectedDriveFolderId}
         schedulingEnabled={schedulingEnabled}
         globalVideosPerDay={globalVideosPerDay}
         checkDuplicatesBeforeUpload={checkDuplicatesBeforeUpload}
